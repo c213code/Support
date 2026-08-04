@@ -1,36 +1,149 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Support Reports
 
-## Getting Started
+Внутренний инструмент для составления ежедневных support-репортов вместо ручного
+копипаста в Telegram. Позволяет вести тикеты по группам, менять статусы,
+писать заметки и одной кнопкой копировать готовый текст репорта.
 
-First, run the development server:
+## Стек
+
+- **Next.js 16** (App Router) + TypeScript + Tailwind CSS
+- **Prisma 7** (driver adapters) + PostgreSQL
+- Простая парольная защита (общий пароль на двоих + куки-сессия)
+
+## Локальный запуск
+
+1. Установи зависимости:
+
+   ```bash
+   npm install
+   ```
+
+2. Настрой `.env` (уже создан локально, но не закоммичен — см. `.gitignore`):
+
+   ```env
+   DATABASE_URL="postgresql://USER@localhost:5432/support_reports?schema=public"
+   APP_PASSWORD="общий-пароль-для-входа"
+   SESSION_SECRET="длинная-случайная-строка"
+   TELEGRAM_BOT_TOKEN="токен-от-BotFather"
+   TELEGRAM_WEBHOOK_SECRET="любая-случайная-строка"
+   ```
+
+3. Накати миграции и засей дефолтные группы:
+
+   ```bash
+   npx prisma migrate dev
+   npx prisma db seed
+   ```
+
+4. Запусти дев-сервер:
+
+   ```bash
+   npm run dev
+   ```
+
+   Открой http://localhost:3000 и войди с паролем из `APP_PASSWORD`.
+
+## Деплой на Vercel
+
+1. Запушь репозиторий в GitHub/GitLab и подключи его в Vercel (Import Project).
+2. В Vercel Dashboard → **Storage** → **Create Database** → выбери **Postgres**
+   (Neon) и подключи к проекту. Vercel сам добавит `DATABASE_URL` в переменные
+   окружения проекта.
+3. В **Settings → Environment Variables** добавь:
+   - `APP_PASSWORD` — пароль для входа (замени `change-me`!)
+   - `SESSION_SECRET` — длинная случайная строка (замени!)
+   - `TELEGRAM_BOT_TOKEN` — токен бота от @BotFather (см. ниже)
+   - `TELEGRAM_WEBHOOK_SECRET` — своя случайная строка для защиты вебхука
+4. Перед первым деплоем (или через Vercel CLI/локально, указав prod
+   `DATABASE_URL`) прогони миграции и сид:
+
+   ```bash
+   npx prisma migrate deploy
+   npx prisma db seed
+   ```
+
+5. Задеплой проект. Готово — сайт доступен по ссылке от Vercel, вход по
+   общему паролю.
+
+## Настройка Telegram-бота ("Входящие")
+
+Бот сам читает сообщения в support-группах и присылает их на сайт во
+"Входящие" (`/inbox`) — можно смотреть переписку и создавать тикеты, не
+открывая Telegram.
+
+### 1. Создать бота
+
+1. Напиши [@BotFather](https://t.me/BotFather) в Telegram → `/newbot` →
+   придумай имя и username → получишь **токен** вида `123456:ABC-DEF...`.
+2. Вставь токен в `TELEGRAM_BOT_TOKEN` (локально в `.env`, на Vercel — в
+   Environment Variables).
+
+### 2. Разрешить боту видеть все сообщения
+
+По умолчанию бот видит только команды. Нужно отключить privacy mode:
+
+1. Напиши @BotFather → `/setprivacy` → выбери своего бота → **Disable**.
+2. Добавь бота как обычного участника во все 4 группы (админ-права не
+   нужны).
+
+### 3. Зарегистрировать вебхук (после деплоя на Vercel)
+
+Telegram должен слать сообщения на публичный HTTPS-адрес — то есть это
+делается **после** первого деплоя, когда есть домен от Vercel.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+  -d "url=https://<твой-домен>.vercel.app/api/telegram/webhook" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Значения `<TELEGRAM_BOT_TOKEN>` и `<TELEGRAM_WEBHOOK_SECRET>` — те же, что
+ты положил в переменные окружения на Vercel. Ответ `{"ok":true,...}`
+означает, что всё подключилось.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Проверить текущий статус вебхука можно так:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
+```
 
-## Learn More
+### 4. Как это работает дальше
 
-To learn more about Next.js, take a look at the following resources:
+- Каждое новое сообщение из группы попадает во "Входящие" на сайте.
+- Если сайт ещё не знает, какой группе принадлежит чат — покажет жёлтый
+  селектор "выбери группу". Выбираешь один раз — дальше все сообщения из
+  этого чата будут подтягиваться в нужную группу автоматически.
+- На каждое сообщение — кнопка **"Создать тикет"** (описание и ссылка на
+  сообщение подставляются автоматически) или **"Скрыть"**, если тикет не
+  нужен.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Как это устроено
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Группы** (`GroupPreset`) — 4 дефолтные телеграм-группы (Әдістеме & IT,
+  Сату - Платформа, IT & Product, IT + Сервис) с фиксированным порядком.
+  Можно на лету добавлять произвольные группы (например, "Жеке чат: Имя") —
+  они попадут в конец репорта.
+- **Тикеты** (`Issue`) привязаны к дате репорта (`reportDate`, формат
+  `YYYY-MM-DD`), группе, статусу (`RESOLVED` / `PENDING`), с полями для
+  Telegram-ссылки, заметки и ссылки на тикет (Jira/Atlassian), плюс автор
+  (`Ерош` / `Алпа`) и таймстемпы — это и есть базовое логирование.
+- **Генератор репорта** (`src/lib/report.ts`) собирает текст в формате,
+  который раньше писали руками: группы по порядку, нумерация с 1 в каждой
+  группе, ✅/⚠️ по статусу, разделитель между группами.
+- **Главная страница** (`/`) — рабочий стол на любую дату (по умолчанию
+  сегодня, можно листать стрелками или выбрать дату). Тут же живой предпросмотр
+  готового текста и кнопка "Скопировать".
+- **История** (`/history`) — список всех дней, по клику открывается тот же
+  рабочий стол на нужную дату.
+- **Входящие** (`/inbox`) — лента сообщений из Telegram (`TelegramMessage`),
+  которые пришли через вебхук бота (`/api/telegram/webhook`). Каждое
+  сообщение можно превратить в тикет (одной кнопкой, с автоподстановкой
+  описания и ссылки) или скрыть. Привязка chat_id → группа
+  запоминается в `GroupPreset.chatId` после первого ручного выбора.
 
-## Deploy on Vercel
+## Возможные доработки на будущее
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Автоматический перенос нерешённых ("Пендинг") тикетов на следующий день.
+- Drag & drop для сортировки групп/тикетов вместо стрелок.
+- Автоматическая отправка готового репорта ботом в чат (сейчас только кнопка вручную "Скопировать").
+- Real-time обновление "Входящих" через WebSocket/SSE вместо опроса каждые 15 секунд.

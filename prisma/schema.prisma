@@ -1,0 +1,65 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum IssueStatus {
+  RESOLVED
+  PENDING
+}
+
+model GroupPreset {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  emoji     String?
+  order     Int      @default(0)
+  // Telegram chat id — чтобы автоматически распознавать входящие сообщения по группе
+  chatId    String?  @unique
+  createdAt DateTime @default(now())
+}
+
+model TelegramMessage {
+  id            String   @id @default(cuid())
+  chatId        String
+  messageId     Int
+  chatTitle     String?
+  groupName     String?
+  groupEmoji    String?
+  authorName    String?
+  text          String?
+  messageLink   String
+  archived      Boolean  @default(false)
+  usedForIssueId String?
+  receivedAt    DateTime @default(now())
+
+  @@unique([chatId, messageId])
+  @@index([archived, receivedAt])
+}
+
+model Issue {
+  id           String      @id @default(cuid())
+  // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)
+  reportDate   String
+  groupName    String
+  groupEmoji   String?
+  position     Int         @default(0)
+  description  String
+  telegramLink String?
+  status       IssueStatus @default(PENDING)
+  note         String?
+  ticketLink   String?
+  createdBy    String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([reportDate])
+}
