@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
   }
 
   const authorName = extractAuthorName(message.from);
-  const fromId = message.from?.id ?? null;
+  const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
 
   const chatId = String(message.chat.id);
   const preset = await prisma.groupPreset.findUnique({ where: { chatId } });

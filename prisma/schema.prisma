@@ -35,8 +35,10 @@ model TelegramMessage {
   groupName     String?
   groupEmoji    String?
   // Telegram user id автора — чтобы склеивать несколько подряд идущих
-  // сообщений одного и того же человека в один запрос во "Входящих"
-  fromId        Int?
+  // сообщений одного и того же человека в один запрос во "Входящих".
+  // BigInt, не Int: у многих Telegram-аккаунтов id уже больше 2^31 и не
+  // помещается в 32-битный integer.
+  fromId        BigInt?
   authorName    String?
   text          String?
   messageLink   String
