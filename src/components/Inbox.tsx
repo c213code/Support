@@ -119,33 +119,29 @@ export function Inbox() {
             >
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs text-slate-500">
-                  {message.groupName ? (
-                    <span
-                      className={`rounded-full px-2 py-0.5 font-medium ${groupColor(message.groupName).bg} ${groupColor(message.groupName).text}`}
-                    >
-                      {message.groupName} {message.groupEmoji}
-                    </span>
-                  ) : (
-                    <select
-                      defaultValue=""
-                      onChange={(e) =>
-                        handleAssignGroup(message.id, e.target.value)
-                      }
-                      className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
-                    >
-                      <option value="" disabled>
-                        {message.chatTitle ?? "Неизвестный чат"} — выбери
-                        группу
-                      </option>
-                      {groups
-                        .filter((g) => isOfficialGroupName(g.name))
-                        .map((g) => (
-                          <option key={g.id} value={g.name}>
-                            {g.name} {g.emoji ?? ""}
-                          </option>
-                        ))}
-                    </select>
-                  )}
+                  <select
+                    value={message.groupName ?? ""}
+                    onChange={(e) =>
+                      handleAssignGroup(message.id, e.target.value)
+                    }
+                    title="Перевыбрать группу для этого чата"
+                    className={`rounded-full border-0 px-2 py-0.5 font-medium outline-none ${
+                      message.groupName
+                        ? `${groupColor(message.groupName).bg} ${groupColor(message.groupName).text}`
+                        : "bg-amber-50 text-amber-700 ring-1 ring-amber-300"
+                    }`}
+                  >
+                    <option value="" disabled>
+                      {message.chatTitle ?? "Неизвестный чат"} — выбери группу
+                    </option>
+                    {groups
+                      .filter((g) => isOfficialGroupName(g.name))
+                      .map((g) => (
+                        <option key={g.id} value={g.name}>
+                          {g.name} {g.emoji ?? ""}
+                        </option>
+                      ))}
+                  </select>
                   <span>{message.authorName ?? "Без имени"}</span>
                   <span>·</span>
                   <span>{formatTime(message.receivedAt)}</span>

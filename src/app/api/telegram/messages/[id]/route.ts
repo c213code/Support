@@ -42,13 +42,22 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     data.groupEmoji = preset?.emoji ?? body.groupEmoji ?? null;
 
     if (preset) {
+      // chatId уникален на GroupPreset — сначала освобождаем его у группы,
+      // за которой он мог быть закреплён раньше по ошибке.
+      await prisma.groupPreset.updateMany({
+        where: { chatId: existing.chatId, NOT: { id: preset.id } },
+        data: { chatId: null },
+      });
+
       await prisma.groupPreset.update({
         where: { id: preset.id },
         data: { chatId: existing.chatId },
       });
 
+      // Переносим все сообщения этого чата на верную группу — включая те,
+      // что уже были ошибочно помечены другой группой раньше.
       await prisma.telegramMessage.updateMany({
-        where: { chatId: existing.chatId, groupName: null },
+        where: { chatId: existing.chatId },
         data: { groupName: preset.name, groupEmoji: preset.emoji },
       });
     }
