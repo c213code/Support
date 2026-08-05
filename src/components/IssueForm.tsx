@@ -184,7 +184,10 @@ export function IssueForm({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setStatus("RESOLVED")}
+            onClick={() => {
+              setStatus("RESOLVED");
+              if (!note.trim()) setNote(`${currentAgent} шешті`);
+            }}
             className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
               status === "RESOLVED"
                 ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"

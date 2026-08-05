@@ -29,10 +29,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  const authorName = extractAuthorName(message.from);
-  if (isOwnAgentMessage(authorName)) {
+  if (isOwnAgentMessage(message.from?.id)) {
     return NextResponse.json({ ok: true });
   }
+
+  const authorName = extractAuthorName(message.from);
 
   const chatId = String(message.chat.id);
   const preset = await prisma.groupPreset.findUnique({ where: { chatId } });

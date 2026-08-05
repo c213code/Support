@@ -45,22 +45,23 @@ export function extractAuthorName(
 }
 
 // Собственные сообщения агентов (их ответы прямо в группе) не нужны во
-// "Входящих" — это не запросы от пользователей. Сравниваем по набору слов
-// в имени, чтобы не зависеть от порядка "имя фамилия" / "фамилия имя".
-const OWN_AGENT_NAME_SIGNATURES = [
-  ["toleubek", "yerassyl"],
-  ["naukhan", "alpamys"],
-].map((words) => words.slice().sort().join(" "));
+// "Входящих" — это не запросы от пользователей. Сравниваем по числовому
+// Telegram user id (OWN_AGENT_TELEGRAM_IDS="123,456" в env) — в отличие от
+// имени/фамилии id никогда не меняется и не зависит от эмодзи/оформления
+// профиля, так что это надёжнее текстового сравнения.
+function ownAgentTelegramIds(): Set<number> {
+  const raw = process.env.OWN_AGENT_TELEGRAM_IDS ?? "";
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n !== 0)
+  );
+}
 
-export function isOwnAgentMessage(authorName: string | null): boolean {
-  if (!authorName) return false;
-  const normalized = authorName
-    .toLowerCase()
-    .trim()
-    .split(/\s+/)
-    .sort()
-    .join(" ");
-  return OWN_AGENT_NAME_SIGNATURES.includes(normalized);
+export function isOwnAgentMessage(fromId: number | undefined): boolean {
+  if (!fromId) return false;
+  return ownAgentTelegramIds().has(fromId);
 }
 
 export function extractText(message: TelegramMessagePayload): string | null {
