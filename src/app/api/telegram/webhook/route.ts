@@ -61,6 +61,11 @@ export async function POST(request: NextRequest) {
       data: {
         text: [recent.text, text].filter(Boolean).join("\n"),
         viewed: false,
+        // Подтягиваем время к последнему сообщению в серии — иначе
+        // склеенная карточка «застревала» под старым receivedAt первого
+        // сообщения и могла выпасть из фильтра «сегодня» во «Входящих»,
+        // если серия началась вчера/раньше.
+        receivedAt: new Date(),
       },
     });
     return NextResponse.json({ ok: true });
