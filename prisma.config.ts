@@ -10,6 +10,8 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Миграции идут через прямое соединение (без пулера) — пуловый
+    // DATABASE_URL не поддерживает advisory lock, нужный Prisma Migrate.
+    url: process.env["POSTGRES_URL_NON_POOLING"] ?? process.env["DATABASE_URL"],
   },
 });
