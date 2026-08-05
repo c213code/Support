@@ -96,6 +96,17 @@ export function Inbox() {
     await loadMessages(date);
   }
 
+  async function handleResetGroups() {
+    if (
+      !window.confirm(
+        "Сбросить привязку групп у всех чатов? Все ещё не разобранные сообщения снова станут «без группы», и группу нужно будет выбрать заново для каждого чата."
+      )
+    )
+      return;
+    await fetch("/api/telegram/reset-groups", { method: "POST" });
+    await loadMessages(date);
+  }
+
   async function handleDismiss(id: string) {
     await fetch(`/api/telegram/messages/${id}`, {
       method: "PATCH",
@@ -130,9 +141,18 @@ export function Inbox() {
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-slate-900">Входящие</h1>
-        <span className="text-xs text-slate-400">
-          Обновляется каждые {POLL_INTERVAL_MS / 1000} сек.
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-400">
+            Обновляется каждые {POLL_INTERVAL_MS / 1000} сек.
+          </span>
+          <button
+            onClick={handleResetGroups}
+            title="Снять привязку групп у всех чатов и начать распределение заново"
+            className="text-xs text-slate-400 hover:text-red-600"
+          >
+            Сбросить группы
+          </button>
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
