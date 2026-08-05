@@ -5,6 +5,7 @@ import {
   buildMessageLink,
   extractAuthorName,
   extractText,
+  isOwnAgentMessage,
   type TelegramUpdate,
 } from "@/lib/telegram";
 
@@ -28,6 +29,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  const authorName = extractAuthorName(message.from);
+  if (isOwnAgentMessage(authorName)) {
+    return NextResponse.json({ ok: true });
+  }
+
   const chatId = String(message.chat.id);
   const preset = await prisma.groupPreset.findUnique({ where: { chatId } });
 
@@ -42,7 +48,7 @@ export async function POST(request: NextRequest) {
       chatTitle: message.chat.title ?? null,
       groupName: preset?.name ?? null,
       groupEmoji: preset?.emoji ?? null,
-      authorName: extractAuthorName(message.from),
+      authorName,
       text,
       messageLink: buildMessageLink(message.chat.id, message.message_id),
     },

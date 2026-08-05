@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isOfficialGroupName } from "@/lib/groups";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -23,7 +24,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   // Присвоение группы вручную: запоминаем chatId -> группа на будущее,
   // чтобы следующие сообщения из этого чата подхватывались автоматически.
+  // Привязка чата разрешена только к одной из 4 официальных групп —
+  // личные чаты через этот механизм не заводятся.
   if (typeof body.groupName === "string" && body.groupName) {
+    if (!isOfficialGroupName(body.groupName)) {
+      return NextResponse.json(
+        { error: "groupName must be one of the 4 official groups" },
+        { status: 400 }
+      );
+    }
+
     const preset = await prisma.groupPreset.findUnique({
       where: { name: body.groupName },
     });

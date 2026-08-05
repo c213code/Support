@@ -1,8 +1,15 @@
 @import "tailwindcss";
 
+/*
+ * Приложение намеренно всегда светлое — без auto dark mode. Раньше здесь
+ * была @media (prefers-color-scheme: dark), которая на устройствах с тёмной
+ * темой ОС красила текст в почти белый (#ededed) поверх белых карточек
+ * (bg-white), потому что сами компоненты тёмную тему не поддерживают —
+ * получался нечитаемый белый на белом.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
 }
 
 @theme inline {
@@ -12,15 +19,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+::selection {
+  background: color-mix(in srgb, #6366f1 30%, transparent);
 }

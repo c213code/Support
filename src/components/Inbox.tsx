@@ -5,6 +5,7 @@ import type { GroupPresetDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import { todayDateString } from "@/lib/date";
+import { groupColor, isOfficialGroupName } from "@/lib/groups";
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -119,7 +120,9 @@ export function Inbox() {
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   {message.groupName ? (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+                    <span
+                      className={`rounded-full px-2 py-0.5 font-medium ${groupColor(message.groupName).bg} ${groupColor(message.groupName).text}`}
+                    >
                       {message.groupName} {message.groupEmoji}
                     </span>
                   ) : (
@@ -134,11 +137,13 @@ export function Inbox() {
                         {message.chatTitle ?? "Неизвестный чат"} — выбери
                         группу
                       </option>
-                      {groups.map((g) => (
-                        <option key={g.id} value={g.name}>
-                          {g.name} {g.emoji ?? ""}
-                        </option>
-                      ))}
+                      {groups
+                        .filter((g) => isOfficialGroupName(g.name))
+                        .map((g) => (
+                          <option key={g.id} value={g.name}>
+                            {g.name} {g.emoji ?? ""}
+                          </option>
+                        ))}
                     </select>
                   )}
                   <span>{message.authorName ?? "Без имени"}</span>

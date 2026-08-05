@@ -8,6 +8,7 @@ import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { groupIssues } from "@/lib/report";
 import { Avatar } from "@/components/Avatar";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
+import { groupColor } from "@/lib/groups";
 
 function statusBadge(status: "RESOLVED" | "PENDING") {
   return status === "RESOLVED" ? (
@@ -183,11 +184,20 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
               За этот день пока нет тикетов — добавь первый ниже.
             </p>
           )}
-          {grouped.map((group) => (
+          {grouped.map((group) => {
+            const color = groupColor(group.name);
+            return (
             <section key={group.name}>
-              <h2 className="mb-2 flex items-center gap-1 text-base font-semibold text-slate-900">
-                {group.name}
-                <span>{group.emoji}</span>
+              <h2 className="mb-2 flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${color.bg} ${color.text}`}
+                >
+                  {group.name}
+                  <span>{group.emoji}</span>
+                </span>
+                <span className="text-xs text-slate-400">
+                  {group.items.length}
+                </span>
               </h2>
               <div className="space-y-2">
                 {group.items.map((issue, index) => (
@@ -203,7 +213,13 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                         onSubmit={(values) => handleUpdate(issue.id, values)}
                       />
                     ) : (
-                      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md">
+                      <div
+                        className={`rounded-xl border-l-4 border-y border-r border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md ${
+                          issue.status === "RESOLVED"
+                            ? "border-l-emerald-400"
+                            : "border-l-amber-400"
+                        }`}
+                      >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1">
                             <p className="text-sm text-slate-900">
@@ -307,7 +323,8 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                 </button>
               )}
             </section>
-          ))}
+            );
+          })}
 
           <section>
             {addingNew ? (
