@@ -47,7 +47,7 @@ export default function LoginPage() {
         </p>
 
         {!agent ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-wrap justify-center gap-3">
             {AGENTS.map((name) => (
               <button
                 key={name}
@@ -56,7 +56,7 @@ export default function LoginPage() {
                   setAgent(name);
                   setError(null);
                 }}
-                className="flex flex-col items-center gap-2 rounded-xl border border-slate-200 px-3 py-5 transition hover:border-indigo-300 hover:bg-indigo-50/50"
+                className="flex w-24 flex-col items-center gap-2 rounded-xl border border-slate-200 px-3 py-5 transition hover:border-indigo-300 hover:bg-indigo-50/50"
               >
                 <Avatar name={name} size="lg" />
                 <span className="text-sm font-medium text-slate-700">

@@ -16,6 +16,7 @@ function getSecret(): string {
 const AGENT_PASSWORDS: Record<Agent, string | undefined> = {
   Ерош: process.env.AGENT_EROSH_PASSWORD,
   Алпа: process.env.AGENT_ALPA_PASSWORD,
+  Дежурный: process.env.AGENT_DEZHURNY_PASSWORD,
 };
 
 function timingSafeStringEqual(a: string, b: string): boolean {
