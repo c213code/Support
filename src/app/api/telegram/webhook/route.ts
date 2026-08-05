@@ -9,6 +9,8 @@ import {
   type TelegramUpdate,
 } from "@/lib/telegram";
 
+const MERGE_WINDOW_MS = 5 * 60 * 1000;
+
 export async function POST(request: NextRequest) {
   const secret = request.headers.get("x-telegram-bot-api-secret-token");
   if (secret !== process.env.TELEGRAM_WEBHOOK_SECRET) {
@@ -34,9 +36,35 @@ export async function POST(request: NextRequest) {
   }
 
   const authorName = extractAuthorName(message.from);
+  const fromId = message.from?.id ?? null;
 
   const chatId = String(message.chat.id);
   const preset = await prisma.groupPreset.findUnique({ where: { chatId } });
+
+  // Если этот же человек только что писал в этот же чат (в пределах
+  // MERGE_WINDOW_MS) и это сообщение ещё не разобрано — считаем это
+  // продолжением того же запроса и приклеиваем текст, а не заводим
+  // новую карточку во "Входящих".
+  const recent = fromId
+    ? await prisma.telegramMessage.findFirst({
+        where: { chatId, fromId, archived: false },
+        orderBy: { receivedAt: "desc" },
+      })
+    : null;
+
+  if (
+    recent &&
+    Date.now() - recent.receivedAt.getTime() < MERGE_WINDOW_MS
+  ) {
+    await prisma.telegramMessage.update({
+      where: { id: recent.id },
+      data: {
+        text: [recent.text, text].filter(Boolean).join("\n"),
+        viewed: false,
+      },
+    });
+    return NextResponse.json({ ok: true });
+  }
 
   await prisma.telegramMessage.upsert({
     where: {
@@ -49,6 +77,7 @@ export async function POST(request: NextRequest) {
       chatTitle: message.chat.title ?? null,
       groupName: preset?.name ?? null,
       groupEmoji: preset?.emoji ?? null,
+      fromId,
       authorName,
       text,
       messageLink: buildMessageLink(message.chat.id, message.message_id),

@@ -34,6 +34,9 @@ model TelegramMessage {
   chatTitle     String?
   groupName     String?
   groupEmoji    String?
+  // Telegram user id автора — чтобы склеивать несколько подряд идущих
+  // сообщений одного и того же человека в один запрос во "Входящих"
+  fromId        Int?
   authorName    String?
   text          String?
   messageLink   String
