@@ -38,6 +38,8 @@ model TelegramMessage {
   text          String?
   messageLink   String
   archived      Boolean  @default(false)
+  // Просмотрено ли сообщение на сайте — для индикатора "новое/просмотрено"
+  viewed        Boolean  @default(false)
   usedForIssueId String?
   receivedAt    DateTime @default(now())
 

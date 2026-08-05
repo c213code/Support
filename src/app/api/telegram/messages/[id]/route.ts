@@ -19,6 +19,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   const data: Record<string, unknown> = {};
   if (typeof body.archived === "boolean") data.archived = body.archived;
+  if (typeof body.viewed === "boolean") data.viewed = body.viewed;
   if (typeof body.usedForIssueId === "string")
     data.usedForIssueId = body.usedForIssueId;
 

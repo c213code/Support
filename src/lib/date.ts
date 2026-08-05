@@ -1,4 +1,15 @@
 const TIMEZONE = "Asia/Almaty";
+// Алматы — фиксированный UTC+5, без перехода на летнее время.
+const TIMEZONE_OFFSET_HOURS = 5;
+
+// Границы календарного дня (00:00–24:00 по Алматы) в UTC — для фильтрации
+// timestamp-полей вроде TelegramMessage.receivedAt по дате.
+export function dayRangeUtc(date: string): { start: Date; end: Date } {
+  const [y, m, d] = date.split("-").map(Number);
+  const start = new Date(Date.UTC(y, m - 1, d, -TIMEZONE_OFFSET_HOURS));
+  const end = new Date(Date.UTC(y, m - 1, d + 1, -TIMEZONE_OFFSET_HOURS));
+  return { start, end };
+}
 
 export function todayDateString(): string {
   const fmt = new Intl.DateTimeFormat("en-CA", {

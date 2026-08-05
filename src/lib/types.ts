@@ -35,6 +35,7 @@ export type TelegramMessageDTO = {
   text: string | null;
   messageLink: string;
   archived: boolean;
+  viewed: boolean;
   usedForIssueId: string | null;
   receivedAt: string;
 };
