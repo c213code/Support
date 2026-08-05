@@ -3,11 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { Avatar } from "@/components/Avatar";
+import { useCurrentAgent } from "@/lib/useCurrentAgent";
 
 export function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [inboxCount, setInboxCount] = useState<number | null>(null);
+  const currentAgent = useCurrentAgent();
 
   useEffect(() => {
     let cancelled = false;
@@ -44,7 +47,7 @@ export function AppHeader() {
             href="/"
             className={`rounded-md px-3 py-1.5 transition ${
               pathname === "/"
-                ? "bg-slate-900 text-white"
+                ? "bg-indigo-600 text-white"
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
@@ -54,7 +57,7 @@ export function AppHeader() {
             href="/inbox"
             className={`relative rounded-md px-3 py-1.5 transition ${
               pathname === "/inbox"
-                ? "bg-slate-900 text-white"
+                ? "bg-indigo-600 text-white"
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
@@ -69,7 +72,7 @@ export function AppHeader() {
             href="/history"
             className={`rounded-md px-3 py-1.5 transition ${
               pathname === "/history"
-                ? "bg-slate-900 text-white"
+                ? "bg-indigo-600 text-white"
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
@@ -77,12 +80,22 @@ export function AppHeader() {
           </Link>
         </nav>
       </div>
-      <button
-        onClick={handleLogout}
-        className="text-sm text-slate-500 hover:text-slate-800"
-      >
-        Выйти
-      </button>
+      <div className="flex items-center gap-3">
+        {currentAgent && (
+          <div className="flex items-center gap-1.5">
+            <Avatar name={currentAgent} size="sm" />
+            <span className="hidden text-sm text-slate-600 sm:inline">
+              {currentAgent}
+            </span>
+          </div>
+        )}
+        <button
+          onClick={handleLogout}
+          className="text-sm text-slate-500 hover:text-slate-800"
+        >
+          Выйти
+        </button>
+      </div>
     </header>
   );
 }

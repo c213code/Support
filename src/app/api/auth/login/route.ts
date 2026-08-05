@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { createSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { createSessionToken, SESSION_COOKIE_NAME, verifyAgentPassword } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
+  const agent = body?.agent as string | undefined;
   const password = body?.password as string | undefined;
 
-  if (!password || password !== process.env.APP_PASSWORD) {
-    return NextResponse.json({ error: "Неверный пароль" }, { status: 401 });
+  if (!agent || !password || !verifyAgentPassword(agent, password)) {
+    return NextResponse.json({ error: "Неверный логин или пароль" }, { status: 401 });
   }
 
-  const response = NextResponse.json({ ok: true });
-  response.cookies.set(SESSION_COOKIE_NAME, createSessionToken(), {
+  const response = NextResponse.json({ ok: true, agent });
+  response.cookies.set(SESSION_COOKIE_NAME, createSessionToken(agent), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

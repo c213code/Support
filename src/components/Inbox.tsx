@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { GroupPresetDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
-import { AGENT_STORAGE_KEY } from "@/lib/agents";
+import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import { todayDateString } from "@/lib/date";
 
 const POLL_INTERVAL_MS = 15000;
@@ -23,10 +23,7 @@ export function Inbox() {
   const [groups, setGroups] = useState<GroupPresetDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
-  const [defaultAgent, setDefaultAgent] = useState(() => {
-    if (typeof window === "undefined") return "Ерош";
-    return window.localStorage.getItem(AGENT_STORAGE_KEY) ?? "Ерош";
-  });
+  const currentAgent = useCurrentAgent();
 
   const loadGroups = useCallback(async () => {
     const res = await fetch("/api/groups");
@@ -48,11 +45,6 @@ export function Inbox() {
     const interval = setInterval(loadMessages, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [loadGroups, loadMessages]);
-
-  function rememberAgent(agent: string) {
-    setDefaultAgent(agent);
-    window.localStorage.setItem(AGENT_STORAGE_KEY, agent);
-  }
 
   async function handleAssignGroup(id: string, groupName: string) {
     if (!groupName) return;
@@ -77,7 +69,6 @@ export function Inbox() {
     message: TelegramMessageDTO,
     values: IssueFormValues
   ) {
-    rememberAgent(values.createdBy);
     const res = await fetch("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -105,9 +96,16 @@ export function Inbox() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-slate-400">Загрузка...</p>
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="h-24 animate-pulse rounded-xl bg-slate-100"
+            />
+          ))}
+        </div>
       ) : messages.length === 0 ? (
-        <p className="text-sm text-slate-400">
+        <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
           Пока нет новых сообщений. Как только бот подключится к группам —
           они появятся здесь.
         </p>
@@ -116,7 +114,7 @@ export function Inbox() {
           {messages.map((message) => (
             <div
               key={message.id}
-              className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+              className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md"
             >
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -165,7 +163,7 @@ export function Inbox() {
                 <div className="mt-3">
                   <IssueForm
                     groups={groups}
-                    defaultAgent={defaultAgent}
+                    currentAgent={currentAgent ?? ""}
                     showGroupPicker={!message.groupName}
                     fixedGroupName={message.groupName ?? undefined}
                     initial={{
@@ -181,7 +179,7 @@ export function Inbox() {
                 <div className="mt-2 flex gap-3">
                   <button
                     onClick={() => setCreatingFromId(message.id)}
-                    className="text-sm font-medium text-slate-900 hover:underline"
+                    className="text-sm font-medium text-indigo-600 hover:underline"
                   >
                     + Создать тикет
                   </button>

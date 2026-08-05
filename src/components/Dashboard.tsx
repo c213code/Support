@@ -6,7 +6,8 @@ import type { GroupPresetDTO, IssueDTO } from "@/lib/types";
 import { formatDateHuman, shiftDateString, todayDateString } from "@/lib/date";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { groupIssues } from "@/lib/report";
-import { AGENT_STORAGE_KEY } from "@/lib/agents";
+import { Avatar } from "@/components/Avatar";
+import { useCurrentAgent } from "@/lib/useCurrentAgent";
 
 function statusBadge(status: "RESOLVED" | "PENDING") {
   return status === "RESOLVED" ? (
@@ -31,10 +32,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   const [addingToGroup, setAddingToGroup] = useState<string | null>(null);
   const [addingNew, setAddingNew] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [defaultAgent, setDefaultAgent] = useState(() => {
-    if (typeof window === "undefined") return "Ерош";
-    return window.localStorage.getItem(AGENT_STORAGE_KEY) ?? "Ерош";
-  });
+  const currentAgent = useCurrentAgent();
 
   const loadGroups = useCallback(async () => {
     const res = await fetch("/api/groups");
@@ -67,13 +65,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
-  function rememberAgent(agent: string) {
-    setDefaultAgent(agent);
-    window.localStorage.setItem(AGENT_STORAGE_KEY, agent);
-  }
-
   async function handleCreate(values: IssueFormValues) {
-    rememberAgent(values.createdBy);
     await fetch("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -85,7 +77,6 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   }
 
   async function handleUpdate(id: string, values: IssueFormValues) {
-    rememberAgent(values.createdBy);
     await fetch(`/api/issues/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -169,16 +160,29 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
 
         <button
           onClick={() => setDate(todayDateString())}
-          className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+          disabled={isToday}
+          className="rounded-lg px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:pointer-events-none disabled:opacity-0"
         >
           Сегодня
         </button>
       </div>
 
       {loading ? (
-        <p className="text-sm text-slate-400">Загрузка...</p>
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="h-20 animate-pulse rounded-xl bg-slate-100"
+            />
+          ))}
+        </div>
       ) : (
         <div className="space-y-6">
+          {grouped.length === 0 && (
+            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+              За этот день пока нет тикетов — добавь первый ниже.
+            </p>
+          )}
           {grouped.map((group) => (
             <section key={group.name}>
               <h2 className="mb-2 flex items-center gap-1 text-base font-semibold text-slate-900">
@@ -191,7 +195,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                     {editingId === issue.id ? (
                       <IssueForm
                         groups={groups}
-                        defaultAgent={defaultAgent}
+                        currentAgent={currentAgent ?? ""}
                         initial={issue}
                         showGroupPicker={false}
                         fixedGroupName={issue.groupName}
@@ -199,7 +203,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                         onSubmit={(values) => handleUpdate(issue.id, values)}
                       />
                     ) : (
-                      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1">
                             <p className="text-sm text-slate-900">
@@ -234,7 +238,8 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                             )}
                             <div className="mt-2 flex flex-wrap items-center gap-2">
                               {statusBadge(issue.status)}
-                              <span className="text-xs text-slate-400">
+                              <span className="flex items-center gap-1 text-xs text-slate-400">
+                                <Avatar name={issue.createdBy} size="sm" />
                                 {issue.createdBy}
                               </span>
                             </div>
@@ -286,7 +291,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                 <div className="mt-2">
                   <IssueForm
                     groups={groups}
-                    defaultAgent={defaultAgent}
+                    currentAgent={currentAgent ?? ""}
                     showGroupPicker={false}
                     fixedGroupName={group.name}
                     onCancel={() => setAddingToGroup(null)}
@@ -308,7 +313,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
             {addingNew ? (
               <IssueForm
                 groups={groups}
-                defaultAgent={defaultAgent}
+                currentAgent={currentAgent ?? ""}
                 showGroupPicker
                 onCancel={() => setAddingNew(false)}
                 onSubmit={handleCreate}
@@ -331,7 +336,11 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
               <button
                 onClick={handleCopy}
                 disabled={!reportText}
-                className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-40"
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-40 ${
+                  copied
+                    ? "bg-emerald-600"
+                    : "bg-indigo-600 hover:bg-indigo-500"
+                }`}
               >
                 {copied ? "Скопировано ✓" : "Скопировать"}
               </button>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { AGENTS } from "@/lib/agents";
+import { getCurrentAgent } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
@@ -18,22 +18,18 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null);
-
-  if (
-    !body?.reportDate ||
-    !body?.groupName ||
-    !body?.description ||
-    !body?.createdBy
-  ) {
-    return NextResponse.json(
-      { error: "reportDate, groupName, description and createdBy are required" },
-      { status: 400 }
-    );
+  const agent = await getCurrentAgent();
+  if (!agent) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  if (!AGENTS.includes(body.createdBy)) {
-    return NextResponse.json({ error: "invalid createdBy" }, { status: 400 });
+  const body = await request.json().catch(() => null);
+
+  if (!body?.reportDate || !body?.groupName || !body?.description) {
+    return NextResponse.json(
+      { error: "reportDate, groupName and description are required" },
+      { status: 400 }
+    );
   }
 
   const last = await prisma.issue.findFirst({
@@ -52,7 +48,7 @@ export async function POST(request: NextRequest) {
       status: body.status === "RESOLVED" ? "RESOLVED" : "PENDING",
       note: body.note || null,
       ticketLink: body.ticketLink || null,
-      createdBy: body.createdBy,
+      createdBy: agent,
     },
   });
 

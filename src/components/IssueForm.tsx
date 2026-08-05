@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { GroupPresetDTO, IssueStatus } from "@/lib/types";
-import { AGENTS } from "@/lib/agents";
+import { Avatar } from "@/components/Avatar";
 
 export type IssueFormValues = {
   groupName: string;
@@ -12,7 +12,6 @@ export type IssueFormValues = {
   status: IssueStatus;
   note: string;
   ticketLink: string;
-  createdBy: string;
 };
 
 export type IssueFormInitial = Partial<{
@@ -27,7 +26,7 @@ export type IssueFormInitial = Partial<{
 
 type Props = {
   groups: GroupPresetDTO[];
-  defaultAgent: string;
+  currentAgent: string;
   initial?: IssueFormInitial;
   showGroupPicker?: boolean;
   fixedGroupName?: string;
@@ -37,7 +36,7 @@ type Props = {
 
 export function IssueForm({
   groups,
-  defaultAgent,
+  currentAgent,
   initial,
   showGroupPicker = true,
   fixedGroupName,
@@ -64,11 +63,10 @@ export function IssueForm({
   );
   const [note, setNote] = useState(initial?.note ?? "");
   const [ticketLink, setTicketLink] = useState(initial?.ticketLink ?? "");
-  const [createdBy, setCreatedBy] = useState(
-    initial?.createdBy ?? defaultAgent
-  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const author = initial?.createdBy ?? currentAgent;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -97,7 +95,6 @@ export function IssueForm({
         status,
         note: note.trim(),
         ticketLink: ticketLink.trim(),
-        createdBy,
       });
     } catch {
       setError("Не удалось сохранить, попробуйте ещё раз");
@@ -109,12 +106,11 @@ export function IssueForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+      className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
     >
-      {showGroupPicker && !fixedGroupName && (
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-500">Группа</label>
-          <div className="flex flex-wrap gap-2">
+      <div className="flex items-center justify-between gap-3">
+        {showGroupPicker && !fixedGroupName ? (
+          <div className="flex flex-1 flex-wrap items-center gap-2">
             <select
               value={groupMode === "preset" ? groupName : "__custom__"}
               onChange={(e) => {
@@ -125,7 +121,7 @@ export function IssueForm({
                   setGroupName(e.target.value);
                 }
               }}
-              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
             >
               {groups.map((g) => (
                 <option key={g.id} value={g.name}>
@@ -140,12 +136,22 @@ export function IssueForm({
                 value={customGroupName}
                 onChange={(e) => setCustomGroupName(e.target.value)}
                 placeholder="Например: Жеке чат: Асем Қайырбекова"
-                className="min-w-[240px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                className="min-w-[220px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
             )}
           </div>
+        ) : (
+          <span />
+        )}
+
+        <div
+          className="flex shrink-0 items-center gap-1.5 rounded-full bg-slate-50 py-1 pl-1 pr-2.5 text-xs text-slate-500 ring-1 ring-slate-200"
+          title="Кто ведёт этот тикет"
+        >
+          <Avatar name={author} size="sm" />
+          {author}
         </div>
-      )}
+      </div>
 
       <div className="space-y-1">
         <label className="text-xs font-medium text-slate-500">
@@ -155,7 +161,7 @@ export function IssueForm({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           placeholder="Оқушы аккаунтына кіре алмай жатыр..."
         />
       </div>
@@ -168,55 +174,36 @@ export function IssueForm({
           type="text"
           value={telegramLink}
           onChange={(e) => setTelegramLink(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           placeholder="https://t.me/c/..."
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-500">Статус</label>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setStatus("RESOLVED")}
-              className={`flex-1 rounded-lg border px-3 py-1.5 text-sm transition ${
-                status === "RESOLVED"
-                  ? "border-emerald-600 bg-emerald-50 text-emerald-700"
-                  : "border-slate-300 text-slate-500"
-              }`}
-            >
-              ✅ Решено
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatus("PENDING")}
-              className={`flex-1 rounded-lg border px-3 py-1.5 text-sm transition ${
-                status === "PENDING"
-                  ? "border-amber-600 bg-amber-50 text-amber-700"
-                  : "border-slate-300 text-slate-500"
-              }`}
-            >
-              ⚠️ Пендинг
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-500">
-            Кто вносит
-          </label>
-          <select
-            value={createdBy}
-            onChange={(e) => setCreatedBy(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-slate-500">Статус</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setStatus("RESOLVED")}
+            className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+              status === "RESOLVED"
+                ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                : "border-slate-300 text-slate-500 hover:bg-slate-50"
+            }`}
           >
-            {AGENTS.map((agent) => (
-              <option key={agent} value={agent}>
-                {agent}
-              </option>
-            ))}
-          </select>
+            ✅ Решено
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatus("PENDING")}
+            className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
+              status === "PENDING"
+                ? "border-amber-500 bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                : "border-slate-300 text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            ⚠️ Пендинг
+          </button>
         </div>
       </div>
 
@@ -228,7 +215,7 @@ export function IssueForm({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={2}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           placeholder="Алпа шешті / Пока смотрим / ..."
         />
       </div>
@@ -241,7 +228,7 @@ export function IssueForm({
           type="text"
           value={ticketLink}
           onChange={(e) => setTicketLink(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           placeholder="https://juz.atlassian.net/browse/DV-..."
         />
       </div>
@@ -259,7 +246,7 @@ export function IssueForm({
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+          className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-50"
         >
           {submitting ? "Сохраняем..." : "Сохранить"}
         </button>
