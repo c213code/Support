@@ -151,3 +151,23 @@ export const IconRefresh = (p: IconProps) => (
     <path d="M3 21v-5h5" />
   </Svg>
 );
+
+export const IconList = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 6h13M8 12h13M8 18h13" />
+    <path d="M3 6h.01M3 12h.01M3 18h.01" />
+  </Svg>
+);
+
+export const IconColumns = (p: IconProps) => (
+  <Svg {...p}>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M9 3v18M15 3v18" />
+  </Svg>
+);
+
+export const IconFilter = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+  </Svg>
+);

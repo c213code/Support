@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GroupPresetDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
@@ -17,6 +17,8 @@ import {
   IconPlus,
   IconRefresh,
 } from "@/components/Icons";
+
+const NO_GROUP_FILTER = "__none__";
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -36,6 +38,7 @@ export function Inbox() {
   const [groups, setGroups] = useState<GroupPresetDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
+  const [groupFilter, setGroupFilter] = useState<string>("");
   const currentAgent = useCurrentAgent();
   const isToday = date === todayDateString();
 
@@ -65,11 +68,26 @@ export function Inbox() {
     return () => clearInterval(interval);
   }, [date, loadMessages]);
 
+  const filteredMessages = useMemo(
+    () =>
+      groupFilter
+        ? messages.filter((m) =>
+            groupFilter === NO_GROUP_FILTER
+              ? !m.groupName
+              : m.groupName === groupFilter
+          )
+        : messages,
+    [messages, groupFilter]
+  );
+
   // Отмечаем "новые" сообщения просмотренными спустя пару секунд после
   // показа — как галочки "прочитано" в мессенджерах, чтобы индикатор
-  // успел мелькнуть перед глазами, а не исчезал мгновенно.
+  // успел мелькнуть перед глазами, а не исчезал мгновенно. Считаем только
+  // видимые (с учётом фильтра по группе), а не все загруженные.
   useEffect(() => {
-    const unviewedIds = messages.filter((m) => !m.viewed).map((m) => m.id);
+    const unviewedIds = filteredMessages
+      .filter((m) => !m.viewed)
+      .map((m) => m.id);
     if (unviewedIds.length === 0) return;
 
     const timeout = setTimeout(() => {
@@ -91,7 +109,7 @@ export function Inbox() {
     }, 2000);
 
     return () => clearTimeout(timeout);
-  }, [messages]);
+  }, [filteredMessages]);
 
   async function handleAssignGroup(id: string, groupName: string) {
     if (!groupName) return;
@@ -202,6 +220,44 @@ export function Inbox() {
         </button>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setGroupFilter("")}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+            groupFilter === ""
+              ? "bg-brand-600 text-white"
+              : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+          }`}
+        >
+          Все
+        </button>
+        {groups
+          .filter((g) => isOfficialGroupName(g.name))
+          .map((g) => (
+            <button
+              key={g.id}
+              onClick={() => setGroupFilter(g.name)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                groupFilter === g.name
+                  ? `${groupColor(g.name).bg} ${groupColor(g.name).text} ring-1 ring-inset ${groupColor(g.name).border}`
+                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+              }`}
+            >
+              {g.name} {g.emoji ?? ""}
+            </button>
+          ))}
+        <button
+          onClick={() => setGroupFilter(NO_GROUP_FILTER)}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+            groupFilter === NO_GROUP_FILTER
+              ? "bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-300"
+              : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+          }`}
+        >
+          Без группы
+        </button>
+      </div>
+
       {loading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
@@ -217,9 +273,13 @@ export function Inbox() {
             ? "За сегодня пока нет сообщений. Как только бот подключится к группам — они появятся здесь."
             : "За этот день сообщений нет."}
         </p>
+      ) : filteredMessages.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+          По этому фильтру сообщений нет.
+        </p>
       ) : (
         <div className="space-y-3">
-          {messages.map((message) => (
+          {filteredMessages.map((message) => (
             <div
               key={message.id}
               className={`rounded-xl border bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md ${
