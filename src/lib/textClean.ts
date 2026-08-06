@@ -1,6 +1,7 @@
 // Убирает то, что агенты и так всегда вычищают руками перед тем, как
-// вписать текст в описание тикета: приветствия на казахском/русском и
-// голые ссылки. Работает по регуляркам — без внешних API, бесплатно и
+// вписать текст в описание тикета: приветствия на казахском/русском,
+// голые ссылки, почту и номера телефона (часто подписывают снизу
+// сообщения). Работает по регуляркам — без внешних API, бесплатно и
 // мгновенно. Если после чистки ничего не осталось (например, всё
 // сообщение и было одним приветствием) — возвращаем исходный текст, чтобы
 // тикет не остался без описания.
@@ -19,6 +20,25 @@ const GREETING_PATTERNS: RegExp[] = [
 ];
 
 const URL_PATTERN = /\bhttps?:\/\/\S+/gi;
+const EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
+
+// Номер телефона не привязан к одному формату (+7/8, пробелы, дефисы,
+// скобки) — считаем совпадением любую цепочку цифр с разделителями, где
+// цифр в сумме 10 и больше. Это отсекает короткие числа вроде кодов ошибок
+// или "3 попытки", но ловит реальные номера в любом написании.
+const PHONE_CANDIDATE_PATTERN = /\+?\d[\d\-\s()]{7,}\d/g;
+
+// Строка-подпись вида "Почта:" / "Номер" без значения — остаётся пустой
+// после вырезания email/телефона выше, убираем её тоже, а не просто ярлык.
+const CONTACT_LABEL_LINE =
+  /^(почта|email|e-mail|номер|тел(ефон)?|phone)\s*[:\-]?\s*$/i;
+
+// То же самое, но когда ярлык идёт не отдельной строкой, а прямо в
+// предложении ("...проблема с логином, email ivan@mail.com") — после
+// вырезания адреса ярлык остаётся висеть между запятой/началом строки и
+// концом строки/следующей запятой, тоже убираем.
+const CONTACT_LABEL_TOKEN =
+  /(^|\n|,)\s*(почта|email|e-mail|номер|тел(ефон)?|phone)\s*[:\-]?\s*(?=,|\n|$)/gi;
 
 export function cleanTicketDescription(raw: string): string {
   let text = raw;
@@ -26,6 +46,15 @@ export function cleanTicketDescription(raw: string): string {
     text = text.replace(pattern, "");
   }
   text = text.replace(URL_PATTERN, "");
+  text = text.replace(EMAIL_PATTERN, "");
+  text = text.replace(PHONE_CANDIDATE_PATTERN, (match) => {
+    const digitCount = (match.match(/\d/g) ?? []).length;
+    return digitCount >= 10 ? "" : match;
+  });
+  text = text.replace(CONTACT_LABEL_TOKEN, "$1");
+  // Вырезание ярлыков в середине строки могло оставить "код,, помогите" —
+  // схлопываем соседние разделители в один.
+  text = text.replace(/[ \t]*,(?:[ \t]*,)+/g, ",");
 
   const cleaned = text
     .split("\n")
@@ -35,7 +64,7 @@ export function cleanTicketDescription(raw: string): string {
         .replace(/^[\s,.:!–-]+|[\s,.:!–-]+$/g, "")
         .trim()
     )
-    .filter((line) => line.length > 0)
+    .filter((line) => line.length > 0 && !CONTACT_LABEL_LINE.test(line))
     .join("\n")
     .trim();
 
