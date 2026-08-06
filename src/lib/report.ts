@@ -1,10 +1,12 @@
+import { STATUS_META, type IssueStatus } from "@/lib/status";
+
 export type ReportIssue = {
   groupName: string;
   groupEmoji: string | null;
   position: number;
   description: string;
   telegramLink: string | null;
-  status: "RESOLVED" | "PENDING";
+  status: IssueStatus;
   note: string | null;
   ticketLink: string | null;
 };
@@ -74,13 +76,12 @@ export function generateReportText(
       if (issue.telegramLink) {
         lines.push(issue.telegramLink);
       }
-      const statusEmoji = issue.status === "RESOLVED" ? "✅" : "⚠️";
+      const meta = STATUS_META[issue.status];
+      const statusEmoji = meta.reportEmoji;
       const noteText =
         issue.note && issue.note.trim().length > 0
           ? issue.note.trim()
-          : issue.status === "RESOLVED"
-            ? "Шешілді"
-            : "Пендинг";
+          : meta.defaultNote;
       const ticketPart = issue.ticketLink ? ` ${issue.ticketLink}` : "";
       lines.push(`Статус: ${noteText}${ticketPart}${statusEmoji}`);
       lines.push("");

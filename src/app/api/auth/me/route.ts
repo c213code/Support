@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
-import { getCurrentAgent } from "@/lib/auth";
+import { getCurrentIdentity } from "@/lib/auth";
 
 export async function GET() {
-  const agent = await getCurrentAgent();
-  return NextResponse.json({ agent });
+  const identity = await getCurrentIdentity();
+  return NextResponse.json({
+    agent: identity?.agent ?? null,
+    name: identity?.name ?? null,
+  });
 }

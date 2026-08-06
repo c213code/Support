@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { GroupPresetDTO, IssueStatus } from "@/lib/types";
+import type { GroupPresetDTO } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
+import { ISSUE_STATUSES, STATUS_META, type IssueStatus } from "@/lib/status";
 
 export type IssueFormValues = {
   groupName: string;
@@ -33,6 +34,9 @@ type Props = {
   onCancel: () => void;
   onSubmit: (values: IssueFormValues) => Promise<void>;
 };
+
+const inputClass =
+  "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
 
 export function IssueForm({
   groups,
@@ -67,6 +71,15 @@ export function IssueForm({
   const [error, setError] = useState<string | null>(null);
 
   const author = initial?.createdBy ?? currentAgent;
+
+  function pickStatus(next: IssueStatus) {
+    setStatus(next);
+    // При переводе в "Решено" сразу подставляем "Имя шешті", если заметка
+    // ещё пустая — чтобы в репорте было видно, кто закрыл.
+    if (next === "RESOLVED" && !note.trim() && author) {
+      setNote(`${author} шешті`);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -121,7 +134,7 @@ export function IssueForm({
                   setGroupName(e.target.value);
                 }
               }}
-              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
             >
               {groups.map((g) => (
                 <option key={g.id} value={g.name}>
@@ -136,7 +149,7 @@ export function IssueForm({
                 value={customGroupName}
                 onChange={(e) => setCustomGroupName(e.target.value)}
                 placeholder="Например: Жеке чат: Асем Қайырбекова"
-                className="min-w-[220px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                className="min-w-[220px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
               />
             )}
           </div>
@@ -161,7 +174,7 @@ export function IssueForm({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={6}
-          className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          className={`${inputClass} resize-y`}
           placeholder="Оқушы аккаунтына кіре алмай жатыр..."
         />
       </div>
@@ -174,39 +187,30 @@ export function IssueForm({
           type="text"
           value={telegramLink}
           onChange={(e) => setTelegramLink(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          className={inputClass}
           placeholder="https://t.me/c/..."
         />
       </div>
 
       <div className="space-y-1">
         <label className="text-xs font-medium text-slate-500">Статус</label>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setStatus("RESOLVED");
-              if (!note.trim()) setNote(`${currentAgent} шешті`);
-            }}
-            className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
-              status === "RESOLVED"
-                ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                : "border-slate-300 text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            ✅ Решено
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatus("PENDING")}
-            className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
-              status === "PENDING"
-                ? "border-amber-500 bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-                : "border-slate-300 text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            ⚠️ Пендинг
-          </button>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {ISSUE_STATUSES.map((s) => {
+            const meta = STATUS_META[s];
+            const selected = status === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => pickStatus(s)}
+                className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition ${
+                  selected ? meta.active : meta.idle
+                }`}
+              >
+                {meta.emoji} {meta.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -218,7 +222,7 @@ export function IssueForm({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={2}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          className={`${inputClass} resize-y`}
           placeholder="Алпа шешті / Пока смотрим / ..."
         />
       </div>
@@ -231,7 +235,7 @@ export function IssueForm({
           type="text"
           value={ticketLink}
           onChange={(e) => setTicketLink(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          className={inputClass}
           placeholder="https://juz.atlassian.net/browse/DV-..."
         />
       </div>
@@ -249,7 +253,7 @@ export function IssueForm({
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-50"
+          className="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-50"
         >
           {submitting ? "Сохраняем..." : "Сохранить"}
         </button>

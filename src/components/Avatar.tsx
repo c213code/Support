@@ -1,9 +1,9 @@
 const PALETTE = [
-  { bg: "bg-indigo-100", text: "text-indigo-700", ring: "ring-indigo-200" },
+  { bg: "bg-brand-100", text: "text-brand-700", ring: "ring-brand-200" },
   { bg: "bg-rose-100", text: "text-rose-700", ring: "ring-rose-200" },
   { bg: "bg-amber-100", text: "text-amber-700", ring: "ring-amber-200" },
   { bg: "bg-emerald-100", text: "text-emerald-700", ring: "ring-emerald-200" },
-  { bg: "bg-sky-100", text: "text-sky-700", ring: "ring-sky-200" },
+  { bg: "bg-accent-500/15", text: "text-accent-600", ring: "ring-accent-400/30" },
 ];
 
 function colorFor(name: string) {

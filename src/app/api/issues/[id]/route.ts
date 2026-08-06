@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isIssueStatus } from "@/lib/status";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -15,8 +16,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (typeof body.description === "string") data.description = body.description;
   if (typeof body.telegramLink === "string" || body.telegramLink === null)
     data.telegramLink = body.telegramLink || null;
-  if (body.status === "RESOLVED" || body.status === "PENDING")
-    data.status = body.status;
+  if (isIssueStatus(body.status)) data.status = body.status;
   if (typeof body.note === "string" || body.note === null)
     data.note = body.note || null;
   if (typeof body.ticketLink === "string" || body.ticketLink === null)

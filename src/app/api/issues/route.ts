@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentAgent } from "@/lib/auth";
+import { getCurrentIdentity } from "@/lib/auth";
+import { isIssueStatus } from "@/lib/status";
 
 export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
@@ -18,8 +19,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const agent = await getCurrentAgent();
-  if (!agent) {
+  const identity = await getCurrentIdentity();
+  if (!identity) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -45,10 +46,10 @@ export async function POST(request: NextRequest) {
       position: (last?.position ?? 0) + 1,
       description: body.description,
       telegramLink: body.telegramLink || null,
-      status: body.status === "RESOLVED" ? "RESOLVED" : "PENDING",
+      status: isIssueStatus(body.status) ? body.status : "PENDING",
       note: body.note || null,
       ticketLink: body.ticketLink || null,
-      createdBy: agent,
+      createdBy: identity.name,
     },
   });
 

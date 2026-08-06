@@ -5,7 +5,7 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 export function proxy(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
 
-  if (verifySessionToken(token)) {
+  if (verifySessionToken(token) !== null) {
     return NextResponse.next();
   }
 

@@ -1,4 +1,5 @@
-export type IssueStatus = "RESOLVED" | "PENDING";
+export type { IssueStatus } from "@/lib/status";
+import type { IssueStatus } from "@/lib/status";
 
 export type IssueDTO = {
   id: string;

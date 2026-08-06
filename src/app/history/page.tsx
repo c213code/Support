@@ -13,7 +13,7 @@ export default async function HistoryPage() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen">
       <AppHeader />
       <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6">
         <h1 className="mb-4 text-lg font-semibold text-slate-900">
@@ -30,7 +30,7 @@ export default async function HistoryPage() {
               <li key={row.reportDate}>
                 <Link
                   href={`/?date=${row.reportDate}`}
-                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm transition hover:border-indigo-300 hover:shadow-md"
+                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm transition hover:border-brand-300 hover:shadow-md"
                 >
                   <span className="font-medium text-slate-900">
                     {formatDateHuman(row.reportDate)}

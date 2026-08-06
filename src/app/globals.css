@@ -1,30 +1,40 @@
 @import "tailwindcss";
 
 /*
- * Приложение намеренно всегда светлое — без auto dark mode. Раньше здесь
- * была @media (prefers-color-scheme: dark), которая на устройствах с тёмной
- * темой ОС красила текст в почти белый (#ededed) поверх белых карточек
- * (bg-white), потому что сами компоненты тёмную тему не поддерживают —
- * получался нечитаемый белый на белом.
+ * Тема повторяет бренд JUZ40 (juz40-edu.kz): бирюзовый #285b6e как основной,
+ * яркая бирюза #2898bd как акцент, шрифт Inter. Приложение всегда светлое —
+ * без auto dark mode (компоненты тёмную тему не поддерживают).
  */
-:root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-}
+@theme {
+  --color-background: #f6f7f9;
+  --color-foreground: #1f293e;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  /* Основной бренд — приглушённая бирюза (кнопки, активная навигация) */
+  --color-brand-50: #eef5f7;
+  --color-brand-100: #d5e6ea;
+  --color-brand-200: #aecdd6;
+  --color-brand-300: #7fb0bd;
+  --color-brand-400: #4f93a4;
+  --color-brand-500: #33788b;
+  --color-brand-600: #285b6e;
+  --color-brand-700: #234f5f;
+  --color-brand-800: #1e4250;
+  --color-brand-900: #182f39;
+
+  /* Яркий бирюзовый акцент (ссылки, индикаторы, hover) */
+  --color-accent-400: #4dafd4;
+  --color-accent-500: #2898bd;
+  --color-accent-600: #227d9b;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
 }
 
 ::selection {
-  background: color-mix(in srgb, #6366f1 30%, transparent);
+  background: color-mix(in srgb, #2898bd 28%, transparent);
 }

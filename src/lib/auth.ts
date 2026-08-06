@@ -1,8 +1,16 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
-import { AGENTS, type Agent } from "@/lib/agents";
+import { AGENTS, SHARED_AGENT, type Agent } from "@/lib/agents";
 
 export const SESSION_COOKIE_NAME = "support_session";
+
+export type Identity = {
+  // Аккаунт, под которым вошли (Ерош / Алпа / Дежурный).
+  agent: Agent;
+  // Отображаемое имя. Для именных аккаунтов совпадает с agent, для общего
+  // "Дежурный" — имя, которое человек ввёл при входе (напр. "Тикош").
+  name: string;
+};
 
 function getSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -26,7 +34,10 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf);
 }
 
-export function verifyAgentPassword(agent: string, password: string): agent is Agent {
+export function verifyAgentPassword(
+  agent: string,
+  password: string
+): agent is Agent {
   if (!AGENTS.includes(agent as Agent)) return false;
   const expected = AGENT_PASSWORDS[agent as Agent];
   if (!expected || !password) return false;
@@ -37,27 +48,39 @@ function sign(value: string): string {
   return createHmac("sha256", getSecret()).update(value).digest("hex");
 }
 
-// Токен = "<агент>.<hmac(агент)>" — client не может подделать имя агента
-// без секрета сервера, но сам агент виден и его удобно читать на сервере
-// без похода в базу.
-export function createSessionToken(agent: Agent): string {
-  return `${agent}.${sign(agent)}`;
+// Нормализуем имя, чтобы в токене не было разделителя "|" и лишних пробелов.
+function cleanName(name: string): string {
+  return name.replace(/\|/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
 }
 
-export function verifySessionToken(token: string | undefined | null): Agent | null {
+// Токен = "<agent>|<name>.<hmac(agent|name)>" — client не может подделать
+// ни аккаунт, ни имя без секрета сервера, но и то и другое читается на
+// сервере без похода в базу.
+export function createSessionToken(agent: Agent, displayName?: string): string {
+  const name =
+    agent === SHARED_AGENT && displayName ? cleanName(displayName) : agent;
+  const payload = `${agent}|${name}`;
+  return `${payload}.${sign(payload)}`;
+}
+
+export function verifySessionToken(
+  token: string | undefined | null
+): Identity | null {
   if (!token) return null;
   const separatorIndex = token.lastIndexOf(".");
   if (separatorIndex === -1) return null;
 
-  const agent = token.slice(0, separatorIndex);
+  const payload = token.slice(0, separatorIndex);
   const signature = token.slice(separatorIndex + 1);
-  if (!AGENTS.includes(agent as Agent)) return null;
-  if (!timingSafeStringEqual(signature, sign(agent))) return null;
+  if (!timingSafeStringEqual(signature, sign(payload))) return null;
 
-  return agent as Agent;
+  const [agent, name] = payload.split("|");
+  if (!AGENTS.includes(agent as Agent)) return null;
+
+  return { agent: agent as Agent, name: name || agent };
 }
 
-export async function getCurrentAgent(): Promise<Agent | null> {
+export async function getCurrentIdentity(): Promise<Identity | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   return verifySessionToken(token);

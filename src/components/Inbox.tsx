@@ -10,6 +10,13 @@ import {
   todayDateString,
 } from "@/lib/date";
 import { groupColor, isOfficialGroupName } from "@/lib/groups";
+import {
+  IconChevronLeft,
+  IconChevronRight,
+  IconExternalLink,
+  IconPlus,
+  IconRefresh,
+} from "@/components/Icons";
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -148,8 +155,9 @@ export function Inbox() {
           <button
             onClick={handleResetGroups}
             title="Снять привязку групп у всех чатов и начать распределение заново"
-            className="text-xs text-slate-400 hover:text-red-600"
+            className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-600"
           >
+            <IconRefresh className="h-3.5 w-3.5" />
             Сбросить группы
           </button>
         </div>
@@ -159,10 +167,10 @@ export function Inbox() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setDate(shiftDateString(date, -1))}
-            className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+            className="flex items-center rounded-lg border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-100"
             aria-label="Предыдущий день"
           >
-            ←
+            <IconChevronLeft />
           </button>
           <div className="flex flex-col items-center">
             <input
@@ -178,17 +186,17 @@ export function Inbox() {
           </div>
           <button
             onClick={() => setDate(shiftDateString(date, 1))}
-            className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+            className="flex items-center rounded-lg border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-100"
             aria-label="Следующий день"
           >
-            →
+            <IconChevronRight />
           </button>
         </div>
 
         <button
           onClick={() => setDate(todayDateString())}
           disabled={isToday}
-          className="rounded-lg px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:pointer-events-none disabled:opacity-0"
+          className="rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50 disabled:pointer-events-none disabled:opacity-0"
         >
           Сегодня
         </button>
@@ -217,14 +225,14 @@ export function Inbox() {
               className={`rounded-xl border bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md ${
                 message.viewed
                   ? "border-slate-200"
-                  : "border-indigo-200 bg-indigo-50/40"
+                  : "border-accent-400/40 bg-accent-500/5"
               }`}
             >
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   {!message.viewed && (
                     <span
-                      className="h-2 w-2 shrink-0 rounded-full bg-indigo-500"
+                      className="h-2 w-2 shrink-0 rounded-full bg-accent-500"
                       title="Новое, ещё не просмотрено"
                     />
                   )}
@@ -259,9 +267,10 @@ export function Inbox() {
                   href={message.messageLink}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-xs text-sky-600 hover:underline"
+                  className="flex items-center gap-1 text-xs text-accent-600 hover:underline"
                 >
-                  Открыть в Telegram ↗
+                  Открыть в Telegram
+                  <IconExternalLink className="h-3.5 w-3.5" />
                 </a>
               </div>
 
@@ -289,9 +298,10 @@ export function Inbox() {
                 <div className="mt-2 flex gap-3">
                   <button
                     onClick={() => setCreatingFromId(message.id)}
-                    className="text-sm font-medium text-indigo-600 hover:underline"
+                    className="flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline"
                   >
-                    + Создать тикет
+                    <IconPlus className="h-3.5 w-3.5" />
+                    Создать тикет
                   </button>
                   <button
                     onClick={() => handleDismiss(message.id)}
