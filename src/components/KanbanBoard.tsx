@@ -36,12 +36,15 @@ const COLUMNS: Column[] = [
 export function KanbanBoard({
   issues,
   onStatusChange,
+  size = "compact",
 }: {
   issues: IssueDTO[];
   onStatusChange: (issue: IssueDTO, status: IssueStatus) => void;
+  size?: "compact" | "large";
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overColumn, setOverColumn] = useState<Column["key"] | null>(null);
+  const large = size === "large";
 
   function handleDrop(column: Column) {
     setOverColumn(null);
@@ -52,7 +55,9 @@ export function KanbanBoard({
   }
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div
+      className={`grid grid-cols-1 sm:grid-cols-3 ${large ? "gap-4" : "gap-3"}`}
+    >
       {COLUMNS.map((column) => {
         const items = issues.filter((i) => column.statuses.includes(i.status));
         const isOver = overColumn === column.key;
@@ -70,14 +75,18 @@ export function KanbanBoard({
               e.preventDefault();
               handleDrop(column);
             }}
-            className={`flex min-h-[140px] flex-col gap-2 rounded-xl border p-2 transition ${
+            className={`flex flex-col rounded-xl border transition ${
+              large ? "min-h-[60vh] gap-3 p-3" : "min-h-[140px] gap-2 p-2"
+            } ${
               isOver
                 ? "border-brand-400 bg-brand-50/50"
                 : "border-slate-200 bg-slate-50/60"
             }`}
           >
             <div className="flex items-center justify-between px-1">
-              <h3 className="text-sm font-semibold text-slate-700">
+              <h3
+                className={`font-semibold text-slate-700 ${large ? "text-base" : "text-sm"}`}
+              >
                 {column.title}
               </h3>
               <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-400 ring-1 ring-slate-200">
@@ -101,7 +110,9 @@ export function KanbanBoard({
                       setDraggingId(null);
                       setOverColumn(null);
                     }}
-                    className={`cursor-grab rounded-lg border-l-4 border-y border-r border-slate-200 bg-white p-2.5 text-sm shadow-sm transition active:cursor-grabbing ${STATUS_META[issue.status].bar} ${
+                    className={`cursor-grab rounded-lg border-l-4 border-y border-r border-slate-200 bg-white shadow-sm transition active:cursor-grabbing ${
+                      large ? "p-3.5 text-sm" : "p-2.5 text-sm"
+                    } ${STATUS_META[issue.status].bar} ${
                       draggingId === issue.id ? "opacity-40" : ""
                     }`}
                   >

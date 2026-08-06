@@ -18,6 +18,8 @@ import {
   IconExternalLink,
   IconPlus,
   IconRefresh,
+  IconInbox,
+  IconColumns,
 } from "@/components/Icons";
 
 const NO_GROUP_FILTER = "__none__";
@@ -42,6 +44,7 @@ export function Inbox() {
   const [loading, setLoading] = useState(true);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("");
+  const [tab, setTab] = useState<"messages" | "board">("messages");
   const currentAgent = useCurrentAgent();
   const isToday = date === todayDateString();
 
@@ -190,22 +193,74 @@ export function Inbox() {
     await loadIssues(date);
   }
 
+  // Разовое действие с кнопки на доске: тикеты, которые остались в
+  // "Пендинг" со старых времён (когда это был дефолтный статус, а не
+  // осознанный выбор), переносим в "Отправлено" за выбранный день.
+  async function handleNormalizePending() {
+    if (
+      !window.confirm(
+        "Перевести тикеты со статусом «Пендинг» за этот день в «Отправлено»? Это только для тикетов, которым статус никто явно не выставлял."
+      )
+    )
+      return;
+    await fetch("/api/issues/normalize-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reportDate: date }),
+    });
+    await loadIssues(date);
+  }
+
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
+    <div
+      className={`mx-auto px-4 py-6 sm:px-6 ${tab === "board" ? "max-w-6xl" : "max-w-3xl"}`}
+    >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-slate-900">Входящие</h1>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400">
-            Обновляется каждые {POLL_INTERVAL_MS / 1000} сек.
-          </span>
-          <button
-            onClick={handleResetGroups}
-            title="Снять привязку групп у всех чатов и начать распределение заново"
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-600"
-          >
-            <IconRefresh className="h-3.5 w-3.5" />
-            Сбросить группы
-          </button>
+          {tab === "messages" && (
+            <>
+              <span className="text-xs text-slate-400">
+                Обновляется каждые {POLL_INTERVAL_MS / 1000} сек.
+              </span>
+              <button
+                onClick={handleResetGroups}
+                title="Снять привязку групп у всех чатов и начать распределение заново"
+                className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-600"
+              >
+                <IconRefresh className="h-3.5 w-3.5" />
+                Сбросить группы
+              </button>
+            </>
+          )}
+          <div className="flex items-center rounded-lg border border-slate-300 p-0.5">
+            <button
+              onClick={() => setTab("messages")}
+              title="Лента входящих сообщений"
+              aria-pressed={tab === "messages"}
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+                tab === "messages"
+                  ? "bg-brand-600 text-white"
+                  : "text-slate-500 hover:bg-slate-100"
+              }`}
+            >
+              <IconInbox className="h-3.5 w-3.5" />
+              Сообщения
+            </button>
+            <button
+              onClick={() => setTab("board")}
+              title="Доска тикетов по статусам"
+              aria-pressed={tab === "board"}
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
+                tab === "board"
+                  ? "bg-brand-600 text-white"
+                  : "text-slate-500 hover:bg-slate-100"
+              }`}
+            >
+              <IconColumns className="h-3.5 w-3.5" />
+              Доска
+            </button>
+          </div>
         </div>
       </div>
 
@@ -248,16 +303,39 @@ export function Inbox() {
         </button>
       </div>
 
-      {issues.length > 0 && (
-        <div className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold text-slate-700">
-            Тикеты за день
-          </h2>
-          <KanbanBoard issues={issues} onStatusChange={handleStatusChange} />
+      {tab === "board" && (
+        <div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-slate-700">
+              Тикеты за день
+            </h2>
+            {issues.some((i) => i.status === "PENDING") && (
+              <button
+                onClick={handleNormalizePending}
+                title="Тикеты без явного статуса перевести в «Отправлено»"
+                className="flex items-center gap-1 text-xs text-slate-400 hover:text-brand-600"
+              >
+                <IconRefresh className="h-3.5 w-3.5" />
+                Пендинг без статуса → Отправлено
+              </button>
+            )}
+          </div>
+          {issues.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+              За этот день пока нет тикетов.
+            </p>
+          ) : (
+            <KanbanBoard
+              issues={issues}
+              onStatusChange={handleStatusChange}
+              size="large"
+            />
+          )}
         </div>
       )}
 
-      <h2 className="mb-2 text-sm font-semibold text-slate-700">Сообщения</h2>
+      {tab === "messages" && (
+        <>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setGroupFilter("")}
@@ -412,6 +490,8 @@ export function Inbox() {
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   );
