@@ -5,7 +5,7 @@ import type { IssueDTO } from "@/lib/types";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { Avatar } from "@/components/Avatar";
 import { groupColor } from "@/lib/groups";
-import { IconTicket } from "@/components/Icons";
+import { IconTicket, IconEdit } from "@/components/Icons";
 
 type Column = {
   key: "sent" | "active" | "resolved";
@@ -36,10 +36,12 @@ const COLUMNS: Column[] = [
 export function KanbanBoard({
   issues,
   onStatusChange,
+  onEdit,
   size = "compact",
 }: {
   issues: IssueDTO[];
   onStatusChange: (issue: IssueDTO, status: IssueStatus) => void;
+  onEdit?: (issue: IssueDTO) => void;
   size?: "compact" | "large";
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -116,11 +118,22 @@ export function KanbanBoard({
                       draggingId === issue.id ? "opacity-40" : ""
                     }`}
                   >
-                    <span
-                      className={`mb-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${color.bg} ${color.text}`}
-                    >
-                      {issue.groupName} {issue.groupEmoji}
-                    </span>
+                    <div className="mb-1 flex items-start justify-between gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${color.bg} ${color.text}`}
+                      >
+                        {issue.groupName} {issue.groupEmoji}
+                      </span>
+                      {onEdit && (
+                        <button
+                          onClick={() => onEdit(issue)}
+                          title="Изменить тикет"
+                          className="shrink-0 text-slate-300 hover:text-slate-600"
+                        >
+                          <IconEdit className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                     <p className="text-slate-900">{issue.description}</p>
                     {issue.ticketLink && (
                       <a

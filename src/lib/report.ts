@@ -65,7 +65,12 @@ export function generateReportText(
   issues: ReportIssue[],
   presets: ReportGroupPreset[]
 ): string {
-  const orderedGroups = groupIssues(issues, presets);
+  // "Отправлено" — тикет только что заведён, по нему ещё ничего не
+  // происходило, в репорт его выносить рано (иначе там будет пусто "Тикет
+  // ашылды" по каждому свежему сообщению). Показываем в репорте только то,
+  // что уже реально в работе, пендинге или решено.
+  const reportable = issues.filter((issue) => issue.status !== "SENT");
+  const orderedGroups = groupIssues(reportable, presets);
 
   const blocks = orderedGroups.map(({ name, emoji, items }) => {
     const header = `${name}${emoji ?? ""}`;

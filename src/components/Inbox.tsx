@@ -44,7 +44,8 @@ export function Inbox() {
   const [loading, setLoading] = useState(true);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("");
-  const [tab, setTab] = useState<"messages" | "board">("messages");
+  const [tab, setTab] = useState<"messages" | "board">("board");
+  const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const currentAgent = useCurrentAgent();
   const isToday = date === todayDateString();
 
@@ -193,6 +194,16 @@ export function Inbox() {
     await loadIssues(date);
   }
 
+  async function handleUpdateIssue(id: string, values: IssueFormValues) {
+    await fetch(`/api/issues/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+    setEditingIssueId(null);
+    await loadIssues(date);
+  }
+
   // Разовое действие с кнопки на доске: тикеты, которые остались в
   // "Пендинг" со старых времён (когда это был дефолтный статус, а не
   // осознанный выбор), переносим в "Отправлено" за выбранный день.
@@ -328,11 +339,40 @@ export function Inbox() {
             <KanbanBoard
               issues={issues}
               onStatusChange={handleStatusChange}
+              onEdit={(issue) => setEditingIssueId(issue.id)}
               size="large"
             />
           )}
         </div>
       )}
+
+      {editingIssueId &&
+        (() => {
+          const editingIssue = issues.find((i) => i.id === editingIssueId);
+          if (!editingIssue) return null;
+          return (
+            <div
+              className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-10 sm:pt-16"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setEditingIssueId(null);
+              }}
+            >
+              <div className="w-full max-w-lg">
+                <IssueForm
+                  groups={groups}
+                  currentAgent={currentAgent ?? ""}
+                  initial={editingIssue}
+                  showGroupPicker={false}
+                  fixedGroupName={editingIssue.groupName}
+                  onCancel={() => setEditingIssueId(null)}
+                  onSubmit={(values) =>
+                    handleUpdateIssue(editingIssue.id, values)
+                  }
+                />
+              </div>
+            </div>
+          );
+        })()}
 
       {tab === "messages" && (
         <>
