@@ -230,6 +230,25 @@ export function Inbox() {
     await loadIssues(date);
   }
 
+  // Разовое действие с кнопки на доске: прогоняет описания тикетов
+  // "Отправлено" за день через ту же автоочистку, что применяется к новым
+  // сообщениям — для тех, что успели завестись до появления автоочистки в
+  // вебхуке и всё ещё занимают место ссылками/приветствиями/логинами.
+  async function handleCleanDescriptions() {
+    const res = await fetch("/api/issues/clean-descriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reportDate: date }),
+    });
+    const data = await res.json();
+    await loadIssues(date);
+    window.alert(
+      data.updated > 0
+        ? `Почистил описание у ${data.updated} тикет(ов).`
+        : "Все описания уже чистые."
+    );
+  }
+
   return (
     <div
       className={`mx-auto px-4 py-6 sm:px-6 ${tab === "board" ? "max-w-6xl" : "max-w-3xl"}`}
@@ -328,16 +347,28 @@ export function Inbox() {
             <h2 className="text-base font-semibold text-slate-700">
               Тикеты за день
             </h2>
-            {issues.some((i) => i.status === "PENDING") && (
-              <button
-                onClick={handleNormalizePending}
-                title="Тикеты без явного статуса перевести в «Отправлено»"
-                className="flex items-center gap-1 text-xs text-slate-400 hover:text-brand-600"
-              >
-                <IconRefresh className="h-3.5 w-3.5" />
-                Пендинг без статуса → Отправлено
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-3">
+              {issues.some((i) => i.status === "SENT") && (
+                <button
+                  onClick={handleCleanDescriptions}
+                  title="Убрать ссылки/приветствия/логины из описаний тикетов «Отправлено»"
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-brand-600"
+                >
+                  <IconRefresh className="h-3.5 w-3.5" />
+                  Почистить описания в «Отправлено»
+                </button>
+              )}
+              {issues.some((i) => i.status === "PENDING") && (
+                <button
+                  onClick={handleNormalizePending}
+                  title="Тикеты без явного статуса перевести в «Отправлено»"
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-brand-600"
+                >
+                  <IconRefresh className="h-3.5 w-3.5" />
+                  Пендинг без статуса → Отправлено
+                </button>
+              )}
+            </div>
           </div>
           {issues.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">

@@ -65,11 +65,15 @@ const CREDENTIAL_LABEL_LINE = new RegExp(
   `^(?:${CREDENTIAL_LABEL_WORDS})\\s*[:\\-]?\\s*$`,
   "i"
 );
-// Слово-метка встречается где-то в строке вместе со значением на той же
-// строке (например "Balausa10 пароль").
-const CREDENTIAL_LABEL_ANYWHERE = new RegExp(
-  `\\b(?:${CREDENTIAL_LABEL_WORDS})\\b`,
-  "i"
+// Метка + один соседний токен-значение на той же строке, в любом порядке
+// ("Balausa10 пароль" или "логин test123"). \b тут не подходит — он
+// завязан на \w, а \w по умолчанию не считает кириллицу "буквой", так что
+// граница перед "логин"/"пароль" просто не находится. Вместо этого — явная
+// проверка через \p{L}/\p{N} (Unicode-буква/цифра) по обе стороны.
+const CREDENTIAL_PAIR = new RegExp(
+  `[^\\s,]+\\s+(?:${CREDENTIAL_LABEL_WORDS})(?![\\p{L}\\p{N}])` +
+    `|(?<![\\p{L}\\p{N}])(?:${CREDENTIAL_LABEL_WORDS})\\s*[:\\-]?\\s*[^\\s,]+`,
+  "iu"
 );
 
 export function cleanTicketDescription(raw: string): string {
@@ -99,8 +103,17 @@ export function cleanTicketDescription(raw: string): string {
       // следующей строке ("логин\nBalausa10").
       keep[i] = false;
       if (i + 1 < lines.length) keep[i + 1] = false;
-    } else if (CREDENTIAL_LABEL_ANYWHERE.test(trimmed)) {
-      // Метка вперемешку с текстом на той же строке ("Balausa10 пароль").
+      continue;
+    }
+    const withoutPair = trimmed
+      .replace(CREDENTIAL_PAIR, "")
+      .replace(/^[\s,.:!–-]+|[\s,.:!–-]+$/g, "")
+      .trim();
+    // Убираем строку целиком только если метка+значение и были всей
+    // строкой ("Balausa10 пароль") — если после вырезания пары остаётся
+    // ещё текст, значит метка встретилась внутри обычного предложения
+    // ("пароль не подходит") и трогать её рискованно.
+    if (withoutPair !== trimmed && withoutPair.length === 0) {
       keep[i] = false;
     }
   }
