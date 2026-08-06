@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { todayDateString } from "@/lib/date";
 import {
   buildMessageLink,
   extractAuthorName,
@@ -8,6 +9,33 @@ import {
   isOwnAgentMessage,
   type TelegramUpdate,
 } from "@/lib/telegram";
+
+// Заводит тикет "Отправлено" для уже известной группы, чтобы он сразу был
+// виден на доске без ручного "Создать тикет".
+async function createAutoIssue(
+  groupName: string,
+  groupEmoji: string | null,
+  description: string,
+  telegramLink: string
+) {
+  const reportDate = todayDateString();
+  const last = await prisma.issue.findFirst({
+    where: { reportDate, groupName },
+    orderBy: { position: "desc" },
+  });
+  return prisma.issue.create({
+    data: {
+      reportDate,
+      groupName,
+      groupEmoji,
+      position: (last?.position ?? 0) + 1,
+      description,
+      telegramLink,
+      status: "SENT",
+      createdBy: "Бот",
+    },
+  });
+}
 
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -56,10 +84,11 @@ export async function POST(request: NextRequest) {
     recent &&
     Date.now() - recent.receivedAt.getTime() < MERGE_WINDOW_MS
   ) {
+    const mergedText = [recent.text, text].filter(Boolean).join("\n");
     await prisma.telegramMessage.update({
       where: { id: recent.id },
       data: {
-        text: [recent.text, text].filter(Boolean).join("\n"),
+        text: mergedText,
         viewed: false,
         // Подтягиваем время к последнему сообщению в серии — иначе
         // склеенная карточка «застревала» под старым receivedAt первого
@@ -68,10 +97,20 @@ export async function POST(request: NextRequest) {
         receivedAt: new Date(),
       },
     });
+    // Если по первому сообщению серии уже успел завестись авто-тикет —
+    // подтягиваем в него дописанный текст, иначе на доске останется
+    // только обрывок исходного запроса.
+    if (recent.usedForIssueId) {
+      await prisma.issue.update({
+        where: { id: recent.usedForIssueId },
+        data: { description: mergedText },
+      });
+    }
     return NextResponse.json({ ok: true });
   }
 
-  await prisma.telegramMessage.upsert({
+  const messageLink = buildMessageLink(message.chat.id, message.message_id);
+  const savedMessage = await prisma.telegramMessage.upsert({
     where: {
       chatId_messageId: { chatId, messageId: message.message_id },
     },
@@ -85,9 +124,25 @@ export async function POST(request: NextRequest) {
       fromId,
       authorName,
       text,
-      messageLink: buildMessageLink(message.chat.id, message.message_id),
+      messageLink,
     },
   });
+
+  // Группа уже известна (чат раньше привязали вручную) — заводим тикет
+  // сразу, без ручного "Создать тикет". upsert идемпотентен на повторных
+  // доставках/edited_message, поэтому создаём тикет только один раз.
+  if (preset && !savedMessage.usedForIssueId) {
+    const issue = await createAutoIssue(
+      preset.name,
+      preset.emoji,
+      text,
+      messageLink
+    );
+    await prisma.telegramMessage.update({
+      where: { id: savedMessage.id },
+      data: { usedForIssueId: issue.id },
+    });
+  }
 
   return NextResponse.json({ ok: true });
 }

@@ -5,7 +5,12 @@ import type { IssueDTO } from "@/lib/types";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { Avatar } from "@/components/Avatar";
 import { groupColor } from "@/lib/groups";
-import { IconTicket, IconEdit } from "@/components/Icons";
+import {
+  IconTicket,
+  IconEdit,
+  IconTrash,
+  IconExternalLink,
+} from "@/components/Icons";
 
 type Column = {
   key: "sent" | "active" | "resolved";
@@ -37,11 +42,13 @@ export function KanbanBoard({
   issues,
   onStatusChange,
   onEdit,
+  onDelete,
   size = "compact",
 }: {
   issues: IssueDTO[];
   onStatusChange: (issue: IssueDTO, status: IssueStatus) => void;
   onEdit?: (issue: IssueDTO) => void;
+  onDelete?: (issue: IssueDTO) => void;
   size?: "compact" | "large";
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -124,17 +131,39 @@ export function KanbanBoard({
                       >
                         {issue.groupName} {issue.groupEmoji}
                       </span>
-                      {onEdit && (
-                        <button
-                          onClick={() => onEdit(issue)}
-                          title="Изменить тикет"
-                          className="shrink-0 text-slate-300 hover:text-slate-600"
-                        >
-                          <IconEdit className="h-3.5 w-3.5" />
-                        </button>
-                      )}
+                      <div className="flex shrink-0 items-center gap-2">
+                        {onEdit && (
+                          <button
+                            onClick={() => onEdit(issue)}
+                            title="Изменить тикет"
+                            className="text-slate-300 hover:text-slate-600"
+                          >
+                            <IconEdit className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {onDelete && (
+                          <button
+                            onClick={() => onDelete(issue)}
+                            title="Удалить тикет"
+                            className="text-slate-300 hover:text-red-500"
+                          >
+                            <IconTrash className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-slate-900">{issue.description}</p>
+                    {issue.telegramLink && (
+                      <a
+                        href={issue.telegramLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 flex items-center gap-1 text-xs text-accent-600 hover:underline"
+                      >
+                        <IconExternalLink className="h-3 w-3 shrink-0" />
+                        Открыть в Telegram
+                      </a>
+                    )}
                     {issue.ticketLink && (
                       <a
                         href={issue.ticketLink}

@@ -20,6 +20,7 @@ import {
   IconRefresh,
   IconInbox,
   IconColumns,
+  IconCheck,
 } from "@/components/Icons";
 
 const NO_GROUP_FILTER = "__none__";
@@ -204,6 +205,12 @@ export function Inbox() {
     await loadIssues(date);
   }
 
+  async function handleDeleteIssue(issue: IssueDTO) {
+    if (!window.confirm(`Удалить тикет «${issue.description}»?`)) return;
+    await fetch(`/api/issues/${issue.id}`, { method: "DELETE" });
+    await loadIssues(date);
+  }
+
   // Разовое действие с кнопки на доске: тикеты, которые остались в
   // "Пендинг" со старых времён (когда это был дефолтный статус, а не
   // осознанный выбор), переносим в "Отправлено" за выбранный день.
@@ -340,6 +347,7 @@ export function Inbox() {
               issues={issues}
               onStatusChange={handleStatusChange}
               onEdit={(issue) => setEditingIssueId(issue.id)}
+              onDelete={handleDeleteIssue}
               size="large"
             />
           )}
@@ -509,6 +517,19 @@ export function Inbox() {
                     onCancel={() => setCreatingFromId(null)}
                     onSubmit={(values) => handleCreateIssue(message, values)}
                   />
+                </div>
+              ) : message.usedForIssueId ? (
+                <div className="mt-2 flex items-center gap-3">
+                  <span className="flex items-center gap-1 text-sm font-medium text-emerald-600">
+                    <IconCheck className="h-3.5 w-3.5" />
+                    Тикет заведён на доске автоматически
+                  </span>
+                  <button
+                    onClick={() => handleDismiss(message.id)}
+                    className="text-sm text-slate-400 hover:text-slate-700"
+                  >
+                    Скрыть
+                  </button>
                 </div>
               ) : (
                 <div className="mt-2 flex gap-3">
