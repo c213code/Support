@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
+import { cleanTicketDescription } from "@/lib/textClean";
 import {
+  AUTO_ISSUE_CREATOR,
   buildMessageLink,
   extractAuthorName,
   extractText,
@@ -29,10 +31,10 @@ async function createAutoIssue(
       groupName,
       groupEmoji,
       position: (last?.position ?? 0) + 1,
-      description,
+      description: cleanTicketDescription(description),
       telegramLink,
       status: "SENT",
-      createdBy: "Бот",
+      createdBy: AUTO_ISSUE_CREATOR,
     },
   });
 }
@@ -103,7 +105,7 @@ export async function POST(request: NextRequest) {
     if (recent.usedForIssueId) {
       await prisma.issue.update({
         where: { id: recent.usedForIssueId },
-        data: { description: mergedText },
+        data: { description: cleanTicketDescription(mergedText) },
       });
     }
     return NextResponse.json({ ok: true });

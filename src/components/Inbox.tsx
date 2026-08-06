@@ -12,6 +12,7 @@ import {
   todayDateString,
 } from "@/lib/date";
 import { groupColor, isOfficialGroupName } from "@/lib/groups";
+import { cleanTicketDescription } from "@/lib/textClean";
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -20,7 +21,7 @@ import {
   IconRefresh,
   IconInbox,
   IconColumns,
-  IconCheck,
+  IconEdit,
 } from "@/components/Icons";
 
 const NO_GROUP_FILTER = "__none__";
@@ -510,7 +511,9 @@ export function Inbox() {
                     showGroupPicker={!message.groupName}
                     fixedGroupName={message.groupName ?? undefined}
                     initial={{
-                      description: message.text ?? "",
+                      description: message.text
+                        ? cleanTicketDescription(message.text)
+                        : "",
                       telegramLink: message.messageLink,
                       groupName: message.groupName ?? undefined,
                     }}
@@ -520,10 +523,13 @@ export function Inbox() {
                 </div>
               ) : message.usedForIssueId ? (
                 <div className="mt-2 flex items-center gap-3">
-                  <span className="flex items-center gap-1 text-sm font-medium text-emerald-600">
-                    <IconCheck className="h-3.5 w-3.5" />
-                    Тикет заведён на доске автоматически
-                  </span>
+                  <button
+                    onClick={() => setEditingIssueId(message.usedForIssueId)}
+                    className="flex items-center gap-1 text-sm font-medium text-emerald-600 hover:underline"
+                  >
+                    <IconEdit className="h-3.5 w-3.5" />
+                    Тикет заведён автоматически — изменить
+                  </button>
                   <button
                     onClick={() => handleDismiss(message.id)}
                     className="text-sm text-slate-400 hover:text-slate-700"

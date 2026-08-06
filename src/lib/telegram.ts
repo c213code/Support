@@ -1,3 +1,8 @@
+// Автор тикетов, которые вебхук заводит сам (без участия агента) — по этому
+// значению определяем, что тикет ещё никто не "забрал", и заменяем его на
+// имя агента при первом же его действии (см. PATCH /api/issues/[id]).
+export const AUTO_ISSUE_CREATOR = "Бот";
+
 export type TelegramUpdate = {
   update_id: number;
   message?: TelegramMessagePayload;

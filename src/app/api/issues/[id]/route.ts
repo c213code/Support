@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentIdentity } from "@/lib/auth";
 import { isIssueStatus } from "@/lib/status";
+import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -25,6 +27,20 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (typeof body.groupName === "string") data.groupName = body.groupName;
   if (typeof body.groupEmoji === "string" || body.groupEmoji === null)
     data.groupEmoji = body.groupEmoji || null;
+
+  // Тикет завёл бот сам (по входящему сообщению) — как только с ним
+  // впервые что-то делает живой агент (меняет статус, правит текст и т.д.),
+  // забираем авторство на него, чтобы "Бот" не висел вечно.
+  const identity = await getCurrentIdentity();
+  if (identity) {
+    const existing = await prisma.issue.findUnique({
+      where: { id },
+      select: { createdBy: true },
+    });
+    if (existing?.createdBy === AUTO_ISSUE_CREATOR) {
+      data.createdBy = identity.name;
+    }
+  }
 
   const issue = await prisma.issue.update({ where: { id }, data });
   return NextResponse.json({ issue });
