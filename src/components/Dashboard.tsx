@@ -10,7 +10,6 @@ import { Avatar } from "@/components/Avatar";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import { groupColor } from "@/lib/groups";
 import { ISSUE_STATUSES, STATUS_META, type IssueStatus } from "@/lib/status";
-import { KanbanBoard } from "@/components/KanbanBoard";
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -19,8 +18,6 @@ import {
   IconTicket,
   IconEdit,
   IconTrash,
-  IconList,
-  IconColumns,
 } from "@/components/Icons";
 
 export function Dashboard({ initialDate }: { initialDate: string }) {
@@ -34,7 +31,6 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   const [addingToGroup, setAddingToGroup] = useState<string | null>(null);
   const [addingNew, setAddingNew] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [view, setView] = useState<"list" | "board">("board");
   const currentAgent = useCurrentAgent();
 
   const loadGroups = useCallback(async () => {
@@ -184,34 +180,6 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
               {resolvedCount}/{totalCount} решено
             </span>
           )}
-          <div className="flex items-center rounded-lg border border-slate-300 p-0.5">
-            <button
-              onClick={() => setView("board")}
-              title="Доска по статусам"
-              aria-pressed={view === "board"}
-              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
-                view === "board"
-                  ? "bg-brand-600 text-white"
-                  : "text-slate-500 hover:bg-slate-100"
-              }`}
-            >
-              <IconColumns className="h-3.5 w-3.5" />
-              Доска
-            </button>
-            <button
-              onClick={() => setView("list")}
-              title="Список по группам"
-              aria-pressed={view === "list"}
-              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition ${
-                view === "list"
-                  ? "bg-brand-600 text-white"
-                  : "text-slate-500 hover:bg-slate-100"
-              }`}
-            >
-              <IconList className="h-3.5 w-3.5" />
-              Список
-            </button>
-          </div>
           <button
             onClick={() => setDate(todayDateString())}
             disabled={isToday}
@@ -233,18 +201,12 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
         </div>
       ) : (
         <div className="space-y-6">
-          {totalCount === 0 && (
+          {grouped.length === 0 && (
             <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
               За этот день пока нет тикетов — добавь первый ниже.
             </p>
           )}
-
-          {view === "board" && totalCount > 0 && (
-            <KanbanBoard issues={issues} onStatusChange={handleStatusChange} />
-          )}
-
-          {view === "list" &&
-            grouped.map((group) => {
+          {grouped.map((group) => {
             const color = groupColor(group.name);
             return (
               <section key={group.name}>

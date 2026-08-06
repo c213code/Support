@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { GroupPresetDTO, TelegramMessageDTO } from "@/lib/types";
+import type { GroupPresetDTO, IssueDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
+import { KanbanBoard } from "@/components/KanbanBoard";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
+import type { IssueStatus } from "@/lib/status";
 import {
   formatDateHuman,
   shiftDateString,
@@ -36,6 +38,7 @@ export function Inbox() {
   const [date, setDate] = useState(todayDateString());
   const [messages, setMessages] = useState<TelegramMessageDTO[]>([]);
   const [groups, setGroups] = useState<GroupPresetDTO[]>([]);
+  const [issues, setIssues] = useState<IssueDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("");
@@ -55,6 +58,12 @@ export function Inbox() {
     setLoading(false);
   }, []);
 
+  const loadIssues = useCallback(async (d: string) => {
+    const res = await fetch(`/api/issues?date=${d}`);
+    const data = await res.json();
+    setIssues(data.issues ?? []);
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load on mount
     loadGroups();
@@ -64,9 +73,13 @@ export function Inbox() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- data load on date change
     setLoading(true);
     loadMessages(date);
-    const interval = setInterval(() => loadMessages(date), POLL_INTERVAL_MS);
+    loadIssues(date);
+    const interval = setInterval(() => {
+      loadMessages(date);
+      loadIssues(date);
+    }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [date, loadMessages]);
+  }, [date, loadMessages, loadIssues]);
 
   const filteredMessages = useMemo(
     () =>
@@ -159,7 +172,22 @@ export function Inbox() {
     });
 
     setCreatingFromId(null);
-    await loadMessages(date);
+    await Promise.all([loadMessages(date), loadIssues(date)]);
+  }
+
+  // Быстрая смена статуса тикета на доске (перетаскиванием или кнопкой). При
+  // переводе в "Решено" с пустой заметкой подставляем "Имя шешті".
+  async function handleStatusChange(issue: IssueDTO, status: IssueStatus) {
+    const body: Record<string, unknown> = { status };
+    if (status === "RESOLVED" && !issue.note?.trim() && currentAgent) {
+      body.note = `${currentAgent} шешті`;
+    }
+    await fetch(`/api/issues/${issue.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    await loadIssues(date);
   }
 
   return (
@@ -220,6 +248,16 @@ export function Inbox() {
         </button>
       </div>
 
+      {issues.length > 0 && (
+        <div className="mb-6">
+          <h2 className="mb-2 text-sm font-semibold text-slate-700">
+            Тикеты за день
+          </h2>
+          <KanbanBoard issues={issues} onStatusChange={handleStatusChange} />
+        </div>
+      )}
+
+      <h2 className="mb-2 text-sm font-semibold text-slate-700">Сообщения</h2>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setGroupFilter("")}

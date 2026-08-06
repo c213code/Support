@@ -63,7 +63,7 @@ export function IssueForm({
     initial?.telegramLink ?? ""
   );
   const [status, setStatus] = useState<IssueStatus>(
-    initial?.status ?? "PENDING"
+    initial?.status ?? "SENT"
   );
   const [note, setNote] = useState(initial?.note ?? "");
   const [ticketLink, setTicketLink] = useState(initial?.ticketLink ?? "");

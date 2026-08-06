@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       position: (last?.position ?? 0) + 1,
       description: body.description,
       telegramLink: body.telegramLink || null,
-      status: isIssueStatus(body.status) ? body.status : "PENDING",
+      status: isIssueStatus(body.status) ? body.status : "SENT",
       note: body.note || null,
       ticketLink: body.ticketLink || null,
       createdBy: identity.name,
