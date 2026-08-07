@@ -3,6 +3,8 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
 import { cleanTicketDescription } from "@/lib/textClean";
+import { rewriteTicketDescriptionWithAI } from "@/lib/gemini";
+import { isAiCleaningEnabled } from "@/lib/settings";
 import {
   AUTO_ISSUE_CREATOR,
   buildMessageLink,
@@ -11,6 +13,19 @@ import {
   isOwnAgentMessage,
   type TelegramUpdate,
 } from "@/lib/telegram";
+
+// Тогл "aiCleaningEnabled" (см. lib/settings.ts, включается кнопкой в
+// /inbox) решает, кто пишет описание авто-тикета: Gemini (переписывает
+// сообщение, понимая контекст) или обычная regex-чистка. Если ИИ выключен,
+// ключ не задан или запрос упал/подвис — тихо откатываемся на regex, чтобы
+// вебхук не зависел от внешнего API.
+async function cleanDescription(raw: string): Promise<string> {
+  if (await isAiCleaningEnabled()) {
+    const aiResult = await rewriteTicketDescriptionWithAI(raw);
+    if (aiResult) return aiResult;
+  }
+  return cleanTicketDescription(raw);
+}
 
 // Заводит тикет "Отправлено" для уже известной группы, чтобы он сразу был
 // виден на доске без ручного "Создать тикет".
@@ -21,17 +36,20 @@ async function createAutoIssue(
   telegramLink: string
 ) {
   const reportDate = todayDateString();
-  const last = await prisma.issue.findFirst({
-    where: { reportDate, groupName },
-    orderBy: { position: "desc" },
-  });
+  const [last, cleaned] = await Promise.all([
+    prisma.issue.findFirst({
+      where: { reportDate, groupName },
+      orderBy: { position: "desc" },
+    }),
+    cleanDescription(description),
+  ]);
   return prisma.issue.create({
     data: {
       reportDate,
       groupName,
       groupEmoji,
       position: (last?.position ?? 0) + 1,
-      description: cleanTicketDescription(description),
+      description: cleaned,
       telegramLink,
       status: "SENT",
       createdBy: AUTO_ISSUE_CREATOR,
@@ -105,7 +123,7 @@ export async function POST(request: NextRequest) {
     if (recent.usedForIssueId) {
       await prisma.issue.update({
         where: { id: recent.usedForIssueId },
-        data: { description: cleanTicketDescription(mergedText) },
+        data: { description: await cleanDescription(mergedText) },
       });
     }
     return NextResponse.json({ ok: true });

@@ -48,6 +48,9 @@ export function Inbox() {
   const [groupFilter, setGroupFilter] = useState<string>("");
   const [tab, setTab] = useState<"messages" | "board">("board");
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
+  const [aiCleaningEnabled, setAiCleaningEnabled] = useState<boolean | null>(
+    null
+  );
   const currentAgent = useCurrentAgent();
   const isToday = date === todayDateString();
 
@@ -73,6 +76,9 @@ export function Inbox() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load on mount
     loadGroups();
+    fetch("/api/settings/ai-cleaning")
+      .then((res) => res.json())
+      .then((data) => setAiCleaningEnabled(Boolean(data.enabled)));
   }, [loadGroups]);
 
   useEffect(() => {
@@ -249,6 +255,20 @@ export function Inbox() {
     );
   }
 
+  // Тогл "описания авто-тикетов пишет ИИ" — общая настройка на всё
+  // приложение (не по агенту), сразу шлём на сервер и откатываем чекбокс
+  // назад, если запрос не прошёл.
+  async function handleToggleAiCleaning() {
+    const next = !aiCleaningEnabled;
+    setAiCleaningEnabled(next);
+    const res = await fetch("/api/settings/ai-cleaning", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok) setAiCleaningEnabled(!next);
+  }
+
   return (
     <div
       className={`mx-auto px-4 py-6 sm:px-6 ${tab === "board" ? "max-w-6xl" : "max-w-3xl"}`}
@@ -256,6 +276,28 @@ export function Inbox() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-slate-900">Входящие</h1>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={aiCleaningEnabled ?? false}
+            onClick={handleToggleAiCleaning}
+            disabled={aiCleaningEnabled === null}
+            title="Описания новых авто-тикетов пишет Gemini вместо обычной чистки регулярками"
+            className="flex items-center gap-1.5 rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 disabled:opacity-50"
+          >
+            <span
+              className={`relative h-4 w-7 shrink-0 rounded-full transition ${
+                aiCleaningEnabled ? "bg-brand-600" : "bg-slate-300"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition ${
+                  aiCleaningEnabled ? "left-3.5" : "left-0.5"
+                }`}
+              />
+            </span>
+            ✨ ИИ-описания
+          </button>
           {tab === "messages" && (
             <>
               <span className="text-xs text-slate-400">

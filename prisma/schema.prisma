@@ -54,6 +54,16 @@ model TelegramMessage {
   @@index([archived, receivedAt])
 }
 
+// Единственная строка (id всегда "singleton") с глобальными переключателями
+// приложения — сейчас только тогл "описания авто-тикетов пишет ИИ вместо
+// регулярок". Не привязано к конкретному агенту/сессии осознанно: это
+// настройка для всей команды, а не личное предпочтение.
+model AppSetting {
+  id                String   @id @default("singleton")
+  aiCleaningEnabled Boolean  @default(false)
+  updatedAt         DateTime @updatedAt
+}
+
 model Issue {
   id           String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)
