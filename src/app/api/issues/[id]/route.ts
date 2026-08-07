@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
 import { isIssueStatus } from "@/lib/status";
 import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
+import { cleanTicketDescription } from "@/lib/textClean";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -15,7 +16,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   const data: Record<string, unknown> = {};
-  if (typeof body.description === "string") data.description = body.description;
+  // Ручное редактирование описания тоже должно проходить через автоочистку —
+  // иначе приветствия/логины/ссылки, которые не убрали при авто-создании
+  // тикета (например, он завёлся до фичи), так и остаются висеть навсегда,
+  // потому что PATCH — единственное место, где агент вообще трогает текст
+  // уже существующего тикета.
+  if (typeof body.description === "string")
+    data.description = cleanTicketDescription(body.description);
   if (typeof body.telegramLink === "string" || body.telegramLink === null)
     data.telegramLink = body.telegramLink || null;
   if (isIssueStatus(body.status)) data.status = body.status;

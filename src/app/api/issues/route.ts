@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
 import { isIssueStatus } from "@/lib/status";
+import { cleanTicketDescription } from "@/lib/textClean";
 
 export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
       groupName: body.groupName,
       groupEmoji: body.groupEmoji ?? null,
       position: (last?.position ?? 0) + 1,
-      description: body.description,
+      description: cleanTicketDescription(body.description),
       telegramLink: body.telegramLink || null,
       status: isIssueStatus(body.status) ? body.status : "SENT",
       note: body.note || null,
