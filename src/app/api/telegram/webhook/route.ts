@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
 import { cleanTicketDescription } from "@/lib/textClean";
-import { rewriteTicketDescriptionWithAI } from "@/lib/gemini";
+import { rewriteTicketDescriptionWithAI } from "@/lib/ai";
 import { isAiCleaningEnabled } from "@/lib/settings";
 import {
   AUTO_ISSUE_CREATOR,
@@ -15,7 +15,7 @@ import {
 } from "@/lib/telegram";
 
 // Тогл "aiCleaningEnabled" (см. lib/settings.ts, включается кнопкой в
-// /inbox) решает, кто пишет описание авто-тикета: Gemini (переписывает
+// /inbox) решает, кто пишет описание авто-тикета: ИИ (Groq, переписывает
 // сообщение, понимая контекст) или обычная regex-чистка. Если ИИ выключен,
 // ключ не задан или запрос упал/подвис — тихо откатываемся на regex, чтобы
 // вебхук не зависел от внешнего API.

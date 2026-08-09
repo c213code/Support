@@ -282,7 +282,7 @@ export function Inbox() {
             aria-checked={aiCleaningEnabled ?? false}
             onClick={handleToggleAiCleaning}
             disabled={aiCleaningEnabled === null}
-            title="Описания новых авто-тикетов пишет Gemini вместо обычной чистки регулярками"
+            title="Описания новых авто-тикетов пишет ИИ (Groq) вместо обычной чистки регулярками"
             className="flex items-center gap-1.5 rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 disabled:opacity-50"
           >
             <span
