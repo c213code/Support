@@ -9,6 +9,7 @@ export type IssueDTO = {
   position: number;
   description: string;
   telegramLink: string | null;
+  extraLinks: string[];
   status: IssueStatus;
   note: string | null;
   ticketLink: string | null;

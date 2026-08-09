@@ -6,7 +6,7 @@ import type { GroupPresetDTO, IssueDTO } from "@/lib/types";
 import { formatDateHuman, shiftDateString, todayDateString } from "@/lib/date";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { ResolveDialog } from "@/components/ResolveDialog";
-import { groupIssues } from "@/lib/report";
+import { groupIssues, issueLinks } from "@/lib/report";
 import { Avatar } from "@/components/Avatar";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import { groupColor } from "@/lib/groups";
@@ -110,6 +110,16 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
       body: JSON.stringify({ status: "RESOLVED", note }),
     });
     setResolvingId(null);
+    await loadIssues(date);
+  }
+
+  // Отвязать приклеенное обращение (промахнулись при объединении).
+  async function handleDetach(issue: IssueDTO, link: string) {
+    await fetch(`/api/issues/${issue.id}/attach-message`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ link }),
+    });
     await loadIssues(date);
   }
 
@@ -270,16 +280,30 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                               <p className="text-sm text-slate-900">
                                 {index + 1}. {issue.description}
                               </p>
-                              {issue.telegramLink && (
-                                <a
-                                  href={issue.telegramLink}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="mt-1 block truncate text-xs text-accent-600 hover:underline"
+                              {issueLinks(issue).map((link) => (
+                                <span
+                                  key={link}
+                                  className="mt-1 flex items-center gap-1.5"
                                 >
-                                  {issue.telegramLink}
-                                </a>
-                              )}
+                                  <a
+                                    href={link}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="truncate text-xs text-accent-600 hover:underline"
+                                  >
+                                    {link}
+                                  </a>
+                                  {issue.extraLinks?.includes(link) && (
+                                    <button
+                                      onClick={() => handleDetach(issue, link)}
+                                      title="Отвязать это обращение от тикета"
+                                      className="shrink-0 text-xs text-slate-300 hover:text-red-500"
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                </span>
+                              ))}
                               <p className="mt-1 text-sm text-slate-500">
                                 {issue.note || (
                                   <span className="italic text-slate-300">

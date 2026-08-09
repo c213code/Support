@@ -5,6 +5,7 @@ import type { GroupPresetDTO, IssueDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { ResolveDialog } from "@/components/ResolveDialog";
+import { AttachToIssuePicker } from "@/components/AttachToIssuePicker";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import type { IssueStatus } from "@/lib/status";
 import {
@@ -23,6 +24,7 @@ import {
   IconInbox,
   IconColumns,
   IconEdit,
+  IconLink,
 } from "@/components/Icons";
 
 const NO_GROUP_FILTER = "__none__";
@@ -51,10 +53,12 @@ export function Inbox() {
   const [issues, setIssues] = useState<IssueDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
+  const [attachingFromId, setAttachingFromId] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("");
   const [tab, setTab] = useState<"messages" | "board">("board");
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [resolvingIssueId, setResolvingIssueId] = useState<string | null>(null);
+  const [mergingIssueId, setMergingIssueId] = useState<string | null>(null);
   const [aiCleaningEnabled, setAiCleaningEnabled] = useState<boolean | null>(
     null
   );
@@ -199,6 +203,33 @@ export function Inbox() {
 
     setCreatingFromId(null);
     await Promise.all([loadMessages(date), loadIssues(date)]);
+  }
+
+  // Приклеить сообщение к уже существующему тикету вместо заведения
+  // нового: один и тот же запрос часто приходит по нескольку раз.
+  async function handleAttachToIssue(
+    message: TelegramMessageDTO,
+    issue: IssueDTO
+  ) {
+    await fetch(`/api/issues/${issue.id}/attach-message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: message.id }),
+    });
+    setAttachingFromId(null);
+    await Promise.all([loadMessages(date), loadIssues(date)]);
+  }
+
+  // Объединение тикета-дубля с основным: ссылки переезжают туда, дубль
+  // исчезает с доски.
+  async function handleMergeIssue(source: IssueDTO, target: IssueDTO) {
+    await fetch(`/api/issues/${source.id}/merge-into`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetId: target.id }),
+    });
+    setMergingIssueId(null);
+    await Promise.all([loadIssues(date), loadMessages(date)]);
   }
 
   // Быстрая смена статуса тикета на доске (перетаскиванием или кнопкой).
@@ -448,11 +479,47 @@ export function Inbox() {
               onStatusChange={handleStatusChange}
               onEdit={(issue) => setEditingIssueId(issue.id)}
               onDelete={handleDeleteIssue}
+              onMerge={(issue) => setMergingIssueId(issue.id)}
               size="large"
             />
           )}
         </div>
       )}
+
+      {mergingIssueId &&
+        (() => {
+          const source = issues.find((i) => i.id === mergingIssueId);
+          if (!source) return null;
+          return (
+            <div
+              className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-16 sm:pt-24"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setMergingIssueId(null);
+              }}
+            >
+              <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+                <p className="mb-1 text-sm font-semibold text-slate-900">
+                  Объединить дубль
+                </p>
+                <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  {source.description}
+                </p>
+                <p className="mb-1 text-xs text-slate-400">
+                  Этот тикет исчезнет, а его ссылки переедут в выбранный.
+                </p>
+                <AttachToIssuePicker
+                  messageText={source.description}
+                  issues={issues.filter((i) => i.id !== source.id)}
+                  title="В какой тикет объединить?"
+                  emptyText="Других тикетов за этот день нет."
+                  pendingText="Объединяем…"
+                  onCancel={() => setMergingIssueId(null)}
+                  onPick={(target) => handleMergeIssue(source, target)}
+                />
+              </div>
+            </div>
+          );
+        })()}
 
       {resolvingIssueId &&
         (() => {
@@ -650,14 +717,29 @@ export function Inbox() {
                     Скрыть
                   </button>
                 </div>
+              ) : attachingFromId === message.id ? (
+                <AttachToIssuePicker
+                  messageText={message.text ?? ""}
+                  issues={issues}
+                  onCancel={() => setAttachingFromId(null)}
+                  onPick={(issue) => handleAttachToIssue(message, issue)}
+                />
               ) : (
-                <div className="mt-2 flex gap-3">
+                <div className="mt-2 flex flex-wrap gap-3">
                   <button
                     onClick={() => setCreatingFromId(message.id)}
                     className="flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline"
                   >
                     <IconPlus className="h-3.5 w-3.5" />
                     Создать тикет
+                  </button>
+                  <button
+                    onClick={() => setAttachingFromId(message.id)}
+                    title="Это повтор уже заведённого запроса — приклеить ссылку к тому тикету"
+                    className="flex items-center gap-1 text-sm text-slate-500 hover:text-accent-600"
+                  >
+                    <IconLink className="h-3.5 w-3.5" />
+                    К существующему
                   </button>
                   <button
                     onClick={() => handleDismiss(message.id)}

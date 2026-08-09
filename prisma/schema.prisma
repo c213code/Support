@@ -72,7 +72,15 @@ model Issue {
   groupEmoji   String?
   position     Int         @default(0)
   description  String
+  // Ссылка на исходное сообщение. Осталась отдельным полем (а не первым
+  // элементом extraLinks), чтобы не переливать данные существующих тикетов
+  // миграцией — она накатывается сама при деплое, а data-миграции так
+  // гонять нельзя.
   telegramLink String?
+  // Ссылки на дополнительные сообщения, приклеенные к этому же тикету:
+  // один и тот же запрос ("доступ беру") часто прилетает несколько раз от
+  // разных людей, и это один тикет с несколькими пруфами, а не N тикетов.
+  extraLinks   String[]    @default([])
   status       IssueStatus @default(PENDING)
   note         String?
   ticketLink   String?

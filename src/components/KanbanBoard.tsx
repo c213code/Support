@@ -5,11 +5,13 @@ import type { IssueDTO } from "@/lib/types";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { Avatar } from "@/components/Avatar";
 import { groupColor } from "@/lib/groups";
+import { issueLinks } from "@/lib/report";
 import {
   IconTicket,
   IconEdit,
   IconTrash,
   IconExternalLink,
+  IconLink,
 } from "@/components/Icons";
 
 type Column = {
@@ -55,12 +57,14 @@ export function KanbanBoard({
   onStatusChange,
   onEdit,
   onDelete,
+  onMerge,
   size = "compact",
 }: {
   issues: IssueDTO[];
   onStatusChange: (issue: IssueDTO, status: IssueStatus) => void;
   onEdit?: (issue: IssueDTO) => void;
   onDelete?: (issue: IssueDTO) => void;
+  onMerge?: (issue: IssueDTO) => void;
   size?: "compact" | "large";
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -153,6 +157,15 @@ export function KanbanBoard({
                         {issue.groupName} {issue.groupEmoji}
                       </span>
                       <div className="flex shrink-0 items-center gap-2">
+                        {onMerge && (
+                          <button
+                            onClick={() => onMerge(issue)}
+                            title="Это дубль — объединить с другим тикетом"
+                            className="text-slate-300 hover:text-accent-600"
+                          >
+                            <IconLink className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         {onEdit && (
                           <button
                             onClick={() => onEdit(issue)}
@@ -174,17 +187,20 @@ export function KanbanBoard({
                       </div>
                     </div>
                     <p className="text-slate-900">{issue.description}</p>
-                    {issue.telegramLink && (
+                    {issueLinks(issue).map((link, i) => (
                       <a
-                        href={issue.telegramLink}
+                        key={link}
+                        href={link}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-1 flex items-center gap-1 text-xs text-accent-600 hover:underline"
                       >
                         <IconExternalLink className="h-3 w-3 shrink-0" />
-                        Открыть в Telegram
+                        {i === 0
+                          ? "Открыть в Telegram"
+                          : `Ещё обращение №${i + 1}`}
                       </a>
-                    )}
+                    ))}
                     {issue.ticketLink && (
                       <a
                         href={issue.ticketLink}

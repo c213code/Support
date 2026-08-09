@@ -6,6 +6,10 @@ export type ReportIssue = {
   position: number;
   description: string;
   telegramLink: string | null;
+  // Дополнительные сообщения, приклеенные к тому же тикету (см.
+  // POST /api/issues/[id]/attach-message). В репорте идут отдельными
+  // строками следом за основной ссылкой.
+  extraLinks?: string[];
   status: IssueStatus;
   note: string | null;
   ticketLink: string | null;
@@ -18,6 +22,19 @@ export type ReportGroupPreset = {
 };
 
 const SEPARATOR = "—".repeat(30);
+
+// Все Telegram-ссылки тикета одним списком: исходное сообщение плюс те,
+// что приклеили к нему потом. Дубли отсеиваем — исходная ссылка могла
+// попасть и в extraLinks, если тикет пересобирали руками.
+export function issueLinks(issue: {
+  telegramLink: string | null;
+  extraLinks?: string[];
+}): string[] {
+  const links = [issue.telegramLink, ...(issue.extraLinks ?? [])].filter(
+    (link): link is string => Boolean(link)
+  );
+  return Array.from(new Set(links));
+}
 
 export type GroupedIssues<T extends ReportIssue = ReportIssue> = {
   name: string;
@@ -78,8 +95,8 @@ export function generateReportText(
 
     items.forEach((issue, idx) => {
       lines.push(`${idx + 1}. ${issue.description}`);
-      if (issue.telegramLink) {
-        lines.push(issue.telegramLink);
+      for (const link of issueLinks(issue)) {
+        lines.push(link);
       }
       const meta = STATUS_META[issue.status];
       const statusEmoji = meta.reportEmoji;
