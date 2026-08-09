@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
-import { cleanTicketDescription } from "@/lib/textClean";
-import { rewriteTicketDescriptionWithAI } from "@/lib/ai";
+import { cleanTicketDescription, isNoiseOnly } from "@/lib/textClean";
+import { isAiSkip, rewriteTicketDescriptionWithAI } from "@/lib/ai";
 import { isAiCleaningEnabled } from "@/lib/settings";
 import {
   AUTO_ISSUE_CREATOR,
@@ -14,21 +14,31 @@ import {
   type TelegramUpdate,
 } from "@/lib/telegram";
 
+// Готовит описание для авто-тикета — или null, если по этому сообщению
+// тикет заводить не нужно (голое приветствие, одна ссылка, "рахмет"):
+// такие карточки только забивают беклог, а само сообщение всё равно
+// остаётся видно во "Входящих" и его можно завести руками.
+//
 // Тогл "aiCleaningEnabled" (см. lib/settings.ts, включается кнопкой в
-// /inbox) решает, кто пишет описание авто-тикета: ИИ (Groq, переписывает
-// сообщение, понимая контекст) или обычная regex-чистка. Если ИИ выключен,
-// ключ не задан или запрос упал/подвис — тихо откатываемся на regex, чтобы
-// вебхук не зависел от внешнего API.
-async function cleanDescription(raw: string): Promise<string> {
+// /inbox) решает, кто пишет описание: ИИ (Groq, переписывает сообщение,
+// понимая контекст) или обычная regex-чистка. Если ИИ выключен, ключ не
+// задан или запрос упал/подвис — тихо откатываемся на regex, чтобы вебхук
+// не зависел от внешнего API.
+async function buildDescription(raw: string): Promise<string | null> {
+  // Дешёвая проверка идёт первой: очевидный мусор отсеиваем регулярками,
+  // не тратя на него запрос к ИИ.
+  if (isNoiseOnly(raw)) return null;
+
   if (await isAiCleaningEnabled()) {
     const aiResult = await rewriteTicketDescriptionWithAI(raw);
-    if (aiResult) return aiResult;
+    if (aiResult) return isAiSkip(aiResult) ? null : aiResult;
   }
   return cleanTicketDescription(raw);
 }
 
 // Заводит тикет "Отправлено" для уже известной группы, чтобы он сразу был
-// виден на доске без ручного "Создать тикет".
+// виден на доске без ручного "Создать тикет". Возвращает null, если по
+// сообщению заводить нечего (см. buildDescription).
 async function createAutoIssue(
   groupName: string,
   groupEmoji: string | null,
@@ -41,8 +51,9 @@ async function createAutoIssue(
       where: { reportDate, groupName },
       orderBy: { position: "desc" },
     }),
-    cleanDescription(description),
+    buildDescription(description),
   ]);
+  if (cleaned === null) return null;
   return prisma.issue.create({
     data: {
       reportDate,
@@ -121,10 +132,33 @@ export async function POST(request: NextRequest) {
     // подтягиваем в него дописанный текст, иначе на доске останется
     // только обрывок исходного запроса.
     if (recent.usedForIssueId) {
-      await prisma.issue.update({
-        where: { id: recent.usedForIssueId },
-        data: { description: await cleanDescription(mergedText) },
-      });
+      const merged = await buildDescription(mergedText);
+      // null тут означает "склеенный текст выглядит мусором" — описание не
+      // трогаем, тикет уже заведён и затирать его нечем.
+      if (merged !== null) {
+        await prisma.issue.update({
+          where: { id: recent.usedForIssueId },
+          data: { description: merged },
+        });
+      }
+    } else if (preset) {
+      // Тикета ещё нет: либо первое сообщение серии было голым
+      // приветствием ("Қайырлы күн" → проблема следующим сообщением) —
+      // самый частый порядок в этих чатах, — либо тогда группа была ещё
+      // неизвестна. Теперь по склеенному тексту заводить уже может быть
+      // что.
+      const issue = await createAutoIssue(
+        preset.name,
+        preset.emoji,
+        mergedText,
+        recent.messageLink
+      );
+      if (issue) {
+        await prisma.telegramMessage.update({
+          where: { id: recent.id },
+          data: { usedForIssueId: issue.id },
+        });
+      }
     }
     return NextResponse.json({ ok: true });
   }
@@ -158,10 +192,14 @@ export async function POST(request: NextRequest) {
       text,
       messageLink
     );
-    await prisma.telegramMessage.update({
-      where: { id: savedMessage.id },
-      data: { usedForIssueId: issue.id },
-    });
+    // issue === null — в сообщении не было запроса; оставляем его во
+    // "Входящих" без тикета (см. buildDescription).
+    if (issue) {
+      await prisma.telegramMessage.update({
+        where: { id: savedMessage.id },
+        data: { usedForIssueId: issue.id },
+      });
+    }
   }
 
   return NextResponse.json({ ok: true });

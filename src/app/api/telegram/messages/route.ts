@@ -14,6 +14,13 @@ export async function GET(request: NextRequest) {
     where.receivedAt = { gte: start, lt: end };
   }
 
+  // Счётчику в шапке нужно только число — тянуть ради него до 200 полных
+  // сообщений (с текстом) каждые 20 секунд смысла нет.
+  if (request.nextUrl.searchParams.get("count") === "true") {
+    const count = await prisma.telegramMessage.count({ where });
+    return NextResponse.json({ count });
+  }
+
   const messages = await prisma.telegramMessage.findMany({
     where,
     orderBy: { receivedAt: "desc" },

@@ -85,7 +85,28 @@ const CREDENTIAL_PAIR = new RegExp(
   "iu"
 );
 
-export function cleanTicketDescription(raw: string): string {
+// Сообщение целиком состоит из "спасибо/ок/жарайды", пунктуации и эмодзи —
+// это ответ-подтверждение, а не запрос. Проверяется уже после stripNoise,
+// то есть на том, что осталось от текста без приветствий/ссылок/контактов.
+const ACKNOWLEDGEMENT_WORDS =
+  "рахмет|рақмет|спасибо|спс|ок|окей|ok|okay|жарайды|жақсы|болды|" +
+  "түсіндім|түсінді|понятно|понял|поняла|хорошо|good|сау\\s+болыңыз|" +
+  "до\\s+свидания|сәтті|" +
+  // Усилители, которые сами по себе смысла не несут и встречаются только
+  // рядом с благодарностью ("спасибо большое", "көп рахмет").
+  "большое|огромное|вам|сізге|көп";
+
+const ACKNOWLEDGEMENT_ONLY = new RegExp(
+  `^(?:${ACKNOWLEDGEMENT_WORDS}|[\\p{P}\\p{S}\\s])+$`,
+  "iu"
+);
+
+// Вырезает весь известный мусор и возвращает то, что осталось — в отличие
+// от cleanTicketDescription может вернуть пустую строку. Именно на этом
+// строится isNoiseOnly: "после чистки не осталось ничего" и "чистка ничего
+// не дала, оставляем как есть" — это два разных случая, и вызывающему коду
+// нужно их различать.
+function stripNoise(raw: string): string {
   let text = raw;
   for (const pattern of GREETING_PATTERNS) {
     text = text.replace(pattern, "");
@@ -127,7 +148,7 @@ export function cleanTicketDescription(raw: string): string {
     }
   }
 
-  const cleaned = lines
+  return lines
     .filter((_, i) => keep[i])
     .map((line) =>
       line
@@ -138,6 +159,19 @@ export function cleanTicketDescription(raw: string): string {
     .filter((line) => line.length > 0 && !CONTACT_LABEL_LINE.test(line))
     .join("\n")
     .trim();
+}
 
-  return cleaned || raw.trim();
+export function cleanTicketDescription(raw: string): string {
+  // Если чистка выкосила вообще всё — лучше грязный тикет, чем пустой.
+  return stripNoise(raw) || raw.trim();
+}
+
+// В сообщении нет запроса: голое приветствие, одна ссылка, "[Фото]" без
+// подписи, "рахмет". Такие в тикеты не заводим, иначе беклог забивается
+// карточками, по которым нечего делать. Сообщение при этом всё равно
+// остаётся во "Входящих" — если агент решит, что там всё же что-то есть,
+// он заведёт тикет руками.
+export function isNoiseOnly(raw: string): boolean {
+  const stripped = stripNoise(raw);
+  return stripped.length === 0 || ACKNOWLEDGEMENT_ONLY.test(stripped);
 }

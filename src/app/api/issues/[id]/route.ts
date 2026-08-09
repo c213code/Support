@@ -55,6 +55,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
   const { id } = await params;
-  await prisma.issue.delete({ where: { id } });
+  // Связь TelegramMessage -> Issue держится только по id (без внешнего ключа),
+  // так что чистим её сами. Иначе во "Входящих" у сообщения так и остаётся
+  // кнопка "Тикет заведён автоматически — изменить", которая ведёт в
+  // никуда, и завести тикет заново уже нельзя.
+  await prisma.$transaction([
+    prisma.telegramMessage.updateMany({
+      where: { usedForIssueId: id },
+      data: { usedForIssueId: null },
+    }),
+    prisma.issue.delete({ where: { id } }),
+  ]);
   return NextResponse.json({ ok: true });
 }

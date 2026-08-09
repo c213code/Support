@@ -38,3 +38,20 @@ body {
 ::selection {
   background: color-mix(in srgb, #2898bd 28%, transparent);
 }
+
+/*
+ * Заметный фокус с клавиатуры. Много кнопок в интерфейсе сделаны через
+ * outline-none ради своего ring-стиля, из-за чего таб-навигация по доске
+ * шла вслепую; :focus-visible не трогает клики мышью.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Перетаскиваемые карточки не должны выделяться текстом во время drag */
+[draggable="true"] {
+  -webkit-user-select: none;
+  user-select: none;
+}

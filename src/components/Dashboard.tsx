@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { GroupPresetDTO, IssueDTO } from "@/lib/types";
 import { formatDateHuman, shiftDateString, todayDateString } from "@/lib/date";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
+import { ResolveDialog } from "@/components/ResolveDialog";
 import { groupIssues } from "@/lib/report";
 import { Avatar } from "@/components/Avatar";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
@@ -31,6 +32,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   const [addingToGroup, setAddingToGroup] = useState<string | null>(null);
   const [addingNew, setAddingNew] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const currentAgent = useCurrentAgent();
 
   const loadGroups = useCallback(async () => {
@@ -85,18 +87,29 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
     await loadIssues(date);
   }
 
-  // Быстрая смена статуса прямо на карточке, без открытия формы. При переводе
-  // в "Решено" с пустой заметкой подставляем "Имя шешті" (кто сейчас закрыл).
+  // Быстрая смена статуса прямо на карточке, без открытия формы. Перевод в
+  // "Решено" сначала спрашивает "как решили" — та же модалка, что на доске
+  // в /inbox: эта заметка и есть то, что попадёт в репорт.
   async function handleStatusChange(issue: IssueDTO, status: IssueStatus) {
-    const body: Record<string, unknown> = { status };
-    if (status === "RESOLVED" && !issue.note?.trim() && currentAgent) {
-      body.note = `${currentAgent} шешті`;
+    if (status === "RESOLVED") {
+      setResolvingId(issue.id);
+      return;
     }
     await fetch(`/api/issues/${issue.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ status }),
     });
+    await loadIssues(date);
+  }
+
+  async function handleConfirmResolve(issue: IssueDTO, note: string) {
+    await fetch(`/api/issues/${issue.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "RESOLVED", note }),
+    });
+    setResolvingId(null);
     await loadIssues(date);
   }
 
@@ -144,6 +157,20 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+      {resolvingId &&
+        (() => {
+          const resolvingIssue = issues.find((i) => i.id === resolvingId);
+          if (!resolvingIssue) return null;
+          return (
+            <ResolveDialog
+              issue={resolvingIssue}
+              currentAgent={currentAgent ?? ""}
+              onCancel={() => setResolvingId(null)}
+              onConfirm={(note) => handleConfirmResolve(resolvingIssue, note)}
+            />
+          );
+        })()}
+
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button

@@ -17,24 +17,36 @@ type Column = {
   title: string;
   statuses: readonly IssueStatus[];
   dropStatus: IssueStatus;
+  // Цветная точка в заголовке колонки: три серые колонки взглядом не
+  // различаются, а цвет тут совпадает с полосой на карточках того же
+  // статуса — глаз цепляется за один и тот же код.
+  dot: string;
 };
 
 // Три колонки по просьбе: "отправили в группу" (ещё не начали смотреть),
 // "в работе или пендинг" (объединены — это один рабочий процесс), "решено".
 // Внутри средней колонки статус переключается парой кнопок, не перетаскиванием.
 const COLUMNS: Column[] = [
-  { key: "sent", title: "Отправлено", statuses: ["SENT"], dropStatus: "SENT" },
+  {
+    key: "sent",
+    title: "Отправлено",
+    statuses: ["SENT"],
+    dropStatus: "SENT",
+    dot: "bg-violet-400",
+  },
   {
     key: "active",
     title: "В работе / Пендинг",
     statuses: ["IN_PROGRESS", "PENDING"],
     dropStatus: "IN_PROGRESS",
+    dot: "bg-sky-400",
   },
   {
     key: "resolved",
     title: "Решено",
     statuses: ["RESOLVED"],
     dropStatus: "RESOLVED",
+    dot: "bg-emerald-400",
   },
 ];
 
@@ -77,9 +89,15 @@ export function KanbanBoard({
               e.preventDefault();
               setOverColumn(column.key);
             }}
-            onDragLeave={() =>
-              setOverColumn((c) => (c === column.key ? null : c))
-            }
+            onDragLeave={(e) => {
+              // dragleave стреляет и когда курсор переходит на карточку
+              // внутри той же колонки — без этой проверки подсветка
+              // колонки мигает всю дорогу, пока тащишь тикет.
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                return;
+              }
+              setOverColumn((c) => (c === column.key ? null : c));
+            }}
             onDrop={(e) => {
               e.preventDefault();
               handleDrop(column);
@@ -94,8 +112,11 @@ export function KanbanBoard({
           >
             <div className="flex items-center justify-between px-1">
               <h3
-                className={`font-semibold text-slate-700 ${large ? "text-base" : "text-sm"}`}
+                className={`flex items-center gap-2 font-semibold text-slate-700 ${large ? "text-base" : "text-sm"}`}
               >
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${column.dot}`}
+                />
                 {column.title}
               </h3>
               <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-400 ring-1 ring-slate-200">

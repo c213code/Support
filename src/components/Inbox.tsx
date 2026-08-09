@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GroupPresetDTO, IssueDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import { ResolveDialog } from "@/components/ResolveDialog";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import type { IssueStatus } from "@/lib/status";
 import {
@@ -28,14 +29,19 @@ const NO_GROUP_FILTER = "__none__";
 
 const POLL_INTERVAL_MS = 15000;
 
+// Форматтер создаётся один раз: toLocaleString строит его заново на каждый
+// вызов, а вызовов тут — по одному на сообщение на каждый рендер, и лента
+// перерисовывается каждые 15 сек после опроса.
+const TIME_FORMAT = new Intl.DateTimeFormat("ru-RU", {
+  timeZone: "Asia/Almaty",
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleString("ru-RU", {
-    timeZone: "Asia/Almaty",
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return TIME_FORMAT.format(new Date(iso));
 }
 
 export function Inbox() {
@@ -48,6 +54,7 @@ export function Inbox() {
   const [groupFilter, setGroupFilter] = useState<string>("");
   const [tab, setTab] = useState<"messages" | "board">("board");
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
+  const [resolvingIssueId, setResolvingIssueId] = useState<string | null>(null);
   const [aiCleaningEnabled, setAiCleaningEnabled] = useState<boolean | null>(
     null
   );
@@ -86,11 +93,23 @@ export function Inbox() {
     setLoading(true);
     loadMessages(date);
     loadIssues(date);
-    const interval = setInterval(() => {
+
+    // В фоновой вкладке опрашивать сервер незачем — вкладку с доской
+    // держат открытой весь день, и это два лишних запроса каждые 15 сек в
+    // пустоту. Зато при возврате на вкладку обновляемся сразу, не
+    // дожидаясь следующего тика.
+    function refreshIfVisible() {
+      if (document.hidden) return;
       loadMessages(date);
       loadIssues(date);
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    }
+
+    const interval = setInterval(refreshIfVisible, POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
   }, [date, loadMessages, loadIssues]);
 
   const filteredMessages = useMemo(
@@ -116,19 +135,14 @@ export function Inbox() {
     if (unviewedIds.length === 0) return;
 
     const timeout = setTimeout(() => {
-      Promise.all(
-        unviewedIds.map((id) =>
-          fetch(`/api/telegram/messages/${id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ viewed: true }),
-          })
-        )
-      ).then(() => {
+      fetch("/api/telegram/messages/mark-viewed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: unviewedIds }),
+      }).then(() => {
+        const marked = new Set(unviewedIds);
         setMessages((prev) =>
-          prev.map((m) =>
-            unviewedIds.includes(m.id) ? { ...m, viewed: true } : m
-          )
+          prev.map((m) => (marked.has(m.id) ? { ...m, viewed: true } : m))
         );
       });
     }, 2000);
@@ -187,18 +201,30 @@ export function Inbox() {
     await Promise.all([loadMessages(date), loadIssues(date)]);
   }
 
-  // Быстрая смена статуса тикета на доске (перетаскиванием или кнопкой). При
-  // переводе в "Решено" с пустой заметкой подставляем "Имя шешті".
+  // Быстрая смена статуса тикета на доске (перетаскиванием или кнопкой).
+  // Перевод в "Решено" — единственный, который не применяется сразу:
+  // сначала спрашиваем "как решили" в модалке (см. ResolveDialog), потому
+  // что эта заметка и есть то, что попадёт в вечерний репорт.
   async function handleStatusChange(issue: IssueDTO, status: IssueStatus) {
-    const body: Record<string, unknown> = { status };
-    if (status === "RESOLVED" && !issue.note?.trim() && currentAgent) {
-      body.note = `${currentAgent} шешті`;
+    if (status === "RESOLVED") {
+      setResolvingIssueId(issue.id);
+      return;
     }
     await fetch(`/api/issues/${issue.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ status }),
     });
+    await loadIssues(date);
+  }
+
+  async function handleConfirmResolve(issue: IssueDTO, note: string) {
+    await fetch(`/api/issues/${issue.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "RESOLVED", note }),
+    });
+    setResolvingIssueId(null);
     await loadIssues(date);
   }
 
@@ -427,6 +453,20 @@ export function Inbox() {
           )}
         </div>
       )}
+
+      {resolvingIssueId &&
+        (() => {
+          const resolvingIssue = issues.find((i) => i.id === resolvingIssueId);
+          if (!resolvingIssue) return null;
+          return (
+            <ResolveDialog
+              issue={resolvingIssue}
+              currentAgent={currentAgent ?? ""}
+              onCancel={() => setResolvingIssueId(null)}
+              onConfirm={(note) => handleConfirmResolve(resolvingIssue, note)}
+            />
+          );
+        })()}
 
       {editingIssueId &&
         (() => {

@@ -28,17 +28,26 @@ export function AppHeader() {
     let cancelled = false;
 
     async function loadCount() {
-      const res = await fetch("/api/telegram/messages?archived=false");
+      const res = await fetch("/api/telegram/messages?archived=false&count=true");
       if (cancelled) return;
       const data = await res.json();
-      setInboxCount(data.messages?.length ?? 0);
+      setInboxCount(data.count ?? 0);
+    }
+
+    // Шапка висит на всех страницах, поэтому опрос тут дороже всего:
+    // в фоновой вкладке его глушим, при возврате — обновляем сразу.
+    function refreshIfVisible() {
+      if (document.hidden) return;
+      loadCount();
     }
 
     loadCount();
-    const interval = setInterval(loadCount, 20000);
+    const interval = setInterval(refreshIfVisible, 20000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, []);
 
