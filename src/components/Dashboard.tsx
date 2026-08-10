@@ -6,6 +6,7 @@ import type { GroupPresetDTO, IssueDTO } from "@/lib/types";
 import { formatDateHuman, shiftDateString, todayDateString } from "@/lib/date";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { ResolveDialog } from "@/components/ResolveDialog";
+import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
 import { groupIssues, issueLinks } from "@/lib/report";
 import { Avatar } from "@/components/Avatar";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
@@ -19,6 +20,7 @@ import {
   IconTicket,
   IconEdit,
   IconTrash,
+  IconSend,
 } from "@/components/Icons";
 
 export function Dashboard({ initialDate }: { initialDate: string }) {
@@ -33,6 +35,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   const [addingNew, setAddingNew] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [escalatingId, setEscalatingId] = useState<string | null>(null);
   const currentAgent = useCurrentAgent();
 
   const loadGroups = useCallback(async () => {
@@ -87,12 +90,17 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
     await loadIssues(date);
   }
 
-  // Быстрая смена статуса прямо на карточке, без открытия формы. Перевод в
-  // "Решено" сначала спрашивает "как решили" — та же модалка, что на доске
-  // в /inbox: эта заметка и есть то, что попадёт в репорт.
+  // Быстрая смена статуса прямо на карточке, без открытия формы. "Решено"
+  // и "Передано" сначала спрашивают детали в модалке (кто решил / кому
+  // передали) — то, что попадёт в заметку и текст репорта, а не просто
+  // молча меняют статус.
   async function handleStatusChange(issue: IssueDTO, status: IssueStatus) {
     if (status === "RESOLVED") {
       setResolvingId(issue.id);
+      return;
+    }
+    if (status === "ESCALATED") {
+      setEscalatingId(issue.id);
       return;
     }
     await fetch(`/api/issues/${issue.id}`, {
@@ -110,6 +118,19 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
       body: JSON.stringify({ status: "RESOLVED", note }),
     });
     setResolvingId(null);
+    await loadIssues(date);
+  }
+
+  async function handleConfirmEscalate(
+    issue: IssueDTO,
+    values: EscalateValues
+  ) {
+    await fetch(`/api/issues/${issue.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "ESCALATED", ...values }),
+    });
+    setEscalatingId(null);
     await loadIssues(date);
   }
 
@@ -177,6 +198,21 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
               currentAgent={currentAgent ?? ""}
               onCancel={() => setResolvingId(null)}
               onConfirm={(note) => handleConfirmResolve(resolvingIssue, note)}
+            />
+          );
+        })()}
+
+      {escalatingId &&
+        (() => {
+          const escalatingIssue = issues.find((i) => i.id === escalatingId);
+          if (!escalatingIssue) return null;
+          return (
+            <EscalateDialog
+              issue={escalatingIssue}
+              onCancel={() => setEscalatingId(null)}
+              onConfirm={(values) =>
+                handleConfirmEscalate(escalatingIssue, values)
+              }
             />
           );
         })()}
@@ -304,6 +340,15 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                                   )}
                                 </span>
                               ))}
+                              {issue.escalatedTeam && (
+                                <p className="mt-1 flex items-center gap-1 text-xs text-orange-600">
+                                  <IconSend className="h-3.5 w-3.5 shrink-0" />
+                                  Передано: {issue.escalatedTeam}
+                                  {issue.escalatedAssignee
+                                    ? ` (${issue.escalatedAssignee})`
+                                    : ""}
+                                </p>
+                              )}
                               <p className="mt-1 text-sm text-slate-500">
                                 {issue.note || (
                                   <span className="italic text-slate-300">

@@ -19,11 +19,19 @@ export function ResolveDialog({
   onCancel: () => void;
   onConfirm: (note: string) => Promise<void>;
 }) {
-  const defaultNote = issue.note?.trim()
-    ? issue.note
-    : currentAgent
-      ? `${currentAgent} шешті`
-      : "";
+  // Если тикет сейчас в статусе "Передано" (см. EscalateDialog) — решала не
+  // саппорт-агент, а та команда. Проверяем это раньше существующей
+  // заметки: там уже лежит "Передано: Backend (Аян)" от самой передачи, и
+  // без этого приоритета до дефолта "<команда> шешті" очередь никогда бы
+  // не доходила.
+  const defaultNote =
+    issue.status === "ESCALATED" && issue.escalatedTeam
+      ? `${issue.escalatedTeam} шешті`
+      : issue.note?.trim()
+        ? issue.note
+        : currentAgent
+          ? `${currentAgent} шешті`
+          : "";
   const [note, setNote] = useState(defaultNote);
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

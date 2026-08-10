@@ -1,6 +1,7 @@
 export const ISSUE_STATUSES = [
   "PENDING",
   "IN_PROGRESS",
+  "ESCALATED",
   "SENT",
   "RESOLVED",
 ] as const;
@@ -49,6 +50,20 @@ export const STATUS_META: Record<IssueStatus, StatusMeta> = {
     active: "border-sky-500 bg-sky-50 text-sky-700 ring-1 ring-sky-200",
     idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
     bar: "border-l-sky-400",
+  },
+  ESCALATED: {
+    label: "Передано",
+    emoji: "📤",
+    reportEmoji: "⚠️",
+    // Статичный запасной вариант — реальный текст с командой/исполнителем
+    // подставляется при передаче (см. EscalateDialog), это только на
+    // случай, если заметку зачем-то стёрли руками.
+    defaultNote: "Передано другой команде",
+    badge: "bg-orange-50 text-orange-700",
+    active:
+      "border-orange-500 bg-orange-50 text-orange-700 ring-1 ring-orange-200",
+    idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
+    bar: "border-l-orange-400",
   },
   SENT: {
     label: "Отправлено",

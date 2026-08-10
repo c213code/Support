@@ -5,6 +5,7 @@ import type { GroupPresetDTO, IssueDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { ResolveDialog } from "@/components/ResolveDialog";
+import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
 import { AttachToIssuePicker } from "@/components/AttachToIssuePicker";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import type { IssueStatus } from "@/lib/status";
@@ -58,6 +59,9 @@ export function Inbox() {
   const [tab, setTab] = useState<"messages" | "board">("board");
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [resolvingIssueId, setResolvingIssueId] = useState<string | null>(null);
+  const [escalatingIssueId, setEscalatingIssueId] = useState<string | null>(
+    null
+  );
   const [mergingIssueId, setMergingIssueId] = useState<string | null>(null);
   const [aiCleaningEnabled, setAiCleaningEnabled] = useState<boolean | null>(
     null
@@ -256,6 +260,19 @@ export function Inbox() {
       body: JSON.stringify({ status: "RESOLVED", note }),
     });
     setResolvingIssueId(null);
+    await loadIssues(date);
+  }
+
+  async function handleConfirmEscalate(
+    issue: IssueDTO,
+    values: EscalateValues
+  ) {
+    await fetch(`/api/issues/${issue.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "ESCALATED", ...values }),
+    });
+    setEscalatingIssueId(null);
     await loadIssues(date);
   }
 
@@ -480,6 +497,7 @@ export function Inbox() {
               onEdit={(issue) => setEditingIssueId(issue.id)}
               onDelete={handleDeleteIssue}
               onMerge={(issue) => setMergingIssueId(issue.id)}
+              onEscalate={(issue) => setEscalatingIssueId(issue.id)}
               size="large"
             />
           )}
@@ -531,6 +549,23 @@ export function Inbox() {
               currentAgent={currentAgent ?? ""}
               onCancel={() => setResolvingIssueId(null)}
               onConfirm={(note) => handleConfirmResolve(resolvingIssue, note)}
+            />
+          );
+        })()}
+
+      {escalatingIssueId &&
+        (() => {
+          const escalatingIssue = issues.find(
+            (i) => i.id === escalatingIssueId
+          );
+          if (!escalatingIssue) return null;
+          return (
+            <EscalateDialog
+              issue={escalatingIssue}
+              onCancel={() => setEscalatingIssueId(null)}
+              onConfirm={(values) =>
+                handleConfirmEscalate(escalatingIssue, values)
+              }
             />
           );
         })()}

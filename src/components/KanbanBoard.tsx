@@ -12,6 +12,7 @@ import {
   IconTrash,
   IconExternalLink,
   IconLink,
+  IconSend,
 } from "@/components/Icons";
 
 type Column = {
@@ -39,7 +40,7 @@ const COLUMNS: Column[] = [
   {
     key: "active",
     title: "В работе / Пендинг",
-    statuses: ["IN_PROGRESS", "PENDING"],
+    statuses: ["IN_PROGRESS", "PENDING", "ESCALATED"],
     dropStatus: "IN_PROGRESS",
     dot: "bg-sky-400",
   },
@@ -58,6 +59,7 @@ export function KanbanBoard({
   onEdit,
   onDelete,
   onMerge,
+  onEscalate,
   size = "compact",
 }: {
   issues: IssueDTO[];
@@ -65,6 +67,10 @@ export function KanbanBoard({
   onEdit?: (issue: IssueDTO) => void;
   onDelete?: (issue: IssueDTO) => void;
   onMerge?: (issue: IssueDTO) => void;
+  // ESCALATED — единственный статус, для которого мало сменить значение:
+  // нужно ещё выбрать команду. Поэтому вместо прямого onStatusChange у него
+  // отдельный колбэк, открывающий диалог (см. EscalateDialog).
+  onEscalate?: (issue: IssueDTO) => void;
   size?: "compact" | "large";
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -201,6 +207,15 @@ export function KanbanBoard({
                           : `Ещё обращение №${i + 1}`}
                       </a>
                     ))}
+                    {issue.escalatedTeam && (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-orange-600">
+                        <IconSend className="h-3 w-3 shrink-0" />
+                        Передано: {issue.escalatedTeam}
+                        {issue.escalatedAssignee
+                          ? ` (${issue.escalatedAssignee})`
+                          : ""}
+                      </p>
+                    )}
                     {issue.ticketLink && (
                       <a
                         href={issue.ticketLink}
@@ -214,7 +229,7 @@ export function KanbanBoard({
                     )}
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                       {column.key === "active" ? (
-                        <div className="flex gap-1">
+                        <div className="flex flex-wrap gap-1">
                           {(["IN_PROGRESS", "PENDING"] as const).map((s) => (
                             <button
                               key={s}
@@ -228,6 +243,20 @@ export function KanbanBoard({
                               {STATUS_META[s].emoji} {STATUS_META[s].label}
                             </button>
                           ))}
+                          {onEscalate && (
+                            <button
+                              onClick={() => onEscalate(issue)}
+                              title="Передать другой команде"
+                              className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition ${
+                                issue.status === "ESCALATED"
+                                  ? STATUS_META.ESCALATED.badge
+                                  : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                              }`}
+                            >
+                              {STATUS_META.ESCALATED.emoji}{" "}
+                              {STATUS_META.ESCALATED.label}
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <span

@@ -13,6 +13,8 @@ export type IssueDTO = {
   status: IssueStatus;
   note: string | null;
   ticketLink: string | null;
+  escalatedTeam: string | null;
+  escalatedAssignee: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

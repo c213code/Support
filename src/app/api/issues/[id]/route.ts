@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
 import { isIssueStatus } from "@/lib/status";
+import { isEscalationTeam } from "@/lib/escalation";
 import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
 import { cleanTicketDescription } from "@/lib/textClean";
 
@@ -34,6 +35,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (typeof body.groupName === "string") data.groupName = body.groupName;
   if (typeof body.groupEmoji === "string" || body.groupEmoji === null)
     data.groupEmoji = body.groupEmoji || null;
+  if (isEscalationTeam(body.escalatedTeam) || body.escalatedTeam === null)
+    data.escalatedTeam = body.escalatedTeam || null;
+  if (
+    typeof body.escalatedAssignee === "string" ||
+    body.escalatedAssignee === null
+  )
+    data.escalatedAssignee = body.escalatedAssignee || null;
 
   // Тикет завёл бот сам (по входящему сообщению) — как только с ним
   // впервые что-то делает живой агент (меняет статус, правит текст и т.д.),

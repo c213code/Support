@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { GroupPresetDTO } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
 import { ISSUE_STATUSES, STATUS_META, type IssueStatus } from "@/lib/status";
+import { ESCALATION_TEAMS, type EscalationTeam } from "@/lib/escalation";
 import { useAiCleaningEnabled } from "@/lib/useAiCleaningEnabled";
 import { IconRefresh } from "@/components/Icons";
 
@@ -15,6 +16,8 @@ export type IssueFormValues = {
   status: IssueStatus;
   note: string;
   ticketLink: string;
+  escalatedTeam: string;
+  escalatedAssignee: string;
 };
 
 export type IssueFormInitial = Partial<{
@@ -25,6 +28,8 @@ export type IssueFormInitial = Partial<{
   status: IssueStatus;
   note: string | null;
   ticketLink: string | null;
+  escalatedTeam: string | null;
+  escalatedAssignee: string | null;
   createdBy: string;
 }>;
 
@@ -70,6 +75,12 @@ export function IssueForm({
   );
   const [note, setNote] = useState(initial?.note ?? "");
   const [ticketLink, setTicketLink] = useState(initial?.ticketLink ?? "");
+  const [escalatedTeam, setEscalatedTeam] = useState<EscalationTeam | "">(
+    (initial?.escalatedTeam as EscalationTeam | null) ?? ""
+  );
+  const [escalatedAssignee, setEscalatedAssignee] = useState(
+    initial?.escalatedAssignee ?? ""
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -129,10 +140,17 @@ export function IssueForm({
 
   function pickStatus(next: IssueStatus) {
     setStatus(next);
-    // При переводе в "Решено" сразу подставляем "Имя шешті", если заметка
-    // ещё пустая — чтобы в репорте было видно, кто закрыл.
-    if (next === "RESOLVED" && !note.trim() && author) {
-      setNote(`${author} шешті`);
+    if (next === "ESCALATED" && !escalatedTeam) {
+      setEscalatedTeam(ESCALATION_TEAMS[0]);
+    }
+    if (next === "RESOLVED" && !note.trim()) {
+      // Если тикет передавали команде — решала она, не агент, который
+      // просто закрыл карточку; иначе — обычный дефолт "Имя шешті".
+      if (escalatedTeam) {
+        setNote(`${escalatedTeam} шешті`);
+      } else if (author) {
+        setNote(`${author} шешті`);
+      }
     }
   }
 
@@ -150,6 +168,10 @@ export function IssueForm({
       setError("Опишите проблему");
       return;
     }
+    if (status === "ESCALATED" && !escalatedTeam) {
+      setError("Выберите команду, которой передали тикет");
+      return;
+    }
 
     setSubmitting(true);
     setError(null);
@@ -163,6 +185,8 @@ export function IssueForm({
         status,
         note: note.trim(),
         ticketLink: ticketLink.trim(),
+        escalatedTeam,
+        escalatedAssignee: escalatedAssignee.trim(),
       });
     } catch {
       setError("Не удалось сохранить, попробуйте ещё раз");
@@ -290,7 +314,7 @@ export function IssueForm({
 
       <div className="space-y-1">
         <label className="text-xs font-medium text-slate-500">Статус</label>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           {ISSUE_STATUSES.map((s) => {
             const meta = STATUS_META[s];
             const selected = status === s;
@@ -309,6 +333,44 @@ export function IssueForm({
           })}
         </div>
       </div>
+
+      {status === "ESCALATED" && (
+        <div className="grid grid-cols-1 gap-3 rounded-lg border border-orange-200 bg-orange-50/50 p-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-slate-500">
+              Кому передали
+            </label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {ESCALATION_TEAMS.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setEscalatedTeam(t)}
+                  className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition ${
+                    escalatedTeam === t
+                      ? "border-orange-500 bg-orange-100 text-orange-700 ring-1 ring-orange-200"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-slate-500">
+              Кто занимается (необязательно)
+            </label>
+            <input
+              type="text"
+              value={escalatedAssignee}
+              onChange={(e) => setEscalatedAssignee(e.target.value)}
+              placeholder="Например: Аян"
+              className={inputClass}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="space-y-1">
         <label className="text-xs font-medium text-slate-500">

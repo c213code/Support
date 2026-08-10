@@ -17,6 +17,10 @@ enum IssueStatus {
   PENDING
   IN_PROGRESS
   SENT
+  // Тикет передан другой команде (Backend/Frontend/Product, см.
+  // src/lib/escalation.ts) — тот же "в работе", но работа не на стороне
+  // саппорта. Третья кнопка внутри колонки "В работе / Пендинг" на доске.
+  ESCALATED
 }
 
 model GroupPreset {
@@ -84,6 +88,11 @@ model Issue {
   status       IssueStatus @default(PENDING)
   note         String?
   ticketLink   String?
+  // Заполняются только при status = ESCALATED: какой команде передали и
+  // кто там занимается. Не выносил в отдельную модель — это просто два
+  // поля на тикете, а не связь с чем-то, что живёт своей жизнью.
+  escalatedTeam     String?
+  escalatedAssignee String?
   createdBy    String
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt

@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
 import { isIssueStatus } from "@/lib/status";
+import { isEscalationTeam } from "@/lib/escalation";
 import { cleanTicketDescription } from "@/lib/textClean";
 
 export async function GET(request: NextRequest) {
@@ -50,6 +51,10 @@ export async function POST(request: NextRequest) {
       status: isIssueStatus(body.status) ? body.status : "SENT",
       note: body.note || null,
       ticketLink: body.ticketLink || null,
+      escalatedTeam: isEscalationTeam(body.escalatedTeam)
+        ? body.escalatedTeam
+        : null,
+      escalatedAssignee: body.escalatedAssignee || null,
       createdBy: identity.name,
     },
   });
