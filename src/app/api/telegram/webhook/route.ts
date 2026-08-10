@@ -183,10 +183,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  if (isOwnAgentMessage(message.from?.id)) {
-    return NextResponse.json({ ok: true });
-  }
-
   // Если это ответ на чужое сообщение — приклеиваем цитату сверху. Хранится
   // уже вместе с цитатой (в TelegramMessage.text), чтобы её было видно и в
   // ленте "Входящих", и в исходнике для кнопки "ИИ написал не то?" — не
@@ -199,6 +195,36 @@ export async function POST(request: NextRequest) {
 
   const chatId = String(message.chat.id);
   const preset = await prisma.groupPreset.findUnique({ where: { chatId } });
+
+  if (isOwnAgentMessage(message.from?.id)) {
+    // Само сообщение агента тикетом не станет (см. комментарий у
+    // isOwnAgentMessage), но сохранить его всё равно нужно: иначе, если
+    // кто-то позже ответит на него реплаем с просьбой дать фидбэк,
+    // attachFollowUpToTicket ищет исходное сообщение по chatId+messageId
+    // и не находит ничего — реплай проваливается в никуда вместо того,
+    // чтобы завестись как обычный тикет с контекстом-цитатой (см. ниже).
+    // archived/viewed сразу true — это не запрос, показывать во
+    // "Входящих" нечего.
+    const messageLink = buildMessageLink(message.chat.id, message.message_id);
+    await prisma.telegramMessage.upsert({
+      where: { chatId_messageId: { chatId, messageId: message.message_id } },
+      update: {},
+      create: {
+        chatId,
+        messageId: message.message_id,
+        chatTitle: message.chat.title ?? null,
+        groupName: preset?.name ?? null,
+        groupEmoji: preset?.emoji ?? null,
+        fromId,
+        authorName,
+        text: contextualText,
+        messageLink,
+        archived: true,
+        viewed: true,
+      },
+    });
+    return NextResponse.json({ ok: true });
+  }
 
   // Точное совпадение "ответили на сообщение, у которого уже есть тикет" —
   // приоритетнее склейки по времени ниже: если оно сработало, дальше по

@@ -168,15 +168,23 @@ export function Inbox() {
     await loadMessages(date);
   }
 
-  async function handleResetGroups() {
+  // Снимает привязку чата только у ОДНОЙ группы (см. комментарий в
+  // api/telegram/reset-groups) — раньше кнопка сбрасывала все 4 группы
+  // разом, и почин "поправить одну неверную привязку" сносил рабочие
+  // привязки остальных.
+  async function handleResetGroup(groupName: string) {
     if (
       !window.confirm(
-        "Сбросить привязку групп у всех чатов? Все ещё не разобранные сообщения снова станут «без группы», и группу нужно будет выбрать заново для каждого чата."
+        `Снять привязку чата у группы «${groupName}»? Ещё не разобранные сообщения из этого чата снова станут «без группы», остальные группы не тронутся.`
       )
     )
       return;
-    await fetch("/api/telegram/reset-groups", { method: "POST" });
-    await loadMessages(date);
+    await fetch("/api/telegram/reset-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupName }),
+    });
+    await Promise.all([loadGroups(), loadMessages(date)]);
   }
 
   async function handleDismiss(id: string) {
@@ -373,19 +381,9 @@ export function Inbox() {
             ✨ ИИ-описания
           </button>
           {tab === "messages" && (
-            <>
-              <span className="text-xs text-slate-400">
-                Обновляется каждые {POLL_INTERVAL_MS / 1000} сек.
-              </span>
-              <button
-                onClick={handleResetGroups}
-                title="Снять привязку групп у всех чатов и начать распределение заново"
-                className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-600"
-              >
-                <IconRefresh className="h-3.5 w-3.5" />
-                Сбросить группы
-              </button>
-            </>
+            <span className="text-xs text-slate-400">
+              Обновляется каждые {POLL_INTERVAL_MS / 1000} сек.
+            </span>
           )}
           <div className="flex items-center rounded-lg border border-slate-300 p-0.5">
             <button
@@ -614,17 +612,30 @@ export function Inbox() {
         {groups
           .filter((g) => isOfficialGroupName(g.name))
           .map((g) => (
-            <button
+            <span
               key={g.id}
-              onClick={() => setGroupFilter(g.name)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              className={`flex items-center rounded-full transition ${
                 groupFilter === g.name
                   ? `${groupColor(g.name).bg} ${groupColor(g.name).text} ring-1 ring-inset ${groupColor(g.name).border}`
                   : "bg-slate-100 text-slate-500 hover:bg-slate-200"
               }`}
             >
-              {g.name} {g.emoji ?? ""}
-            </button>
+              <button
+                onClick={() => setGroupFilter(g.name)}
+                className="rounded-full py-1 pl-3 pr-1 text-xs font-medium"
+              >
+                {g.name} {g.emoji ?? ""}
+              </button>
+              {g.chatId && (
+                <button
+                  onClick={() => handleResetGroup(g.name)}
+                  title={`Снять привязку чата у «${g.name}» и начать распределение заново`}
+                  className="rounded-full p-1 pr-2 opacity-60 hover:text-red-600 hover:opacity-100"
+                >
+                  <IconRefresh className="h-3 w-3" />
+                </button>
+              )}
+            </span>
           ))}
         <button
           onClick={() => setGroupFilter(NO_GROUP_FILTER)}
