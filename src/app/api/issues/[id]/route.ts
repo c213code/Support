@@ -58,7 +58,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   const issue = await prisma.issue.update({ where: { id }, data });
 
-  // Смена статуса — реакцией на исходное сообщение в Telegram (🔥 взяли в
+  // Смена статуса — реакцией на исходное сообщение в Telegram (👀 взяли в
   // работу/пендинг/передали, 👍 решили), чтобы было видно прямо в чате.
   // "Отправлено" реакции не ставит (см. STATUS_META.SENT.reactionEmoji).
   if (
