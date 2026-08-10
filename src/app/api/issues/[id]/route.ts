@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
-import { isIssueStatus } from "@/lib/status";
+import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
 import { isEscalationTeam } from "@/lib/escalation";
-import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
+import { AUTO_ISSUE_CREATOR, setMessageReaction } from "@/lib/telegram";
 import { cleanTicketDescription } from "@/lib/textClean";
 
 type Params = { params: Promise<{ id: string }> };
@@ -43,21 +43,40 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   )
     data.escalatedAssignee = body.escalatedAssignee || null;
 
+  const existing = await prisma.issue.findUnique({
+    where: { id },
+    select: { createdBy: true, status: true, telegramLink: true },
+  });
+
   // Тикет завёл бот сам (по входящему сообщению) — как только с ним
   // впервые что-то делает живой агент (меняет статус, правит текст и т.д.),
   // забираем авторство на него, чтобы "Бот" не висел вечно.
   const identity = await getCurrentIdentity();
-  if (identity) {
-    const existing = await prisma.issue.findUnique({
-      where: { id },
-      select: { createdBy: true },
-    });
-    if (existing?.createdBy === AUTO_ISSUE_CREATOR) {
-      data.createdBy = identity.name;
-    }
+  if (identity && existing?.createdBy === AUTO_ISSUE_CREATOR) {
+    data.createdBy = identity.name;
   }
 
   const issue = await prisma.issue.update({ where: { id }, data });
+
+  // Смена статуса — реакцией на исходное сообщение в Telegram (🔥 взяли в
+  // работу/пендинг/передали, 👍 решили), чтобы было видно прямо в чате.
+  // "Отправлено" реакции не ставит (см. STATUS_META.SENT.reactionEmoji).
+  if (
+    typeof data.status === "string" &&
+    existing &&
+    data.status !== existing.status &&
+    existing.telegramLink
+  ) {
+    const emoji = STATUS_META[data.status as IssueStatus].reactionEmoji;
+    const message = await prisma.telegramMessage.findFirst({
+      where: { messageLink: existing.telegramLink },
+      select: { chatId: true, messageId: true },
+    });
+    if (message) {
+      await setMessageReaction(message.chatId, message.messageId, emoji);
+    }
+  }
+
   return NextResponse.json({ issue });
 }
 

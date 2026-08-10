@@ -3,7 +3,7 @@
 // свободный текст — те же 3-4 команды и так постоянно повторялись бы, а
 // фиксированный список ещё и не даёт разъехаться написанию ("Бэкенд" /
 // "backend" / "Backend team").
-export const ESCALATION_TEAMS = ["Backend", "Frontend", "Product"] as const;
+export const ESCALATION_TEAMS = ["Backend", "Frontend", "Product", "Мобайл"] as const;
 
 export type EscalationTeam = (typeof ESCALATION_TEAMS)[number];
 

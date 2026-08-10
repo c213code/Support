@@ -108,7 +108,7 @@ export function EscalateDialog({
 
         <div className="space-y-1">
           <label className="text-xs font-medium text-slate-500">Команда</label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {ESCALATION_TEAMS.map((t) => (
               <button
                 key={t}

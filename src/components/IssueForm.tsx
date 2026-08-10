@@ -340,7 +340,7 @@ export function IssueForm({
             <label className="text-xs font-medium text-slate-500">
               Кому передали
             </label>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5">
               {ESCALATION_TEAMS.map((t) => (
                 <button
                   key={t}

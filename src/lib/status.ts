@@ -28,6 +28,11 @@ type StatusMeta = {
   active: string; // выбранная кнопка в переключателе
   idle: string; // невыбранная кнопка в переключателе
   bar: string; // цветная полоса слева на карточке тикета
+  // Реакция, которую бот ставит на исходное сообщение в Telegram при
+  // переходе в этот статус (см. setMessageReaction в lib/telegram.ts).
+  // null — реакцию снимаем/не ставим. У Telegram нет ✅ среди разрешённых
+  // emoji-реакций (ReactionTypeEmoji), поэтому для "Решено" используем 👍.
+  reactionEmoji: string | null;
 };
 
 export const STATUS_META: Record<IssueStatus, StatusMeta> = {
@@ -40,6 +45,7 @@ export const STATUS_META: Record<IssueStatus, StatusMeta> = {
     active: "border-amber-500 bg-amber-50 text-amber-700 ring-1 ring-amber-200",
     idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
     bar: "border-l-amber-400",
+    reactionEmoji: "🔥",
   },
   IN_PROGRESS: {
     label: "В работе",
@@ -50,6 +56,7 @@ export const STATUS_META: Record<IssueStatus, StatusMeta> = {
     active: "border-sky-500 bg-sky-50 text-sky-700 ring-1 ring-sky-200",
     idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
     bar: "border-l-sky-400",
+    reactionEmoji: "🔥",
   },
   ESCALATED: {
     label: "Передано",
@@ -64,6 +71,7 @@ export const STATUS_META: Record<IssueStatus, StatusMeta> = {
       "border-orange-500 bg-orange-50 text-orange-700 ring-1 ring-orange-200",
     idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
     bar: "border-l-orange-400",
+    reactionEmoji: "🔥",
   },
   SENT: {
     label: "Отправлено",
@@ -75,6 +83,10 @@ export const STATUS_META: Record<IssueStatus, StatusMeta> = {
       "border-violet-500 bg-violet-50 text-violet-700 ring-1 ring-violet-200",
     idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
     bar: "border-l-violet-400",
+    // Начальное состояние — реагировать не на что, а если тикет вернули
+    // сюда (например, автопереоткрытие по follow-up), старую реакцию
+    // (🔥/👍) снимаем, а не оставляем висеть.
+    reactionEmoji: null,
   },
   RESOLVED: {
     label: "Решено",
@@ -86,5 +98,6 @@ export const STATUS_META: Record<IssueStatus, StatusMeta> = {
       "border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
     idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
     bar: "border-l-emerald-400",
+    reactionEmoji: "👍",
   },
 };

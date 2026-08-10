@@ -118,3 +118,40 @@ export function extractReplyContextLine(
 
   return `↩️ ${author ?? "Жауап"}: ${truncated}`;
 }
+
+const REACTION_TIMEOUT_MS = 5000;
+
+// Отражает смену статуса тикета прямо в чате — реакцией на исходное
+// сообщение, без лишнего сообщения-уведомления в чат. emoji: null снимает
+// реакцию (пустой список reaction). Telegram разрешает для ботов только
+// фиксированный набор emoji (ReactionTypeEmoji) — не любой символ.
+// Намеренно не бросает исключение: реакция — бонус к статусу тикета, а не
+// его часть, и не должна ронять сохранение статуса, если у бота нет прав
+// на реакции в чате, сообщение удалено или Telegram недоступен.
+export async function setMessageReaction(
+  chatId: string,
+  messageId: number,
+  emoji: string | null
+): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REACTION_TIMEOUT_MS);
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/setMessageReaction`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        reaction: emoji ? [{ type: "emoji", emoji }] : [],
+      }),
+      signal: controller.signal,
+    });
+  } catch {
+    // см. комментарий выше — намеренно проглатываем
+  } finally {
+    clearTimeout(timeout);
+  }
+}
