@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { GroupPresetDTO } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
 import { ISSUE_STATUSES, STATUS_META, type IssueStatus } from "@/lib/status";
+import { useAiCleaningEnabled } from "@/lib/useAiCleaningEnabled";
+import { IconRefresh } from "@/components/Icons";
 
 export type IssueFormValues = {
   groupName: string;
@@ -16,6 +18,7 @@ export type IssueFormValues = {
 };
 
 export type IssueFormInitial = Partial<{
+  id: string;
   groupName: string;
   description: string;
   telegramLink: string | null;
@@ -70,7 +73,59 @@ export function IssueForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // "Вернуть без ИИ" — путь назад для тикета, чей описание переписал ИИ:
+  // подтягиваем исходное Telegram-сообщение и то, что дала бы обычная
+  // regex-чистка (см. GET /api/issues/[id]/raw-source), чтобы не вычищать
+  // чужой ИИ-текст руками, а начать с предсказуемого варианта. Показываем
+  // только когда тогл ИИ включён и у тикета вообще есть источник — иначе
+  // кнопка либо бессмысленна (regex и так всё, что было), либо
+  // возвращать неоткуда (тикет заведён вручную, без сообщения).
+  const aiCleaningEnabled = useAiCleaningEnabled();
+  const canRevertToRegex = Boolean(
+    initial?.id && initial?.telegramLink && aiCleaningEnabled
+  );
+  const [showSource, setShowSource] = useState(false);
+  const [source, setSource] = useState<{
+    raw: string;
+    regexCleaned: string;
+  } | null>(null);
+  const [sourceState, setSourceState] = useState<
+    "idle" | "loading" | "empty"
+  >("idle");
+
   const author = initial?.createdBy ?? currentAgent;
+
+  async function handleToggleSource() {
+    if (showSource) {
+      setShowSource(false);
+      return;
+    }
+    setShowSource(true);
+    if (source || sourceState === "loading") return;
+    setSourceState("loading");
+    const res = await fetch(`/api/issues/${initial!.id}/raw-source`);
+    const data = await res.json();
+    if (data.regexCleaned) {
+      setSource(data);
+      setSourceState("idle");
+    } else {
+      setSourceState("empty");
+    }
+  }
+
+  function handleUseRegexVersion() {
+    if (!source) return;
+    if (
+      description.trim() &&
+      description.trim() !== source.regexCleaned.trim() &&
+      !window.confirm(
+        "Заменить текущее описание вариантом без ИИ? Несохранённые правки будут потеряны."
+      )
+    ) {
+      return;
+    }
+    setDescription(source.regexCleaned);
+  }
 
   function pickStatus(next: IssueStatus) {
     setStatus(next);
@@ -167,9 +222,21 @@ export function IssueForm({
       </div>
 
       <div className="space-y-1">
-        <label className="text-xs font-medium text-slate-500">
-          Описание проблемы
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-slate-500">
+            Описание проблемы
+          </label>
+          {canRevertToRegex && (
+            <button
+              type="button"
+              onClick={handleToggleSource}
+              className="flex items-center gap-1 text-xs font-medium text-accent-600 hover:underline"
+            >
+              <IconRefresh className="h-3 w-3" />
+              {showSource ? "Скрыть" : "ИИ написал не то?"}
+            </button>
+          )}
+        </div>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -177,6 +244,35 @@ export function IssueForm({
           className={`${inputClass} resize-y`}
           placeholder="Оқушы аккаунтына кіре алмай жатыр..."
         />
+        {showSource && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs">
+            {sourceState === "loading" ? (
+              <p className="text-slate-400">Загружаем исходное сообщение…</p>
+            ) : sourceState === "empty" ? (
+              <p className="text-slate-400">
+                Исходное сообщение не нашлось — похоже, тикет создан вручную.
+              </p>
+            ) : (
+              source && (
+                <>
+                  <p className="mb-1 font-medium text-slate-500">
+                    Исходное сообщение из Telegram:
+                  </p>
+                  <p className="mb-2 whitespace-pre-wrap text-slate-600">
+                    {source.raw}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleUseRegexVersion}
+                    className="rounded-md bg-white px-2.5 py-1.5 text-xs font-medium text-brand-600 shadow-sm ring-1 ring-slate-300 hover:bg-brand-50"
+                  >
+                    ↺ Вставить вариант без ИИ, напишу сам
+                  </button>
+                </>
+              )
+            )}
+          </div>
+        )}
       </div>
 
       <div className="space-y-1">
