@@ -31,6 +31,14 @@ export type TelegramMessagePayload = {
   document?: { file_name?: string };
   voice?: unknown;
   video?: unknown;
+  // Сообщение, на которое ответили ("Reply"). Telegram не разворачивает
+  // цепочку глубже одного уровня — этого достаточно, обычно отвечают на
+  // прямого собеседника, а не пересылают цитату из цитаты.
+  reply_to_message?: {
+    from?: TelegramMessagePayload["from"];
+    text?: string;
+    caption?: string;
+  };
 };
 
 export function buildMessageLink(chatId: number, messageId: number): string {
@@ -78,4 +86,30 @@ export function extractText(message: TelegramMessagePayload): string | null {
   if (message.voice) return "[Голосовое сообщение]";
   if (message.video) return "[Видео]";
   return null;
+}
+
+const QUOTE_MAX_LENGTH = 200;
+
+// Ответ ("Reply") на чужое сообщение сам по себе часто нечитаем без
+// контекста — "Әдістеме бөлінді нұсқа салынып тұр дейді" ("дейді" —
+// "говорят/сказал") ничего не значит, если не видно, на какой вопрос
+// отвечают. Telegram присылает reply_to_message только при первом
+// событии; отдельно его перезапрашивать не нужно — либо контекст пришёл
+// вместе с сообщением, либо его нет.
+export function extractReplyContextLine(
+  message: TelegramMessagePayload
+): string | null {
+  const quoted = message.reply_to_message;
+  if (!quoted) return null;
+
+  const quotedText = quoted.text ?? quoted.caption;
+  if (!quotedText) return null;
+
+  const truncated =
+    quotedText.length > QUOTE_MAX_LENGTH
+      ? `${quotedText.slice(0, QUOTE_MAX_LENGTH)}…`
+      : quotedText;
+  const author = extractAuthorName(quoted.from);
+
+  return `↩️ ${author ?? "Жауап"}: ${truncated}`;
 }

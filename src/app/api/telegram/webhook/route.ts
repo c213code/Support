@@ -9,6 +9,7 @@ import {
   AUTO_ISSUE_CREATOR,
   buildMessageLink,
   extractAuthorName,
+  extractReplyContextLine,
   extractText,
   isOwnAgentMessage,
   type TelegramUpdate,
@@ -19,21 +20,31 @@ import {
 // такие карточки только забивают беклог, а само сообщение всё равно
 // остаётся видно во "Входящих" и его можно завести руками.
 //
+// Два текста намеренно разные: `own` — то, что человек буквально напечатал
+// (без цитаты), решает, мусор это или нет ("ок" в ответ на чей-то вопрос —
+// всё ещё не тикет, независимо от вопроса). `contextual` — то же самое, но
+// с приклеенной цитатой (см. extractReplyContextLine) — идёт в regex/ИИ,
+// когда мусором не оказалось: реплика вроде "Әдістеме бөлінді... дейді"
+// без вопроса, на который отвечали, превращается в нечитаемый обрывок.
+//
 // Тогл "aiCleaningEnabled" (см. lib/settings.ts, включается кнопкой в
 // /inbox) решает, кто пишет описание: ИИ (Groq, переписывает сообщение,
 // понимая контекст) или обычная regex-чистка. Если ИИ выключен, ключ не
 // задан или запрос упал/подвис — тихо откатываемся на regex, чтобы вебхук
 // не зависел от внешнего API.
-async function buildDescription(raw: string): Promise<string | null> {
+async function buildDescription(
+  own: string,
+  contextual: string
+): Promise<string | null> {
   // Дешёвая проверка идёт первой: очевидный мусор отсеиваем регулярками,
   // не тратя на него запрос к ИИ.
-  if (isNoiseOnly(raw)) return null;
+  if (isNoiseOnly(own)) return null;
 
   if (await isAiCleaningEnabled()) {
-    const aiResult = await rewriteTicketDescriptionWithAI(raw);
+    const aiResult = await rewriteTicketDescriptionWithAI(contextual);
     if (aiResult) return isAiSkip(aiResult) ? null : aiResult;
   }
-  return cleanTicketDescription(raw);
+  return cleanTicketDescription(contextual);
 }
 
 // Заводит тикет "Отправлено" для уже известной группы, чтобы он сразу был
@@ -42,7 +53,8 @@ async function buildDescription(raw: string): Promise<string | null> {
 async function createAutoIssue(
   groupName: string,
   groupEmoji: string | null,
-  description: string,
+  own: string,
+  contextual: string,
   telegramLink: string
 ) {
   const reportDate = todayDateString();
@@ -51,7 +63,7 @@ async function createAutoIssue(
       where: { reportDate, groupName },
       orderBy: { position: "desc" },
     }),
-    buildDescription(description),
+    buildDescription(own, contextual),
   ]);
   if (cleaned === null) return null;
   return prisma.issue.create({
@@ -94,6 +106,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // Если это ответ на чужое сообщение — приклеиваем цитату сверху. Хранится
+  // уже вместе с цитатой (в TelegramMessage.text), чтобы её было видно и в
+  // ленте "Входящих", и в исходнике для кнопки "ИИ написал не то?" — не
+  // только на момент построения описания.
+  const replyContext = extractReplyContextLine(message);
+  const contextualText = replyContext ? `${replyContext}\n${text}` : text;
+
   const authorName = extractAuthorName(message.from);
   const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
 
@@ -115,11 +134,17 @@ export async function POST(request: NextRequest) {
     recent &&
     Date.now() - recent.receivedAt.getTime() < MERGE_WINDOW_MS
   ) {
-    const mergedText = [recent.text, text].filter(Boolean).join("\n");
+    // recent.text уже может содержать свою цитату (если само было
+    // ответом) — просто приклеиваем следующее сообщение(с его цитатой)
+    // следом, каждое несёт свой контекст само по себе.
+    const mergedOwn = [recent.text, text].filter(Boolean).join("\n");
+    const mergedContextual = [recent.text, contextualText]
+      .filter(Boolean)
+      .join("\n");
     await prisma.telegramMessage.update({
       where: { id: recent.id },
       data: {
-        text: mergedText,
+        text: mergedContextual,
         viewed: false,
         // Подтягиваем время к последнему сообщению в серии — иначе
         // склеенная карточка «застревала» под старым receivedAt первого
@@ -132,7 +157,7 @@ export async function POST(request: NextRequest) {
     // подтягиваем в него дописанный текст, иначе на доске останется
     // только обрывок исходного запроса.
     if (recent.usedForIssueId) {
-      const merged = await buildDescription(mergedText);
+      const merged = await buildDescription(mergedOwn, mergedContextual);
       // null тут означает "склеенный текст выглядит мусором" — описание не
       // трогаем, тикет уже заведён и затирать его нечем.
       if (merged !== null) {
@@ -150,7 +175,8 @@ export async function POST(request: NextRequest) {
       const issue = await createAutoIssue(
         preset.name,
         preset.emoji,
-        mergedText,
+        mergedOwn,
+        mergedContextual,
         recent.messageLink
       );
       if (issue) {
@@ -177,7 +203,7 @@ export async function POST(request: NextRequest) {
       groupEmoji: preset?.emoji ?? null,
       fromId,
       authorName,
-      text,
+      text: contextualText,
       messageLink,
     },
   });
@@ -190,6 +216,7 @@ export async function POST(request: NextRequest) {
       preset.name,
       preset.emoji,
       text,
+      contextualText,
       messageLink
     );
     // issue === null — в сообщении не было запроса; оставляем его во
