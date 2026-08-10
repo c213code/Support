@@ -12,6 +12,7 @@ import {
   extractReplyContextLine,
   extractText,
   isOwnAgentMessage,
+  type TelegramMessagePayload,
   type TelegramUpdate,
 } from "@/lib/telegram";
 
@@ -80,6 +81,86 @@ async function createAutoIssue(
   });
 }
 
+// Реплай на уже заведённое сообщение — частый паттерн "напоминание":
+// человек отвечает на своё же старое сообщение (или снова пишет по уже
+// "решённому" тикету), на которое так и не ответили. Обычная
+// regex/ИИ-чистка тут не спасает: сама реплика ("Осы бойынша кері
+// байланыс бере аласыздарма?") без исходного вопроса ничего не значит.
+// Вместо отдельного, оторванного от контекста тикета — приклеиваем
+// сообщение к уже существующему по точному Telegram reply_to_message_id, а
+// если тот значился решённым — возвращаем в "Отправлено": RESOLVED был
+// явно преждевременным, раз человек написал снова. Возвращает true, если
+// сообщение обработано (и вызывающему коду делать больше нечего).
+async function attachFollowUpToTicket(
+  message: TelegramMessagePayload,
+  chatId: string,
+  ownText: string,
+  contextualText: string
+): Promise<boolean> {
+  const repliedId = message.reply_to_message?.message_id;
+  // Мусор проверяем по "своей" реплике: голое "ок"/"рахмет" в ответ — не
+  // повод трогать уже заведённый тикет.
+  if (repliedId == null || isNoiseOnly(ownText)) return false;
+
+  const repliedMessage = await prisma.telegramMessage.findUnique({
+    where: { chatId_messageId: { chatId, messageId: repliedId } },
+    select: { usedForIssueId: true },
+  });
+  if (!repliedMessage?.usedForIssueId) return false;
+
+  const issue = await prisma.issue.findUnique({
+    where: { id: repliedMessage.usedForIssueId },
+  });
+  if (!issue) return false;
+
+  const messageLink = buildMessageLink(message.chat.id, message.message_id);
+  const alreadyLinked =
+    messageLink === issue.telegramLink || issue.extraLinks.includes(messageLink);
+  const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
+  const authorName = extractAuthorName(message.from);
+  const wasResolved = issue.status === "RESOLVED";
+
+  await prisma.$transaction([
+    prisma.telegramMessage.upsert({
+      where: { chatId_messageId: { chatId, messageId: message.message_id } },
+      update: { usedForIssueId: issue.id, archived: true, viewed: true },
+      create: {
+        chatId,
+        messageId: message.message_id,
+        chatTitle: message.chat.title ?? null,
+        groupName: issue.groupName,
+        groupEmoji: issue.groupEmoji,
+        fromId,
+        authorName,
+        text: contextualText,
+        messageLink,
+        usedForIssueId: issue.id,
+        archived: true,
+        viewed: true,
+      },
+    }),
+    prisma.issue.update({
+      where: { id: issue.id },
+      data: {
+        extraLinks: alreadyLinked ? undefined : { push: messageLink },
+        ...(wasResolved
+          ? {
+              status: "SENT" as const,
+              // Не затираем прежнюю заметку (там могло быть, что именно
+              // делали) — дописываем поверх, чтобы было видно обе части
+              // истории.
+              note: issue.note
+                ? `${issue.note} → жауап берілмеді, қайта хабарласты`
+                : "Жауап берілмеді, қайта хабарласты",
+            }
+          : {}),
+      },
+    }),
+  ]);
+
+  return true;
+}
+
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
@@ -118,6 +199,13 @@ export async function POST(request: NextRequest) {
 
   const chatId = String(message.chat.id);
   const preset = await prisma.groupPreset.findUnique({ where: { chatId } });
+
+  // Точное совпадение "ответили на сообщение, у которого уже есть тикет" —
+  // приоритетнее склейки по времени ниже: если оно сработало, дальше по
+  // этому сообщению обрабатывать нечего.
+  if (await attachFollowUpToTicket(message, chatId, text, contextualText)) {
+    return NextResponse.json({ ok: true });
+  }
 
   // Если этот же человек только что писал в этот же чат (в пределах
   // MERGE_WINDOW_MS) и это сообщение ещё не разобрано — считаем это
