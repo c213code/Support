@@ -61,6 +61,7 @@ export function KanbanBoard({
   onMerge,
   onEscalate,
   size = "compact",
+  highlightId,
 }: {
   issues: IssueDTO[];
   onStatusChange: (issue: IssueDTO, status: IssueStatus) => void;
@@ -72,9 +73,17 @@ export function KanbanBoard({
   // отдельный колбэк, открывающий диалог (см. EscalateDialog).
   onEscalate?: (issue: IssueDTO) => void;
   size?: "compact" | "large";
+  // Тикет, на который надо обратить внимание (нашли через ⌘K) — подсвечиваем
+  // кольцом на пару секунд, иначе после закрытия поиска непонятно, куда
+  // смотреть на доске из трёх колонок.
+  highlightId?: string | null;
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overColumn, setOverColumn] = useState<Column["key"] | null>(null);
+  // На узком экране три колонки по 60vh превращаются в простыню на три
+  // экрана прокрутки. Показываем по одной, переключаясь табами — доска
+  // остаётся доской, а не списком.
+  const [mobileColumn, setMobileColumn] = useState<Column["key"]>("active");
   const large = size === "large";
 
   function handleDrop(column: Column) {
@@ -86,60 +95,86 @@ export function KanbanBoard({
   }
 
   return (
-    <div
-      className={`grid grid-cols-1 sm:grid-cols-3 ${large ? "gap-4" : "gap-3"}`}
-    >
-      {COLUMNS.map((column) => {
-        const items = issues.filter((i) => column.statuses.includes(i.status));
-        const isOver = overColumn === column.key;
-        return (
-          <div
-            key={column.key}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setOverColumn(column.key);
-            }}
-            onDragLeave={(e) => {
-              // dragleave стреляет и когда курсор переходит на карточку
-              // внутри той же колонки — без этой проверки подсветка
-              // колонки мигает всю дорогу, пока тащишь тикет.
-              if (e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                return;
-              }
-              setOverColumn((c) => (c === column.key ? null : c));
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleDrop(column);
-            }}
-            className={`flex flex-col rounded-xl border transition ${
-              large ? "min-h-[60vh] gap-3 p-3" : "min-h-[140px] gap-2 p-2"
-            } ${
-              isOver
-                ? "border-brand-400 bg-brand-50/50"
-                : "border-slate-200 bg-slate-50/60"
-            }`}
-          >
-            <div className="flex items-center justify-between px-1">
-              <h3
-                className={`flex items-center gap-2 font-semibold text-slate-700 ${large ? "text-base" : "text-sm"}`}
-              >
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${column.dot}`}
-                />
-                {column.title}
-              </h3>
-              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-400 ring-1 ring-slate-200">
-                {items.length}
-              </span>
-            </div>
+    <>
+      <div className="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-white p-1 sm:hidden">
+        {COLUMNS.map((column) => {
+          const count = issues.filter((i) =>
+            column.statuses.includes(i.status)
+          ).length;
+          const active = mobileColumn === column.key;
+          return (
+            <button
+              key={column.key}
+              onClick={() => setMobileColumn(column.key)}
+              aria-pressed={active}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition ${
+                active
+                  ? "bg-slate-100 text-slate-800"
+                  : "text-slate-400 hover:bg-slate-50"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${column.dot}`} />
+              {column.title.split(" / ")[0]}
+              <span className="text-slate-400">{count}</span>
+            </button>
+          );
+        })}
+      </div>
 
-            {items.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
-                Пусто
-              </p>
-            ) : (
-              items.map((issue) => {
+      <div
+        className={`grid grid-cols-1 sm:grid-cols-3 ${large ? "gap-4" : "gap-3"}`}
+      >
+        {COLUMNS.map((column) => {
+          const items = issues.filter((i) => column.statuses.includes(i.status));
+          const isOver = overColumn === column.key;
+          return (
+            <div
+              key={column.key}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setOverColumn(column.key);
+              }}
+              onDragLeave={(e) => {
+                // dragleave стреляет и когда курсор переходит на карточку
+                // внутри той же колонки — без этой проверки подсветка
+                // колонки мигает всю дорогу, пока тащишь тикет.
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  return;
+                }
+                setOverColumn((c) => (c === column.key ? null : c));
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                handleDrop(column);
+              }}
+              className={`flex-col rounded-xl border transition ${
+                mobileColumn === column.key ? "flex" : "hidden sm:flex"
+              } ${large ? "gap-3 p-3 sm:min-h-[60vh]" : "gap-2 p-2 sm:min-h-[140px]"} ${
+                isOver
+                  ? "border-brand-400 bg-brand-50/60 ring-2 ring-brand-200"
+                  : "border-slate-200 bg-slate-50/60"
+              }`}
+            >
+              <div className="flex items-center justify-between px-1">
+                <h3
+                  className={`flex items-center gap-2 font-semibold text-slate-700 ${large ? "text-base" : "text-sm"}`}
+                >
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${column.dot}`}
+                  />
+                  {column.title}
+                </h3>
+                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-400 ring-1 ring-slate-200">
+                  {items.length}
+                </span>
+              </div>
+
+              {items.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
+                  {isOver ? "Отпусти здесь" : "Пусто"}
+                </p>
+              ) : (
+                items.map((issue) => {
                 const color = groupColor(issue.groupName);
                 return (
                   <div
@@ -150,10 +185,16 @@ export function KanbanBoard({
                       setDraggingId(null);
                       setOverColumn(null);
                     }}
-                    className={`cursor-grab rounded-lg border-l-4 border-y border-r border-slate-200 bg-white shadow-sm transition active:cursor-grabbing ${
+                    className={`group/card cursor-grab rounded-lg border-l-4 border-y border-r border-slate-200 bg-white shadow-sm transition hover:-translate-y-px hover:shadow-md active:cursor-grabbing ${
                       large ? "p-3.5 text-sm" : "p-2.5 text-sm"
                     } ${STATUS_META[issue.status].bar} ${
-                      draggingId === issue.id ? "opacity-40" : ""
+                      draggingId === issue.id
+                        ? "rotate-1 opacity-40 shadow-lg"
+                        : ""
+                    } ${
+                      highlightId === issue.id
+                        ? "j40-ping ring-2 ring-accent-400"
+                        : ""
                     }`}
                   >
                     <div className="mb-1 flex items-start justify-between gap-2">
@@ -162,12 +203,16 @@ export function KanbanBoard({
                       >
                         {issue.groupName} {issue.groupEmoji}
                       </span>
-                      <div className="flex shrink-0 items-center gap-2">
+                      {/* Кнопки проявляются на hover: три иконки на каждой из
+                          пары десятков карточек создавали визуальный шум,
+                          из-за которого текст тикета читался хуже. На
+                          тач-устройствах hover нет — там они видны всегда. */}
+                      <div className="flex shrink-0 items-center gap-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/card:opacity-100 sm:focus-within:opacity-100">
                         {onMerge && (
                           <button
                             onClick={() => onMerge(issue)}
                             title="Это дубль — объединить с другим тикетом"
-                            className="text-slate-300 hover:text-accent-600"
+                            className="text-slate-300 transition hover:text-accent-600"
                           >
                             <IconLink className="h-3.5 w-3.5" />
                           </button>
@@ -176,7 +221,7 @@ export function KanbanBoard({
                           <button
                             onClick={() => onEdit(issue)}
                             title="Изменить тикет"
-                            className="text-slate-300 hover:text-slate-600"
+                            className="text-slate-300 transition hover:text-slate-600"
                           >
                             <IconEdit className="h-3.5 w-3.5" />
                           </button>
@@ -185,14 +230,16 @@ export function KanbanBoard({
                           <button
                             onClick={() => onDelete(issue)}
                             title="Удалить тикет"
-                            className="text-slate-300 hover:text-red-500"
+                            className="text-slate-300 transition hover:text-red-500"
                           >
                             <IconTrash className="h-3.5 w-3.5" />
                           </button>
                         )}
                       </div>
                     </div>
-                    <p className="text-slate-900">{issue.description}</p>
+                    <p className="leading-snug text-slate-900">
+                      {issue.description}
+                    </p>
                     {issueLinks(issue).map((link, i) => (
                       <a
                         key={link}
@@ -269,12 +316,13 @@ export function KanbanBoard({
                       <Avatar name={issue.createdBy} size="sm" />
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        );
-      })}
-    </div>
+                  );
+                })
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }

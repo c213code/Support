@@ -1,12 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GroupPresetDTO, IssueDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { ResolveDialog } from "@/components/ResolveDialog";
 import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
 import { AttachToIssuePicker } from "@/components/AttachToIssuePicker";
+import { Modal } from "@/components/Modal";
+import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
+import { ShortcutsHelp, type Shortcut } from "@/components/ShortcutsHelp";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/components/Toast";
+import { useHotkeys } from "@/lib/useHotkeys";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import type { IssueStatus } from "@/lib/status";
 import {
@@ -26,9 +32,18 @@ import {
   IconColumns,
   IconEdit,
   IconLink,
+  IconFilter,
 } from "@/components/Icons";
 
 const NO_GROUP_FILTER = "__none__";
+
+const SHORTCUTS: Shortcut[] = [
+  { keys: ["b"], description: "Доска" },
+  { keys: ["m"], description: "Сообщения" },
+  { keys: ["f"], description: "Фильтр по тексту" },
+  { keys: ["←", "→"], description: "Предыдущий / следующий день" },
+  { keys: ["t"], description: "Сегодня" },
+];
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -66,7 +81,13 @@ export function Inbox() {
   const [aiCleaningEnabled, setAiCleaningEnabled] = useState<boolean | null>(
     null
   );
+  const [boardQuery, setBoardQuery] = useState("");
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const boardSearchRef = useRef<HTMLInputElement>(null);
   const currentAgent = useCurrentAgent();
+  const { confirm, element: confirmElement } = useConfirm();
+  const toast = useToast();
   const isToday = date === todayDateString();
 
   const loadGroups = useCallback(async () => {
@@ -172,19 +193,21 @@ export function Inbox() {
   // api/telegram/reset-groups) — раньше кнопка сбрасывала все 4 группы
   // разом, и почин "поправить одну неверную привязку" сносил рабочие
   // привязки остальных.
-  async function handleResetGroup(groupName: string) {
-    if (
-      !window.confirm(
-        `Снять привязку чата у группы «${groupName}»? Ещё не разобранные сообщения из этого чата снова станут «без группы», остальные группы не тронутся.`
-      )
-    )
-      return;
-    await fetch("/api/telegram/reset-groups", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupName }),
+  function handleResetGroup(groupName: string) {
+    confirm({
+      title: `Снять привязку чата у «${groupName}»?`,
+      body: "Ещё не разобранные сообщения из этого чата снова станут «без группы». Остальные группы не тронутся.",
+      confirmLabel: "Снять привязку",
+      onConfirm: async () => {
+        await fetch("/api/telegram/reset-groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groupName }),
+        });
+        await Promise.all([loadGroups(), loadMessages(date)]);
+        toast(`Привязка «${groupName}» снята`);
+      },
     });
-    await Promise.all([loadGroups(), loadMessages(date)]);
   }
 
   async function handleDismiss(id: string) {
@@ -294,28 +317,38 @@ export function Inbox() {
     await loadIssues(date);
   }
 
-  async function handleDeleteIssue(issue: IssueDTO) {
-    if (!window.confirm(`Удалить тикет «${issue.description}»?`)) return;
-    await fetch(`/api/issues/${issue.id}`, { method: "DELETE" });
-    await loadIssues(date);
+  function handleDeleteIssue(issue: IssueDTO) {
+    confirm({
+      title: "Удалить тикет?",
+      body: issue.description,
+      confirmLabel: "Удалить",
+      tone: "danger",
+      onConfirm: async () => {
+        await fetch(`/api/issues/${issue.id}`, { method: "DELETE" });
+        await loadIssues(date);
+        toast("Тикет удалён", "info");
+      },
+    });
   }
 
   // Разовое действие с кнопки на доске: тикеты, которые остались в
   // "Пендинг" со старых времён (когда это был дефолтный статус, а не
   // осознанный выбор), переносим в "Отправлено" за выбранный день.
-  async function handleNormalizePending() {
-    if (
-      !window.confirm(
-        "Перевести тикеты со статусом «Пендинг» за этот день в «Отправлено»? Это только для тикетов, которым статус никто явно не выставлял."
-      )
-    )
-      return;
-    await fetch("/api/issues/normalize-status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reportDate: date }),
+  function handleNormalizePending() {
+    confirm({
+      title: "Перевести «Пендинг» в «Отправлено»?",
+      body: "Только для тикетов за этот день, которым статус никто явно не выставлял.",
+      confirmLabel: "Перевести",
+      onConfirm: async () => {
+        await fetch("/api/issues/normalize-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reportDate: date }),
+        });
+        await loadIssues(date);
+        toast("Статусы обновлены");
+      },
     });
-    await loadIssues(date);
   }
 
   // Разовое действие с кнопки на доске: прогоняет описания тикетов
@@ -330,10 +363,11 @@ export function Inbox() {
     });
     const data = await res.json();
     await loadIssues(date);
-    window.alert(
+    toast(
       data.updated > 0
-        ? `Почистил описание у ${data.updated} тикет(ов).`
-        : "Все описания уже чистые."
+        ? `Почистил описание у ${data.updated} тикет(ов)`
+        : "Все описания уже чистые",
+      data.updated > 0 ? "success" : "info"
     );
   }
 
@@ -348,13 +382,112 @@ export function Inbox() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: next }),
     });
-    if (!res.ok) setAiCleaningEnabled(!next);
+    if (!res.ok) {
+      setAiCleaningEnabled(!next);
+      toast("Не удалось переключить ИИ-описания", "error");
+      return;
+    }
+    toast(next ? "ИИ-описания включены" : "ИИ-описания выключены", "info");
   }
+
+  // Фильтр по тексту на доске: за активный день набирается несколько
+  // десятков карточек в трёх колонках, и найти "тот тикет про ДТ" глазами
+  // дольше, чем набрать пару букв.
+  const visibleIssues = useMemo(() => {
+    const q = boardQuery.trim().toLowerCase();
+    if (!q) return issues;
+    return issues.filter(
+      (i) =>
+        i.description.toLowerCase().includes(q) ||
+        i.groupName.toLowerCase().includes(q) ||
+        (i.note ?? "").toLowerCase().includes(q)
+    );
+  }, [issues, boardQuery]);
+
+  // Подсветить тикет, выбранный в ⌘K: открываем его форму и заодно
+  // помечаем на доске, чтобы после закрытия было видно, где он лежит.
+  function focusIssue(issue: IssueDTO) {
+    setTab("board");
+    setHighlightId(issue.id);
+    setEditingIssueId(issue.id);
+    setTimeout(() => setHighlightId(null), 2500);
+  }
+
+  useHotkeys({
+    ArrowLeft: () => setDate((d) => shiftDateString(d, -1)),
+    ArrowRight: () => setDate((d) => shiftDateString(d, 1)),
+    t: () => setDate(todayDateString()),
+    b: () => setTab("board"),
+    m: () => setTab("messages"),
+    f: () => {
+      setTab("board");
+      // Фокус после переключения вкладки — поле рендерится только на доске.
+      setTimeout(() => boardSearchRef.current?.focus(), 0);
+    },
+    "?": () => setShowShortcuts(true),
+  });
+
+  const paletteActions: PaletteAction[] = useMemo(
+    () => [
+      {
+        id: "today",
+        label: "Перейти к сегодняшнему дню",
+        hint: "t",
+        Icon: IconRefresh,
+        run: () => setDate(todayDateString()),
+      },
+      {
+        id: "tab-board",
+        label: "Открыть доску",
+        hint: "b",
+        Icon: IconColumns,
+        run: () => setTab("board"),
+      },
+      {
+        id: "tab-messages",
+        label: "Открыть ленту сообщений",
+        hint: "m",
+        Icon: IconInbox,
+        run: () => setTab("messages"),
+      },
+      {
+        id: "toggle-ai",
+        label: aiCleaningEnabled
+          ? "Выключить ИИ-описания"
+          : "Включить ИИ-описания",
+        Icon: IconRefresh,
+        run: handleToggleAiCleaning,
+      },
+      {
+        id: "shortcuts",
+        label: "Показать горячие клавиши",
+        hint: "?",
+        run: () => setShowShortcuts(true),
+      },
+    ],
+    // handleToggleAiCleaning пересоздаётся каждый рендер, но зависит только
+    // от aiCleaningEnabled — его и отслеживаем.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [aiCleaningEnabled]
+  );
 
   return (
     <div
       className={`mx-auto px-4 py-6 sm:px-6 ${tab === "board" ? "max-w-6xl" : "max-w-3xl"}`}
     >
+      {confirmElement}
+      <CommandPalette
+        issues={issues}
+        actions={paletteActions}
+        onPickIssue={focusIssue}
+      />
+      {showShortcuts && (
+        <ShortcutsHelp
+          shortcuts={SHORTCUTS}
+          onClose={() => setShowShortcuts(false)}
+        />
+      )}
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-slate-900">Входящие</h1>
         <div className="flex items-center gap-3">
@@ -458,9 +591,33 @@ export function Inbox() {
       {tab === "board" && (
         <div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-base font-semibold text-slate-700">
-              Тикеты за день
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-semibold text-slate-700">
+                Тикеты за день
+              </h2>
+              <div className="relative">
+                <IconFilter className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-300" />
+                <input
+                  ref={boardSearchRef}
+                  value={boardQuery}
+                  onChange={(e) => setBoardQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setBoardQuery("");
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  placeholder="Фильтр…"
+                  aria-label="Фильтр тикетов по тексту"
+                  className="w-32 rounded-lg border border-slate-200 bg-white py-1 pl-8 pr-2 text-xs outline-none transition focus:w-48 focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                />
+              </div>
+              {boardQuery && (
+                <span className="text-xs text-slate-400">
+                  {visibleIssues.length} из {issues.length}
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               {issues.some((i) => i.status === "SENT") && (
                 <button
@@ -485,18 +642,23 @@ export function Inbox() {
             </div>
           </div>
           {issues.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-400">
               За этот день пока нет тикетов.
+              <br />
+              <span className="text-xs">
+                Они появятся сами, как только в привязанный чат напишут.
+              </span>
             </p>
           ) : (
             <KanbanBoard
-              issues={issues}
+              issues={visibleIssues}
               onStatusChange={handleStatusChange}
               onEdit={(issue) => setEditingIssueId(issue.id)}
               onDelete={handleDeleteIssue}
               onMerge={(issue) => setMergingIssueId(issue.id)}
               onEscalate={(issue) => setEscalatingIssueId(issue.id)}
               size="large"
+              highlightId={highlightId}
             />
           )}
         </div>
@@ -507,14 +669,15 @@ export function Inbox() {
           const source = issues.find((i) => i.id === mergingIssueId);
           if (!source) return null;
           return (
-            <div
-              className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-16 sm:pt-24"
-              onClick={(e) => {
-                if (e.target === e.currentTarget) setMergingIssueId(null);
-              }}
+            <Modal
+              onClose={() => setMergingIssueId(null)}
+              labelledBy="merge-title"
             >
-              <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
-                <p className="mb-1 text-sm font-semibold text-slate-900">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+                <p
+                  id="merge-title"
+                  className="mb-1 text-sm font-semibold text-slate-900"
+                >
                   Объединить дубль
                 </p>
                 <p className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
@@ -533,7 +696,7 @@ export function Inbox() {
                   onPick={(target) => handleMergeIssue(source, target)}
                 />
               </div>
-            </div>
+            </Modal>
           );
         })()}
 
@@ -573,26 +736,19 @@ export function Inbox() {
           const editingIssue = issues.find((i) => i.id === editingIssueId);
           if (!editingIssue) return null;
           return (
-            <div
-              className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-10 sm:pt-16"
-              onClick={(e) => {
-                if (e.target === e.currentTarget) setEditingIssueId(null);
-              }}
-            >
-              <div className="w-full max-w-lg">
-                <IssueForm
-                  groups={groups}
-                  currentAgent={currentAgent ?? ""}
-                  initial={editingIssue}
-                  showGroupPicker={false}
-                  fixedGroupName={editingIssue.groupName}
-                  onCancel={() => setEditingIssueId(null)}
-                  onSubmit={(values) =>
-                    handleUpdateIssue(editingIssue.id, values)
-                  }
-                />
-              </div>
-            </div>
+            <Modal onClose={() => setEditingIssueId(null)} size="lg">
+              <IssueForm
+                groups={groups}
+                currentAgent={currentAgent ?? ""}
+                initial={editingIssue}
+                showGroupPicker={false}
+                fixedGroupName={editingIssue.groupName}
+                onCancel={() => setEditingIssueId(null)}
+                onSubmit={(values) =>
+                  handleUpdateIssue(editingIssue.id, values)
+                }
+              />
+            </Modal>
           );
         })()}
 

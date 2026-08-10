@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { IssueDTO } from "@/lib/types";
+import { Modal } from "@/components/Modal";
 import { IconCheck } from "@/components/Icons";
 
 // Спрашиваем "что сделали" в момент перевода тикета в "Решено" — заметка
@@ -45,14 +46,6 @@ export function ResolveDialog({
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   }, []);
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onCancel]);
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (saving) return;
@@ -65,18 +58,16 @@ export function ResolveDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-16 sm:pt-24"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
+    <Modal onClose={onCancel} labelledBy="resolve-title">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
+        className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
       >
         <div>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <h2
+            id="resolve-title"
+            className="flex items-center gap-2 text-sm font-semibold text-slate-900"
+          >
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
               <IconCheck className="h-3.5 w-3.5" />
             </span>
@@ -131,6 +122,6 @@ export function ResolveDialog({
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

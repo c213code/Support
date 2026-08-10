@@ -55,3 +55,91 @@ body {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/*
+ * Тонкие скроллбары: во "Входящих" и в колонках доски скроллится сразу
+ * несколько областей, и системные широкие полосы съедают заметную часть
+ * узкой колонки.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/*
+ * Анимации появления. Модалки и карточки без них "телепортируются" —
+ * глазу негде зацепиться за то, что изменилось, особенно когда доска
+ * перерисовывается после опроса сервера каждые 15 сек.
+ */
+@keyframes j40-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes j40-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes j40-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes j40-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, #2898bd 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.j40-fade-in {
+  animation: j40-fade-in 0.16s ease-out;
+}
+.j40-pop-in {
+  animation: j40-pop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.j40-slide-up {
+  animation: j40-slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+/* Ненавязчивый «пинг» на только что изменившемся элементе */
+.j40-ping {
+  animation: j40-pulse-ring 1s ease-out;
+}
+
+/*
+ * Уважение к системной настройке «меньше движения»: интерфейс рабочий, и
+ * для тех, кому анимации мешают, они должны исчезать полностью, а не
+ * замедляться.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

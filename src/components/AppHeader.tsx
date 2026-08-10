@@ -18,6 +18,10 @@ const NAV = [
   { href: "/history", label: "История", Icon: IconHistory },
 ] as const;
 
+// Страницы, на которых смонтирована CommandPalette (ей нужен список
+// тикетов за день, которого на "Истории" просто нет).
+const PALETTE_ROUTES = new Set(["/", "/inbox"]);
+
 export function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
@@ -92,6 +96,27 @@ export function AppHeader() {
         </nav>
       </div>
       <div className="flex items-center gap-3">
+        {/* Подсказка про ⌘K — единственное место, где о палитре вообще
+            можно узнать, не зная о ней заранее. Кликабельна: мышкой
+            дотянуться быстрее, чем вспоминать сочетание. Показываем только
+            там, где палитра действительно смонтирована (ей нужны тикеты
+            дня) — на "Истории" кнопка была бы мёртвой. */}
+        {PALETTE_ROUTES.has(pathname) && (
+          <button
+            onClick={() =>
+              window.dispatchEvent(
+                new KeyboardEvent("keydown", { key: "k", metaKey: true })
+              )
+            }
+            title="Поиск по тикетам и командам"
+            className="hidden items-center gap-1.5 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-400 transition hover:border-slate-300 hover:text-slate-600 md:flex"
+          >
+            Поиск
+            <kbd className="rounded border border-slate-200 bg-slate-50 px-1 py-px text-[10px] font-medium">
+              ⌘K
+            </kbd>
+          </button>
+        )}
         {currentAgent && (
           <div className="flex items-center gap-1.5">
             <Avatar name={currentAgent} size="sm" />

@@ -1,12 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { GroupPresetDTO, IssueDTO } from "@/lib/types";
 import { formatDateHuman, shiftDateString, todayDateString } from "@/lib/date";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { ResolveDialog } from "@/components/ResolveDialog";
 import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
+import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
+import { ShortcutsHelp, type Shortcut } from "@/components/ShortcutsHelp";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { useToast } from "@/components/Toast";
+import { useHotkeys } from "@/lib/useHotkeys";
 import { groupIssues, issueLinks } from "@/lib/report";
 import { Avatar } from "@/components/Avatar";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
@@ -21,7 +26,15 @@ import {
   IconEdit,
   IconTrash,
   IconSend,
+  IconPlus,
 } from "@/components/Icons";
+
+const SHORTCUTS: Shortcut[] = [
+  { keys: ["n"], description: "Новый тикет" },
+  { keys: ["c"], description: "Скопировать репорт" },
+  { keys: ["←", "→"], description: "Предыдущий / следующий день" },
+  { keys: ["t"], description: "Сегодня" },
+];
 
 export function Dashboard({ initialDate }: { initialDate: string }) {
   const router = useRouter();
@@ -36,7 +49,10 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [escalatingId, setEscalatingId] = useState<string | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const currentAgent = useCurrentAgent();
+  const { confirm, element: confirmElement } = useConfirm();
+  const toast = useToast();
 
   const loadGroups = useCallback(async () => {
     const res = await fetch("/api/groups");
@@ -144,10 +160,18 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
     await loadIssues(date);
   }
 
-  async function handleDelete(id: string) {
-    if (!window.confirm("Удалить этот тикет?")) return;
-    await fetch(`/api/issues/${id}`, { method: "DELETE" });
-    await loadIssues(date);
+  function handleDelete(issue: IssueDTO) {
+    confirm({
+      title: "Удалить тикет?",
+      body: issue.description,
+      confirmLabel: "Удалить",
+      tone: "danger",
+      onConfirm: async () => {
+        await fetch(`/api/issues/${issue.id}`, { method: "DELETE" });
+        await loadIssues(date);
+        toast("Тикет удалён", "info");
+      },
+    });
   }
 
   async function handleMove(
@@ -175,8 +199,10 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   }
 
   async function handleCopy() {
+    if (!reportText) return;
     await navigator.clipboard.writeText(reportText);
     setCopied(true);
+    toast("Репорт скопирован");
     setTimeout(() => setCopied(false), 2000);
   }
 
@@ -185,9 +211,68 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   const isToday = date === todayDateString();
   const totalCount = issues.length;
   const resolvedCount = issues.filter((i) => i.status === "RESOLVED").length;
+  const progressPercent = totalCount
+    ? Math.round((resolvedCount / totalCount) * 100)
+    : 0;
+
+  useHotkeys({
+    ArrowLeft: () => setDate(shiftDateString(date, -1)),
+    ArrowRight: () => setDate(shiftDateString(date, 1)),
+    t: () => setDate(todayDateString()),
+    n: () => setAddingNew(true),
+    c: handleCopy,
+    "?": () => setShowShortcuts(true),
+  });
+
+  const paletteActions: PaletteAction[] = useMemo(
+    () => [
+      {
+        id: "new",
+        label: "Новый тикет",
+        hint: "n",
+        Icon: IconPlus,
+        run: () => setAddingNew(true),
+      },
+      {
+        id: "copy",
+        label: "Скопировать текст репорта",
+        hint: "c",
+        Icon: IconCopy,
+        run: handleCopy,
+      },
+      {
+        id: "today",
+        label: "Перейти к сегодняшнему дню",
+        hint: "t",
+        run: () => setDate(todayDateString()),
+      },
+      {
+        id: "shortcuts",
+        label: "Показать горячие клавиши",
+        hint: "?",
+        run: () => setShowShortcuts(true),
+      },
+    ],
+    // handleCopy замыкает reportText — его и отслеживаем.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reportText]
+  );
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+      {confirmElement}
+      <CommandPalette
+        issues={issues}
+        actions={paletteActions}
+        onPickIssue={(issue) => setEditingId(issue.id)}
+      />
+      {showShortcuts && (
+        <ShortcutsHelp
+          shortcuts={SHORTCUTS}
+          onClose={() => setShowShortcuts(false)}
+        />
+      )}
+
       {resolvingId &&
         (() => {
           const resolvingIssue = issues.find((i) => i.id === resolvingId);
@@ -247,16 +332,30 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {!loading && totalCount > 0 && (
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
-              {resolvedCount}/{totalCount} решено
-            </span>
+            // Прогресс дня строкой из цифр читался как справка; полоса
+            // отвечает на главный вопрос "мы близко к концу?" одним взглядом,
+            // не требуя считать в уме.
+            <div
+              className="flex items-center gap-2"
+              title={`${resolvedCount} из ${totalCount} тикетов решено`}
+            >
+              <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <span className="text-xs font-medium tabular-nums text-slate-500">
+                {resolvedCount}/{totalCount}
+              </span>
+            </div>
           )}
           <button
             onClick={() => setDate(todayDateString())}
             disabled={isToday}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50 disabled:pointer-events-none disabled:opacity-0"
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 transition hover:bg-brand-50 disabled:pointer-events-none disabled:opacity-0"
           >
             Сегодня
           </button>
@@ -309,7 +408,15 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                         />
                       ) : (
                         <div
-                          className={`rounded-xl border-l-4 border-y border-r border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md ${STATUS_META[issue.status].bar}`}
+                          // Лёгкая лесенка при появлении списка: карточки
+                          // проявляются сверху вниз, и глаз успевает
+                          // проследить порядок группы, а не получает всё
+                          // разом. Задержка ограничена, чтобы длинная
+                          // группа не «доезжала» полсекунды.
+                          style={{
+                            animationDelay: `${Math.min(index, 6) * 25}ms`,
+                          }}
+                          className={`j40-slide-up group/row rounded-xl border-l-4 border-y border-r border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md ${STATUS_META[issue.status].bar}`}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex-1">
@@ -367,31 +474,55 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                                   {issue.ticketLink}
                                 </a>
                               )}
+                              {/* Раньше статус менялся нативным <select>:
+                                  два клика на каждую смену, чужая системная
+                                  вёрстка списка и никакой связи с теми же
+                                  статусами на доске. Кнопки в ряд — один
+                                  клик и одинаковый вид с канбаном. Подпись
+                                  несёт только текущий статус: пять полных
+                                  подписей в каждой строке перебивали собой
+                                  текст самих тикетов. */}
                               <div className="mt-2 flex flex-wrap items-center gap-2">
-                                <select
-                                  value={issue.status}
-                                  onChange={(e) =>
-                                    handleStatusChange(
-                                      issue,
-                                      e.target.value as IssueStatus
-                                    )
-                                  }
-                                  title="Сменить статус"
-                                  className={`cursor-pointer rounded-full border-0 px-2 py-0.5 text-xs font-medium outline-none ${STATUS_META[issue.status].badge}`}
-                                >
-                                  {ISSUE_STATUSES.map((s) => (
-                                    <option key={s} value={s}>
-                                      {STATUS_META[s].emoji} {STATUS_META[s].label}
-                                    </option>
-                                  ))}
-                                </select>
+                                <div className="flex flex-wrap items-center gap-0.5 rounded-full bg-slate-50 p-0.5 ring-1 ring-slate-200">
+                                  {ISSUE_STATUSES.map((s) => {
+                                    const meta = STATUS_META[s];
+                                    const selected = issue.status === s;
+                                    return (
+                                      <button
+                                        key={s}
+                                        onClick={() =>
+                                          handleStatusChange(issue, s)
+                                        }
+                                        title={meta.label}
+                                        aria-label={meta.label}
+                                        aria-pressed={selected}
+                                        className={`rounded-full px-1.5 py-0.5 text-[11px] font-medium transition ${
+                                          selected
+                                            ? meta.badge
+                                            : "text-slate-400 opacity-50 hover:bg-white hover:opacity-100"
+                                        }`}
+                                      >
+                                        {meta.emoji}
+                                        {selected && (
+                                          <span className="ml-1">
+                                            {meta.label}
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                                 <span className="flex items-center gap-1 text-xs text-slate-400">
                                   <Avatar name={issue.createdBy} size="sm" />
                                   {issue.createdBy}
                                 </span>
                               </div>
                             </div>
-                            <div className="flex flex-col items-end gap-1.5">
+                            {/* Те же кнопки, что и на доске, ведут себя
+                                одинаково: проявляются на наведении, чтобы
+                                колонка «Изменить/Удалить» не тянула на себя
+                                внимание в каждой строке. */}
+                            <div className="flex shrink-0 flex-col items-end gap-1.5 transition-opacity sm:opacity-0 sm:group-hover/row:opacity-100 sm:focus-within:opacity-100">
                               <div className="flex gap-0.5">
                                 <button
                                   onClick={() =>
@@ -422,8 +553,8 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                                 Изменить
                               </button>
                               <button
-                                onClick={() => handleDelete(issue.id)}
-                                className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600"
+                                onClick={() => handleDelete(issue)}
+                                className="flex items-center gap-1 text-xs text-red-400 transition hover:text-red-600"
                               >
                                 <IconTrash className="h-3.5 w-3.5" />
                                 Удалить
@@ -478,16 +609,26 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
             )}
           </section>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-700">
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            {/* Шапка липкая внутри секции: репорт за насыщенный день не
+                помещается на экран, и кнопка "Скопировать" уезжала вверх
+                ровно тогда, когда до неё дочитывали. */}
+            <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-2.5 backdrop-blur">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 Готовый репорт
+                {!!reportText && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-400">
+                    {reportText.split("\n").length} строк
+                  </span>
+                )}
               </h3>
               <button
                 onClick={handleCopy}
                 disabled={!reportText}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-40 ${
-                  copied ? "bg-emerald-600" : "bg-brand-600 hover:bg-brand-700"
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white shadow-sm transition disabled:opacity-40 ${
+                  copied
+                    ? "bg-emerald-600"
+                    : "bg-brand-600 hover:bg-brand-700 active:scale-95"
                 }`}
               >
                 {copied ? (
@@ -501,7 +642,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                 )}
               </button>
             </div>
-            <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-sm text-slate-800 ring-1 ring-slate-200">
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words bg-slate-50/70 p-4 text-sm leading-relaxed text-slate-800">
               {reportText || "Нет тикетов за этот день."}
             </pre>
           </section>
