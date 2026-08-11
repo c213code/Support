@@ -60,6 +60,7 @@ export function KanbanBoard({
   onDelete,
   onMerge,
   onEscalate,
+  onDetach,
   size = "compact",
   highlightId,
 }: {
@@ -68,6 +69,11 @@ export function KanbanBoard({
   onEdit?: (issue: IssueDTO) => void;
   onDelete?: (issue: IssueDTO) => void;
   onMerge?: (issue: IssueDTO) => void;
+  // Отвязать приклеенное обращение (см. extraLinks на Issue) — приклеили
+  // не туда через "объединить"/"прикрепить" и без отката пришлось бы
+  // чинить руками в базе. Только для extraLinks — основную ссылку
+  // (issue.telegramLink), с которой тикет и завёлся, так не отвязать.
+  onDetach?: (issue: IssueDTO, link: string) => void;
   // ESCALATED — единственный статус, для которого мало сменить значение:
   // нужно ещё выбрать команду. Поэтому вместо прямого onStatusChange у него
   // отдельный колбэк, открывающий диалог (см. EscalateDialog).
@@ -241,18 +247,28 @@ export function KanbanBoard({
                       {issue.description}
                     </p>
                     {issueLinks(issue).map((link, i) => (
-                      <a
-                        key={link}
-                        href={link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 flex items-center gap-1 text-xs text-accent-600 hover:underline"
-                      >
-                        <IconExternalLink className="h-3 w-3 shrink-0" />
-                        {i === 0
-                          ? "Открыть в Telegram"
-                          : `Ещё обращение №${i + 1}`}
-                      </a>
+                      <span key={link} className="mt-1 flex items-center gap-1">
+                        <a
+                          href={link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-xs text-accent-600 hover:underline"
+                        >
+                          <IconExternalLink className="h-3 w-3 shrink-0" />
+                          {i === 0
+                            ? "Открыть в Telegram"
+                            : `Ещё обращение №${i + 1}`}
+                        </a>
+                        {onDetach && issue.extraLinks?.includes(link) && (
+                          <button
+                            onClick={() => onDetach(issue, link)}
+                            title="Отвязать это обращение от тикета"
+                            className="shrink-0 text-xs text-slate-300 hover:text-red-500"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </span>
                     ))}
                     {issue.escalatedTeam && (
                       <p className="mt-1 flex items-center gap-1 text-xs text-orange-600">

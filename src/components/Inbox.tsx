@@ -325,6 +325,19 @@ export function Inbox() {
     setDuplicateGroups((prev) => prev?.filter((_, i) => i !== index) ?? null);
   }
 
+  // Отвязать приклеенное обращение (промахнулись при объединении/
+  // приклеивании) — то же действие, что уже есть на Дашборде, теперь и на
+  // доске "Входящих".
+  async function handleDetach(issue: IssueDTO, link: string) {
+    await fetch(`/api/issues/${issue.id}/attach-message`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ link }),
+    });
+    await Promise.all([loadIssues(date), loadMessages(date)]);
+    toast("Обращение отвязано", "info");
+  }
+
   // Перепроверка тикетов "Отправлено", заведённых ботом без участия ИИ
   // (был выключен/упал/квота) — та же идея, что и у "Найти дубли": ИИ
   // только предлагает, ничего не удаляет и не переписывает сам (см.
@@ -943,6 +956,7 @@ export function Inbox() {
               onDelete={handleDeleteIssue}
               onMerge={(issue) => setMergingIssueId(issue.id)}
               onEscalate={(issue) => setEscalatingIssueId(issue.id)}
+              onDetach={handleDetach}
               size="large"
               highlightId={highlightId}
             />
