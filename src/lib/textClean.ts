@@ -28,6 +28,17 @@ const GREETING_PATTERNS: RegExp[] = GREETING_WORDS.map(
     new RegExp(`(?<![\\p{L}\\p{N}])(?:${word})(?![\\p{L}\\p{N}])`, "giu")
 );
 
+// Реплай на чужое сообщение (см. extractReplyContextLine в lib/telegram.ts)
+// приклеивает цитату первой строкой вида "↩️ Имя: текст" — это контекст
+// для ИИ (см. ai.ts), который явно проинструктирован её не повторять. Но
+// regex-чистка про этот формат ничего не знает и раньше пропускала строку
+// как обычный текст — если ИИ выключен или запрос к нему упал, цитата
+// навсегда оставалась в описании тикета вместо реальной сути обращения.
+// Режем только до первого \n: если исходное цитируемое сообщение само
+// было многострочным, хвост цитаты этим не поймать — редкий случай,
+// который сейчас не разбираем, лучше почистить одну строку, чем ни одной.
+const REPLY_QUOTE_LINE = /^↩️[^\n]*\n/;
+
 const URL_PATTERN = /\bhttps?:\/\/\S+/gi;
 const EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
 
@@ -107,7 +118,7 @@ const ACKNOWLEDGEMENT_ONLY = new RegExp(
 // не дала, оставляем как есть" — это два разных случая, и вызывающему коду
 // нужно их различать.
 function stripNoise(raw: string): string {
-  let text = raw;
+  let text = raw.replace(REPLY_QUOTE_LINE, "");
   for (const pattern of GREETING_PATTERNS) {
     text = text.replace(pattern, "");
   }

@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
-import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
+import { isIssueStatus, type IssueStatus } from "@/lib/status";
 import { isEscalationTeam } from "@/lib/escalation";
-import { AUTO_ISSUE_CREATOR, setMessageReaction } from "@/lib/telegram";
+import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
+import { reactToStatusChange } from "@/lib/issueStatus";
 import { cleanTicketDescription } from "@/lib/textClean";
 
 type Params = { params: Promise<{ id: string }> };
@@ -61,20 +62,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   // Смена статуса — реакцией на исходное сообщение в Telegram (👀 взяли в
   // работу/пендинг/передали, 👍 решили), чтобы было видно прямо в чате.
   // "Отправлено" реакции не ставит (см. STATUS_META.SENT.reactionEmoji).
-  if (
-    typeof data.status === "string" &&
-    existing &&
-    data.status !== existing.status &&
-    existing.telegramLink
-  ) {
-    const emoji = STATUS_META[data.status as IssueStatus].reactionEmoji;
-    const message = await prisma.telegramMessage.findFirst({
-      where: { messageLink: existing.telegramLink },
-      select: { chatId: true, messageId: true },
-    });
-    if (message) {
-      await setMessageReaction(message.chatId, message.messageId, emoji);
-    }
+  // Та же функция используется при смене статуса inline-кнопкой в
+  // Telegram (см. handleCallbackQuery в вебхуке) — чтобы оба места не
+  // разъезжались логикой.
+  if (typeof data.status === "string" && existing) {
+    await reactToStatusChange(
+      existing.status,
+      data.status as IssueStatus,
+      existing.telegramLink
+    );
   }
 
   return NextResponse.json({ issue });

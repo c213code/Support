@@ -46,7 +46,9 @@ const SYSTEM_PROMPT = `Ты — часть тикет-системы подде�
 
 Если сообщение и так уже короткое и по делу — верни как есть.
 
-ОСОБЫЙ СЛУЧАЙ: если в сообщении вообще нет запроса или проблемы — это просто приветствие ("Қайырлы күн", "Здравствуйте"), только ссылка или файл без пояснения, благодарность/подтверждение ("рахмет", "ок", "жарайды") или болтовня не по делу — ответь ровно одним словом: SKIP. Ничего больше не пиши. По таким сообщениям тикет заводить не нужно.`;
+Тикет заводится только на конкретную жалобу/проблему у конкретного ученика/родителя — не на рабочую переписку коллег между собой. В группах поддержки сотрудники (методисты, тимлиды, "owner" и т.п.) часто обсуждают между собой процессы, инструкции, версии тестов, кто что настроил — это НЕ обращение пользователя, даже если по форме похоже на сообщение о проблеме ("нұсқа ашылмады", "неге солай болды" и т.п.). Отличай по сути: жалуется/спрашивает помощи именно ученик или родитель о СВОЁМ конкретном случае — тикет; сотрудники сверяются друг с другом, как настроена система в целом — не тикет.
+
+ОСОБЫЙ СЛУЧАЙ: если в сообщении вообще нет запроса или проблемы — это просто приветствие ("Қайырлы күн", "Здравствуйте"), только ссылка или файл без пояснения, благодарность/подтверждение ("рахмет", "ок", "жарайды"), болтовня не по делу, ИЛИ это реплика внутри рабочего обсуждения коллег (см. выше) — ответь ровно одним словом: SKIP. Ничего больше не пиши. По таким сообщениям тикет заводить не нужно.`;
 
 const FEW_SHOT_TURNS: Array<{ user: string; assistant: string }> = [
   {
@@ -72,6 +74,19 @@ const FEW_SHOT_TURNS: Array<{ user: string; assistant: string }> = [
   { user: "Қайырлы күн!", assistant: AI_SKIP },
   { user: "https://juz40.kz/lesson/12345", assistant: AI_SKIP },
   { user: "рахмет, түсіндім 👍", assistant: AI_SKIP },
+  // Реальный пропущенный случай: рабочий чат методистов обсуждал, по какой
+  // версии ҰБТ-теста открывать доступ — это ответ одного сотрудника
+  // другому внутри этого обсуждения, а не жалоба ученика/родителя. Без
+  // этого примера модель хваталась за слово "нұсқа" ("версия") и лепила
+  // тикет вроде "Нұсқа бойынша тапсырып жатыр" из простого подтверждения.
+  {
+    user: "↩️ Мөлдір Баймұқан: Или олар уже ашылганмен тапсыра береді ма?\nиә олар бастап қойған сол нұсқамен тапсырып жатыр",
+    assistant: AI_SKIP,
+  },
+  {
+    user: "↩️ Кудайбергенова Асем: Иә, ал неге жаңа нұсқалар ашылмады екен\nСебебі барлық пәннен нұсқа дайын болмады",
+    assistant: AI_SKIP,
+  },
 ];
 
 export async function rewriteTicketDescriptionWithAI(
@@ -114,6 +129,83 @@ export async function rewriteTicketDescriptionWithAI(
   } catch {
     // Таймаут, сеть, невалидный ответ — не наша забота здесь, вызывающий
     // код откатится на regex-чистку.
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const DUPLICATE_SYSTEM_PROMPT = `Ты помогаешь саппорту находить дублирующиеся тикеты — обращения, которые описывают ОДИН И ТОТ ЖЕ конкретный запрос (например, один и тот же ученик написал 2-3 раза про один и тот же логин/тест/ошибку), а не просто похожую тему в общем.
+
+Тебе дан список тикетов за день в формате "id: описание". Найди группы тикетов, которые с высокой уверенностью — один и тот же запрос.
+
+Не группируй тикеты только потому, что у них одна общая тема ("не работает ДТ" у разных людей — это НЕ дубль, если это разные ученики или разные детали проблемы). Если сомневаешься — не включай тикет ни в одну группу.
+
+Ответь строго JSON без пояснений, в формате {"groups": [["id1","id2"], ["id3","id4","id5"]]} — только группы из 2 и более id. Если дублей нет — {"groups": []}.`;
+
+const DUPLICATES_TIMEOUT_MS = 12000;
+const MAX_ISSUES_FOR_DUPLICATE_CHECK = 60;
+
+// Ищет вероятные дубли среди тикетов дня через ИИ — только подсказка,
+// ничего не объединяет сама: решение и клик "Объединить" остаются за
+// агентом (см. POST /api/issues/duplicates и панель во "Входящих"). Тот
+// же принцип, что и у similarity.ts (Жаккар-подсказка при ручном
+// приклеивании) — здесь просто точнее, потому что видит смысл, а не
+// только пересечение слов, но настолько же не авторитетна.
+export async function findDuplicateGroups(
+  issues: Array<{ id: string; description: string }>
+): Promise<string[][] | null> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey || issues.length < 2) return null;
+
+  const validIds = new Set(issues.map((i) => i.id));
+  const list = issues
+    .slice(0, MAX_ISSUES_FOR_DUPLICATE_CHECK)
+    .map((i) => `${i.id}: ${i.description}`)
+    .join("\n");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DUPLICATES_TIMEOUT_MS);
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 1000,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: DUPLICATE_SYSTEM_PROMPT },
+          { role: "user", content: list },
+        ],
+      }),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const text: unknown = data?.choices?.[0]?.message?.content;
+    if (typeof text !== "string") return null;
+
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed?.groups)) return null;
+
+    // Модель может добавить айди, которых не было в списке (галлюцинация),
+    // или ужать группу до одного элемента после фильтрации — оба случая
+    // отсеиваем, чтобы UI не пытался объединить несуществующий тикет.
+    const groups = (parsed.groups as unknown[])
+      .filter((g): g is unknown[] => Array.isArray(g))
+      .map((g) => g.filter((id): id is string => typeof id === "string" && validIds.has(id)))
+      .filter((g) => g.length >= 2);
+
+    return groups;
+  } catch {
     return null;
   } finally {
     clearTimeout(timeout);

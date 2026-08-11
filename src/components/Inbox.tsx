@@ -82,6 +82,10 @@ export function Inbox() {
     null
   );
   const [boardQuery, setBoardQuery] = useState("");
+  const [duplicateGroups, setDuplicateGroups] = useState<IssueDTO[][] | null>(
+    null
+  );
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const boardSearchRef = useRef<HTMLInputElement>(null);
@@ -265,6 +269,54 @@ export function Inbox() {
     });
     setMergingIssueId(null);
     await Promise.all([loadIssues(date), loadMessages(date)]);
+  }
+
+  // ИИ-подсказка "это похоже один и тот же запрос, повторённый N раз" —
+  // только предлагает, ничего не объединяет сама (см. комментарий у
+  // findDuplicateGroups в lib/ai.ts). Дата фиксируется на момент клика,
+  // а не пересчитывается при каждой смене `date`, — панель с находками
+  // должна остаться на экране, даже если агент тем временем полистал день.
+  async function handleFindDuplicates() {
+    setCheckingDuplicates(true);
+    setDuplicateGroups(null);
+    try {
+      const res = await fetch("/api/issues/duplicates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportDate: date }),
+      });
+      const data = await res.json();
+      if (data.unavailable) {
+        toast("ИИ недоступен — проверь GROQ_API_KEY", "error");
+        return;
+      }
+      const groups: IssueDTO[][] = data.groups ?? [];
+      setDuplicateGroups(groups);
+      if (groups.length === 0) toast("Дублей не нашлось", "info");
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  }
+
+  // Схлопывает всю найденную группу в один тикет: первый (самый ранний по
+  // позиции) остаётся, остальные вливаются в него по очереди — тот же
+  // POST /api/issues/[id]/merge-into, что и у ручного объединения.
+  async function handleMergeDuplicateGroup(group: IssueDTO[], index: number) {
+    const [target, ...rest] = [...group].sort((a, b) => a.position - b.position);
+    for (const source of rest) {
+      await fetch(`/api/issues/${source.id}/merge-into`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: target.id }),
+      });
+    }
+    setDuplicateGroups((prev) => prev?.filter((_, i) => i !== index) ?? null);
+    await Promise.all([loadIssues(date), loadMessages(date)]);
+    toast(`Объединено в 1 тикет (было ${group.length})`);
+  }
+
+  function handleDismissDuplicateGroup(index: number) {
+    setDuplicateGroups((prev) => prev?.filter((_, i) => i !== index) ?? null);
   }
 
   // Быстрая смена статуса тикета на доске (перетаскиванием или кнопкой).
@@ -619,6 +671,16 @@ export function Inbox() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              {issues.length >= 2 && (
+                <button
+                  onClick={handleFindDuplicates}
+                  disabled={checkingDuplicates}
+                  title="Спросить ИИ, нет ли среди тикетов дня повторов одного и того же запроса"
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-brand-600 disabled:opacity-50"
+                >
+                  🤖 {checkingDuplicates ? "Ищем дубли…" : "Найти дубли"}
+                </button>
+              )}
               {issues.some((i) => i.status === "SENT") && (
                 <button
                   onClick={handleCleanDescriptions}
@@ -641,6 +703,49 @@ export function Inbox() {
               )}
             </div>
           </div>
+          {duplicateGroups && duplicateGroups.length > 0 && (
+            <div className="mb-3 space-y-2 rounded-xl border border-accent-400/40 bg-accent-500/5 p-3">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-accent-700">
+                🤖 ИИ подозревает повторы — проверь и реши сам, объединять
+                ли:
+              </p>
+              {duplicateGroups.map((group, index) => (
+                <div
+                  key={group.map((i) => i.id).join("-")}
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5"
+                >
+                  <div className="flex flex-1 flex-wrap gap-1.5">
+                    {group.map((issue) => {
+                      const color = groupColor(issue.groupName);
+                      return (
+                        <span
+                          key={issue.id}
+                          className={`rounded-full px-2 py-0.5 text-[11px] ${color.bg} ${color.text}`}
+                          title={issue.description}
+                        >
+                          {issue.description.length > 40
+                            ? `${issue.description.slice(0, 40)}…`
+                            : issue.description}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => handleMergeDuplicateGroup(group, index)}
+                    className="shrink-0 rounded-lg bg-accent-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-accent-700"
+                  >
+                    Объединить
+                  </button>
+                  <button
+                    onClick={() => handleDismissDuplicateGroup(index)}
+                    className="shrink-0 text-xs text-slate-400 transition hover:text-slate-700"
+                  >
+                    Скрыть
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {issues.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-400">
               За этот день пока нет тикетов.

@@ -5,16 +5,108 @@ import { todayDateString } from "@/lib/date";
 import { cleanTicketDescription, isNoiseOnly } from "@/lib/textClean";
 import { isAiSkip, rewriteTicketDescriptionWithAI } from "@/lib/ai";
 import { isAiCleaningEnabled } from "@/lib/settings";
+import { isIssueStatus, STATUS_META } from "@/lib/status";
+import { reactToStatusChange } from "@/lib/issueStatus";
+import { telegramIdToAgent } from "@/lib/agentTelegram";
+import { generateReportText } from "@/lib/report";
 import {
   AUTO_ISSUE_CREATOR,
+  answerCallbackQuery,
   buildMessageLink,
+  editMessageReplyMarkup,
   extractAuthorName,
   extractReplyContextLine,
   extractText,
   isOwnAgentMessage,
+  sendTelegramMessage,
+  type TelegramCallbackQuery,
   type TelegramMessagePayload,
   type TelegramUpdate,
 } from "@/lib/telegram";
+
+const REPORT_SEND_PREFIX = "report_send:";
+const ISSUE_STATUS_PREFIX = "issue_status:";
+
+// Нажатия на инлайн-кнопки под вечерней сводкой (см.
+// /api/cron/evening-report) и под карточками отдельных тикетов — дают
+// агенту менять статус тикета или разослать готовый репорт в рабочую
+// группу прямо из Telegram, без захода на сайт.
+async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
+  const data = query.data ?? "";
+
+  if (data.startsWith(ISSUE_STATUS_PREFIX)) {
+    const [issueId, status] = data.slice(ISSUE_STATUS_PREFIX.length).split(":");
+    if (!issueId || !isIssueStatus(status)) {
+      await answerCallbackQuery(query.id, "Неизвестное действие");
+      return;
+    }
+
+    const existing = await prisma.issue.findUnique({
+      where: { id: issueId },
+      select: { status: true, telegramLink: true, createdBy: true },
+    });
+    if (!existing) {
+      await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
+      return;
+    }
+
+    // Тот же принцип, что у PATCH /api/issues/[id]: если тикет ещё
+    // числится за ботом, первое же действие живого агента (тут — клик по
+    // кнопке) переоформляет автора на него. Кто именно нажал, узнаём по
+    // Telegram id из callback_query, а не из тела запроса.
+    const actorName = telegramIdToAgent(query.from.id);
+    await prisma.issue.update({
+      where: { id: issueId },
+      data: {
+        status,
+        ...(actorName && existing.createdBy === AUTO_ISSUE_CREATOR
+          ? { createdBy: actorName }
+          : {}),
+      },
+    });
+    await reactToStatusChange(existing.status, status, existing.telegramLink);
+    await answerCallbackQuery(
+      query.id,
+      `Статус: ${STATUS_META[status].emoji} ${STATUS_META[status].label}`
+    );
+    if (query.message) {
+      await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
+    }
+    return;
+  }
+
+  if (data.startsWith(REPORT_SEND_PREFIX)) {
+    const targetChatId = process.env.REPORT_TARGET_CHAT_ID;
+    if (!targetChatId) {
+      await answerCallbackQuery(
+        query.id,
+        "Группа для отправки ещё не настроена (REPORT_TARGET_CHAT_ID)",
+        true
+      );
+      return;
+    }
+
+    const reportDate = data.slice(REPORT_SEND_PREFIX.length);
+    const [issues, presets] = await Promise.all([
+      prisma.issue.findMany({ where: { reportDate } }),
+      prisma.groupPreset.findMany(),
+    ]);
+    const text = generateReportText(issues, presets);
+    if (!text) {
+      await answerCallbackQuery(query.id, "За этот день нечего отправлять", true);
+      return;
+    }
+
+    await sendTelegramMessage(targetChatId, text);
+    await answerCallbackQuery(query.id, "Отправлено в группу ✅");
+    if (query.message) {
+      await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
+    }
+    return;
+  }
+
+  await answerCallbackQuery(query.id);
+}
 
 // Готовит описание для авто-тикета — или null, если по этому сообщению
 // тикет заводить не нужно (голое приветствие, одна ссылка, "рахмет"):
@@ -170,6 +262,12 @@ export async function POST(request: NextRequest) {
   }
 
   const update: TelegramUpdate = await request.json().catch(() => null);
+
+  if (update?.callback_query) {
+    await handleCallbackQuery(update.callback_query);
+    return NextResponse.json({ ok: true });
+  }
+
   const message = update?.message ?? update?.edited_message;
 
   // Отвечаем 200 сразу же на всё, что нам не интересно, чтобы Telegram

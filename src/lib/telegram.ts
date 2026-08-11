@@ -7,7 +7,30 @@ export type TelegramUpdate = {
   update_id: number;
   message?: TelegramMessagePayload;
   edited_message?: TelegramMessagePayload;
+  callback_query?: TelegramCallbackQuery;
 };
+
+// Нажатие на inline-кнопку под сообщением бота — под вечерней сводкой
+// (см. /api/cron/evening-report) и под карточками отдельных тикетов,
+// позволяют менять статус тикета и рассылать репорт прямо из Telegram, не
+// открывая сайт (см. handleCallbackQuery в вебхуке).
+export type TelegramCallbackQuery = {
+  id: string;
+  from: {
+    id: number;
+    first_name?: string;
+    last_name?: string;
+    username?: string;
+  };
+  data?: string;
+  message?: {
+    message_id: number;
+    chat: { id: number };
+  };
+};
+
+export type InlineKeyboardButton = { text: string; callback_data: string };
+export type InlineKeyboard = InlineKeyboardButton[][];
 
 export type TelegramMessagePayload = {
   message_id: number;
@@ -119,39 +142,104 @@ export function extractReplyContextLine(
   return `↩️ ${author ?? "Жауап"}: ${truncated}`;
 }
 
-const REACTION_TIMEOUT_MS = 5000;
+const BOT_API_TIMEOUT_MS = 5000;
+
+// Общий вызов Telegram Bot API — для реакций, отправки сообщений с
+// инлайн-кнопками и ответов на них. Намеренно не бросает исключение и
+// возвращает null при любой проблеме (нет токена, нет сети, таймаут,
+// Telegram ответил ошибкой): каждый из этих вызовов — бонус к основному
+// действию (сохранить статус, отдать тикет), а не его часть, и не должен
+// ронять его при недоступности Telegram.
+async function callBotApi(
+  method: string,
+  payload: Record<string, unknown>
+): Promise<unknown> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BOT_API_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // Отражает смену статуса тикета прямо в чате — реакцией на исходное
 // сообщение, без лишнего сообщения-уведомления в чат. emoji: null снимает
 // реакцию (пустой список reaction). Telegram разрешает для ботов только
 // фиксированный набор emoji (ReactionTypeEmoji) — не любой символ.
-// Намеренно не бросает исключение: реакция — бонус к статусу тикета, а не
-// его часть, и не должна ронять сохранение статуса, если у бота нет прав
-// на реакции в чате, сообщение удалено или Telegram недоступен.
 export async function setMessageReaction(
   chatId: string,
   messageId: number,
   emoji: string | null
 ): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
+  await callBotApi("setMessageReaction", {
+    chat_id: chatId,
+    message_id: messageId,
+    reaction: emoji ? [{ type: "emoji", emoji }] : [],
+  });
+}
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REACTION_TIMEOUT_MS);
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/setMessageReaction`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        message_id: messageId,
-        reaction: emoji ? [{ type: "emoji", emoji }] : [],
-      }),
-      signal: controller.signal,
-    });
-  } catch {
-    // см. комментарий выше — намеренно проглатываем
-  } finally {
-    clearTimeout(timeout);
-  }
+// Отправляет сообщение (опционально с инлайн-клавиатурой) — используется
+// вечерней сводкой (см. /api/cron/evening-report) и рассылкой готового
+// репорта в группу по кнопке. Возвращает message_id для тех редких
+// случаев, когда его потом нужно отредактировать (см.
+// editMessageReplyMarkup); при неудаче — null, вызывающий код просто не
+// получит id и не станет ничего редактировать.
+export async function sendTelegramMessage(
+  chatId: string | number,
+  text: string,
+  replyMarkup?: InlineKeyboard
+): Promise<{ message_id: number } | null> {
+  const data = (await callBotApi("sendMessage", {
+    chat_id: chatId,
+    text,
+    reply_markup: replyMarkup ? { inline_keyboard: replyMarkup } : undefined,
+  })) as { result?: { message_id?: number } } | null;
+
+  return typeof data?.result?.message_id === "number"
+    ? { message_id: data.result.message_id }
+    : null;
+}
+
+// Снимает инлайн-клавиатуру с уже отправленного сообщения — после того,
+// как кнопку нажали ("Отправить в группу" / смена статуса), чтобы её
+// нельзя было случайно нажать второй раз.
+export async function editMessageReplyMarkup(
+  chatId: string | number,
+  messageId: number,
+  replyMarkup: InlineKeyboard | null
+): Promise<void> {
+  await callBotApi("editMessageReplyMarkup", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: { inline_keyboard: replyMarkup ?? [] },
+  });
+}
+
+// Ответ на нажатие инлайн-кнопки — Telegram требует его в течение
+// нескольких секунд, иначе кнопка у пользователя "крутится" бесконечно.
+// showAlert — показать всплывающее окно вместо мелкого тоста (для явных
+// отказов вроде "группа ещё не настроена").
+export async function answerCallbackQuery(
+  callbackQueryId: string,
+  text?: string,
+  showAlert = false
+): Promise<void> {
+  await callBotApi("answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text,
+    show_alert: showAlert,
+  });
 }
