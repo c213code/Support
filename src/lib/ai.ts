@@ -10,6 +10,52 @@
 // молча откатывается на cleanTicketDescription, а не роняет обработку
 // сообщения.
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+
+// Groq free tier: 100k токенов/день, лимит висит на аккаунте целиком (не на
+// ключе) — второй ключ того же аккаунта квоту не обходит, нужен ключ с
+// другого аккаунта. GROQ_API_KEY можно задать как один ключ или как
+// несколько через запятую ("key1,key2") — при исчерпании/ошибке первого
+// автоматически пробуем следующий, ничего в вызывающем коде менять не
+// нужно.
+function groqApiKeys(): string[] {
+  return (process.env.GROQ_API_KEY ?? "")
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
+
+// Общий вызов Groq chat completions с перебором ключей — 429 (квота
+// исчерпана) и любая другая ошибка/таймаут одного ключа переходят к
+// следующему, а не сразу к null. Возвращает null, только если так
+// ответили (или упали) вообще все ключи — вызывающий код как и раньше
+// откатывается на regex-чистку/пропуск фичи.
+async function callGroqChat(
+  body: Record<string, unknown>,
+  timeoutMs: number
+): Promise<unknown> {
+  for (const apiKey of groqApiKeys()) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return await res.json();
+    } catch {
+      // Сеть/таймаут — пробуем следующий ключ.
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return null;
+}
+
 const GROQ_TIMEOUT_MS = 8000;
 
 // Ответ модели, означающий "в сообщении нет запроса, тикет заводить не
@@ -92,21 +138,11 @@ const FEW_SHOT_TURNS: Array<{ user: string; assistant: string }> = [
 export async function rewriteTicketDescriptionWithAI(
   raw: string
 ): Promise<string | null> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey || !raw.trim()) return null;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS);
+  if (groqApiKeys().length === 0 || !raw.trim()) return null;
 
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
+    const data = (await callGroqChat(
+      {
         model: GROQ_MODEL,
         temperature: 0.15,
         max_tokens: 150,
@@ -118,20 +154,16 @@ export async function rewriteTicketDescriptionWithAI(
           ]),
           { role: "user", content: raw },
         ],
-      }),
-    });
+      },
+      GROQ_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
 
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    const text: unknown = data?.choices?.[0]?.message?.content;
+    const text = data?.choices?.[0]?.message?.content;
     return typeof text === "string" && text.trim() ? text.trim() : null;
   } catch {
-    // Таймаут, сеть, невалидный ответ — не наша забота здесь, вызывающий
-    // код откатится на regex-чистку.
+    // Невалидный ответ — не наша забота здесь, вызывающий код откатится
+    // на regex-чистку.
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -155,8 +187,7 @@ const MAX_ISSUES_FOR_DUPLICATE_CHECK = 60;
 export async function findDuplicateGroups(
   issues: Array<{ id: string; description: string }>
 ): Promise<string[][] | null> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey || issues.length < 2) return null;
+  if (groqApiKeys().length === 0 || issues.length < 2) return null;
 
   const validIds = new Set(issues.map((i) => i.id));
   const list = issues
@@ -164,18 +195,9 @@ export async function findDuplicateGroups(
     .map((i) => `${i.id}: ${i.description}`)
     .join("\n");
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DUPLICATES_TIMEOUT_MS);
-
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
+    const data = (await callGroqChat(
+      {
         model: GROQ_MODEL,
         temperature: 0,
         max_tokens: 1000,
@@ -184,13 +206,11 @@ export async function findDuplicateGroups(
           { role: "system", content: DUPLICATE_SYSTEM_PROMPT },
           { role: "user", content: list },
         ],
-      }),
-    });
+      },
+      DUPLICATES_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
 
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    const text: unknown = data?.choices?.[0]?.message?.content;
+    const text = data?.choices?.[0]?.message?.content;
     if (typeof text !== "string") return null;
 
     const parsed = JSON.parse(text);
@@ -207,7 +227,5 @@ export async function findDuplicateGroups(
     return groups;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
