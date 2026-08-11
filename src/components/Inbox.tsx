@@ -22,6 +22,7 @@ import {
 } from "@/lib/date";
 import { groupColor, isOfficialGroupName } from "@/lib/groups";
 import { cleanTicketDescription } from "@/lib/textClean";
+import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -86,6 +87,11 @@ export function Inbox() {
     null
   );
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [aiValidation, setAiValidation] = useState<{
+    falsePositives: IssueDTO[];
+    improvements: Array<{ issue: IssueDTO; suggested: string }>;
+  } | null>(null);
+  const [checkingAiValidation, setCheckingAiValidation] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const boardSearchRef = useRef<HTMLInputElement>(null);
@@ -317,6 +323,101 @@ export function Inbox() {
 
   function handleDismissDuplicateGroup(index: number) {
     setDuplicateGroups((prev) => prev?.filter((_, i) => i !== index) ?? null);
+  }
+
+  // Перепроверка тикетов "Отправлено", заведённых ботом без участия ИИ
+  // (был выключен/упал/квота) — та же идея, что и у "Найти дубли": ИИ
+  // только предлагает, ничего не удаляет и не переписывает сам (см.
+  // POST /api/issues/ai-validate). Ловит два случая: ИИ решает, что это
+  // вообще не обращение (рабочая переписка коллег, отсеялась бы SKIP-ом
+  // при живом ИИ) — кандидат на удаление; и просто более короткая/точная
+  // формулировка описания — кандидат на замену текста.
+  async function handleAiValidate() {
+    setCheckingAiValidation(true);
+    setAiValidation(null);
+    try {
+      const res = await fetch("/api/issues/ai-validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportDate: date }),
+      });
+      const data = await res.json();
+      if (data.unavailable) {
+        toast("ИИ недоступен — проверь GROQ_API_KEY / квоту", "error");
+        return;
+      }
+      const falsePositives: IssueDTO[] = data.falsePositives ?? [];
+      const improvements: Array<{ issue: IssueDTO; suggested: string }> =
+        data.improvements ?? [];
+      setAiValidation({ falsePositives, improvements });
+      if (falsePositives.length === 0 && improvements.length === 0) {
+        toast("Всё чисто, замечаний нет", "info");
+      }
+    } finally {
+      setCheckingAiValidation(false);
+    }
+  }
+
+  function handleDeleteFalsePositive(issue: IssueDTO) {
+    confirm({
+      title: "Удалить тикет?",
+      body: `ИИ считает, что это не обращение, а рабочая переписка:\n«${issue.description}»`,
+      confirmLabel: "Удалить",
+      tone: "danger",
+      onConfirm: async () => {
+        await fetch(`/api/issues/${issue.id}`, { method: "DELETE" });
+        setAiValidation((prev) =>
+          prev
+            ? {
+                ...prev,
+                falsePositives: prev.falsePositives.filter((i) => i.id !== issue.id),
+              }
+            : null
+        );
+        await loadIssues(date);
+        toast("Тикет удалён", "info");
+      },
+    });
+  }
+
+  function handleDismissFalsePositive(issue: IssueDTO) {
+    setAiValidation((prev) =>
+      prev
+        ? {
+            ...prev,
+            falsePositives: prev.falsePositives.filter((i) => i.id !== issue.id),
+          }
+        : null
+    );
+  }
+
+  async function handleApplyImprovement(issue: IssueDTO, suggested: string) {
+    await fetch(`/api/issues/${issue.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: suggested }),
+    });
+    setAiValidation((prev) =>
+      prev
+        ? {
+            ...prev,
+            improvements: prev.improvements.filter((i) => i.issue.id !== issue.id),
+          }
+        : null
+    );
+    await loadIssues(date);
+    toast("Описание обновлено");
+  }
+
+  function handleDismissImprovement(issue: IssueDTO) {
+    setAiValidation((prev) =>
+      prev
+        ? {
+            ...prev,
+            improvements: prev.improvements.filter((i) => i.issue.id !== issue.id),
+          }
+        : null
+    );
   }
 
   // Быстрая смена статуса тикета на доске (перетаскиванием или кнопкой).
@@ -681,6 +782,18 @@ export function Inbox() {
                   🤖 {checkingDuplicates ? "Ищем дубли…" : "Найти дубли"}
                 </button>
               )}
+              {issues.some(
+                (i) => i.status === "SENT" && i.createdBy === AUTO_ISSUE_CREATOR
+              ) && (
+                <button
+                  onClick={handleAiValidate}
+                  disabled={checkingAiValidation}
+                  title="Перепроверить ИИ тикеты, заведённые ботом без него (был выключен/упал/квота)"
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-brand-600 disabled:opacity-50"
+                >
+                  🤖 {checkingAiValidation ? "Проверяем…" : "Проверить авто-тикеты"}
+                </button>
+              )}
               {issues.some((i) => i.status === "SENT") && (
                 <button
                   onClick={handleCleanDescriptions}
@@ -746,6 +859,74 @@ export function Inbox() {
               ))}
             </div>
           )}
+          {aiValidation &&
+            (aiValidation.falsePositives.length > 0 ||
+              aiValidation.improvements.length > 0) && (
+              <div className="mb-3 space-y-2 rounded-xl border border-accent-400/40 bg-accent-500/5 p-3">
+                {aiValidation.falsePositives.length > 0 && (
+                  <>
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-accent-700">
+                      🤖 ИИ считает — это не обращение, а рабочая переписка,
+                      без него так завелось ошибочно:
+                    </p>
+                    {aiValidation.falsePositives.map((issue) => (
+                      <div
+                        key={issue.id}
+                        className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5"
+                      >
+                        <span className="flex-1 text-xs text-slate-700">
+                          {issue.description}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteFalsePositive(issue)}
+                          className="shrink-0 rounded-lg bg-red-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-red-700"
+                        >
+                          Удалить
+                        </button>
+                        <button
+                          onClick={() => handleDismissFalsePositive(issue)}
+                          className="shrink-0 text-xs text-slate-400 transition hover:text-slate-700"
+                        >
+                          Оставить
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {aiValidation.improvements.length > 0 && (
+                  <>
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-accent-700">
+                      🤖 ИИ предлагает описание точнее:
+                    </p>
+                    {aiValidation.improvements.map(({ issue, suggested }) => (
+                      <div
+                        key={issue.id}
+                        className="flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-2.5"
+                      >
+                        <span className="text-xs text-slate-400 line-through">
+                          {issue.description}
+                        </span>
+                        <span className="text-xs text-slate-700">{suggested}</span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleApplyImprovement(issue, suggested)}
+                            className="shrink-0 rounded-lg bg-accent-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-accent-700"
+                          >
+                            Применить
+                          </button>
+                          <button
+                            onClick={() => handleDismissImprovement(issue)}
+                            className="shrink-0 text-xs text-slate-400 transition hover:text-slate-700"
+                          >
+                            Оставить как есть
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
           {issues.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-400">
               За этот день пока нет тикетов.
