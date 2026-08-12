@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
-import { cleanTicketDescription, isNoiseOnly } from "@/lib/textClean";
-import { isAiSkip, rewriteTicketDescriptionWithAI } from "@/lib/ai";
-import { isAiCleaningEnabled } from "@/lib/settings";
+import { isNoiseOnly } from "@/lib/textClean";
+import { buildDescription } from "@/lib/ticketDescription";
 import { isIssueStatus, STATUS_META } from "@/lib/status";
 import { reactToStatusChange } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
@@ -106,38 +105,6 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
   }
 
   await answerCallbackQuery(query.id);
-}
-
-// Готовит описание для авто-тикета — или null, если по этому сообщению
-// тикет заводить не нужно (голое приветствие, одна ссылка, "рахмет"):
-// такие карточки только забивают беклог, а само сообщение всё равно
-// остаётся видно во "Входящих" и его можно завести руками.
-//
-// Два текста намеренно разные: `own` — то, что человек буквально напечатал
-// (без цитаты), решает, мусор это или нет ("ок" в ответ на чей-то вопрос —
-// всё ещё не тикет, независимо от вопроса). `contextual` — то же самое, но
-// с приклеенной цитатой (см. extractReplyContextLine) — идёт в regex/ИИ,
-// когда мусором не оказалось: реплика вроде "Әдістеме бөлінді... дейді"
-// без вопроса, на который отвечали, превращается в нечитаемый обрывок.
-//
-// Тогл "aiCleaningEnabled" (см. lib/settings.ts, включается кнопкой в
-// /inbox) решает, кто пишет описание: ИИ (Groq, переписывает сообщение,
-// понимая контекст) или обычная regex-чистка. Если ИИ выключен, ключ не
-// задан или запрос упал/подвис — тихо откатываемся на regex, чтобы вебхук
-// не зависел от внешнего API.
-async function buildDescription(
-  own: string,
-  contextual: string
-): Promise<string | null> {
-  // Дешёвая проверка идёт первой: очевидный мусор отсеиваем регулярками,
-  // не тратя на него запрос к ИИ.
-  if (isNoiseOnly(own)) return null;
-
-  if (await isAiCleaningEnabled()) {
-    const aiResult = await rewriteTicketDescriptionWithAI(contextual);
-    if (aiResult) return isAiSkip(aiResult) ? null : aiResult;
-  }
-  return cleanTicketDescription(contextual);
 }
 
 // Заводит тикет "Отправлено" для уже известной группы, чтобы он сразу был

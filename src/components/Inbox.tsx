@@ -92,6 +92,10 @@ export function Inbox() {
     improvements: Array<{ issue: IssueDTO; suggested: string }>;
   } | null>(null);
   const [checkingAiValidation, setCheckingAiValidation] = useState(false);
+  const [missedTickets, setMissedTickets] = useState<
+    Array<{ message: TelegramMessageDTO; suggested: string }> | null
+  >(null);
+  const [checkingMissedTickets, setCheckingMissedTickets] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const boardSearchRef = useRef<HTMLInputElement>(null);
@@ -430,6 +434,58 @@ export function Inbox() {
             improvements: prev.improvements.filter((i) => i.issue.id !== issue.id),
           }
         : null
+    );
+  }
+
+  // Перепроверка "Входящих" за день: сообщения с уже известной группой, по
+  // которым тикет так и не завёлся — либо потому, что группу привязали
+  // задним числом (см. PATCH /api/telegram/messages/[id], тикеты за
+  // накопленные сообщения не создаёт сам), либо это старый пропуск ещё до
+  // какого-то фикса. Прогоняет их через ту же логику, что и вебхук в
+  // моменте (см. POST /api/telegram/ai-recheck-messages), и предлагает
+  // завести тикет по тем, что теперь проходят.
+  async function handleRecheckMessages() {
+    setCheckingMissedTickets(true);
+    setMissedTickets(null);
+    try {
+      const res = await fetch("/api/telegram/ai-recheck-messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportDate: date }),
+      });
+      const data = await res.json();
+      const missed: Array<{ message: TelegramMessageDTO; suggested: string }> =
+        data.missed ?? [];
+      setMissedTickets(missed);
+      if (missed.length === 0) toast("Пропущенных тикетов не нашлось", "info");
+    } finally {
+      setCheckingMissedTickets(false);
+    }
+  }
+
+  async function handleCreateMissedTicket(item: {
+    message: TelegramMessageDTO;
+    suggested: string;
+  }) {
+    await handleCreateIssue(item.message, {
+      groupName: item.message.groupName ?? "",
+      groupEmoji: item.message.groupEmoji,
+      description: item.suggested,
+      telegramLink: item.message.messageLink,
+      status: "SENT",
+      note: "",
+      ticketLink: "",
+      escalatedTeam: "",
+      escalatedAssignee: "",
+    });
+    setMissedTickets((prev) =>
+      prev ? prev.filter((x) => x.message.id !== item.message.id) : null
+    );
+  }
+
+  function handleDismissMissedTicket(messageId: string) {
+    setMissedTickets((prev) =>
+      prev ? prev.filter((x) => x.message.id !== messageId) : null
     );
   }
 
@@ -1103,7 +1159,51 @@ export function Inbox() {
         >
           Без группы
         </button>
+        {messages.length > 0 && (
+          <button
+            onClick={handleRecheckMessages}
+            disabled={checkingMissedTickets}
+            title="Проверить сообщения с уже известной группой, по которым тикет так и не завёлся"
+            className="ml-auto flex items-center gap-1 text-xs text-slate-400 hover:text-brand-600 disabled:opacity-50"
+          >
+            🔍 {checkingMissedTickets ? "Проверяем…" : "Найти пропущенные тикеты"}
+          </button>
+        )}
       </div>
+
+      {missedTickets && missedTickets.length > 0 && (
+        <div className="mb-4 space-y-2 rounded-xl border border-accent-400/40 bg-accent-500/5 p-3">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-accent-700">
+            🔍 По этим сообщениям группа известна, а тикет так и не завёлся —
+            проверь и заведи, если нужно:
+          </p>
+          {missedTickets.map((item) => (
+            <div
+              key={item.message.id}
+              className="flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-2.5"
+            >
+              <span className="text-xs text-slate-400">
+                {item.message.groupName} {item.message.groupEmoji}
+              </span>
+              <span className="text-xs text-slate-700">{item.suggested}</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleCreateMissedTicket(item)}
+                  className="shrink-0 rounded-lg bg-accent-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-accent-700"
+                >
+                  Создать тикет
+                </button>
+                <button
+                  onClick={() => handleDismissMissedTicket(item.message.id)}
+                  className="shrink-0 text-xs text-slate-400 transition hover:text-slate-700"
+                >
+                  Скрыть
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">
