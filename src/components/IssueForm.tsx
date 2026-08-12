@@ -83,6 +83,7 @@ export function IssueForm({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rewriting, setRewriting] = useState(false);
 
   // "Вернуть без ИИ" — путь назад для тикета, чей описание переписал ИИ:
   // подтягиваем исходное Telegram-сообщение и то, что дала бы обычная
@@ -136,6 +137,39 @@ export function IssueForm({
       return;
     }
     setDescription(source.regexCleaned);
+  }
+
+  // "✨ ИИ напишет" — переписать то, что сейчас в описании (сырой
+  // вставленный текст сообщения), в короткий стиль тикета. В отличие от
+  // автоматической чистки в вебхуке — разовое явное действие агента,
+  // не зависит от тогла aiCleaningEnabled: тот решает про новые входящие
+  // сообщения, это — "попроси ИИ прямо сейчас" для конкретного тикета,
+  // который агент заводит вручную (см. POST /api/ai/rewrite-description).
+  async function handleAiRewrite() {
+    if (!description.trim() || rewriting) return;
+    setRewriting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ai/rewrite-description", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: description }),
+      });
+      const data = await res.json();
+      if (data.result) {
+        setDescription(data.result);
+      } else if (data.skip) {
+        setError(
+          "ИИ считает, что тут нет обращения — опиши своими словами"
+        );
+      } else {
+        setError("ИИ сейчас недоступен, попробуй ещё раз позже");
+      }
+    } catch {
+      setError("ИИ сейчас недоступен, попробуй ещё раз позже");
+    } finally {
+      setRewriting(false);
+    }
   }
 
   function pickStatus(next: IssueStatus) {
@@ -250,16 +284,29 @@ export function IssueForm({
           <label className="text-xs font-medium text-slate-500">
             Описание проблемы
           </label>
-          {canRevertToRegex && (
-            <button
-              type="button"
-              onClick={handleToggleSource}
-              className="flex items-center gap-1 text-xs font-medium text-accent-600 hover:underline"
-            >
-              <IconRefresh className="h-3 w-3" />
-              {showSource ? "Скрыть" : "ИИ написал не то?"}
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {description.trim() && (
+              <button
+                type="button"
+                onClick={handleAiRewrite}
+                disabled={rewriting}
+                title="Переписать вставленный текст в короткий стиль тикета через ИИ"
+                className="flex items-center gap-1 text-xs font-medium text-accent-600 hover:underline disabled:opacity-50"
+              >
+                ✨ {rewriting ? "Переписываем…" : "ИИ напишет"}
+              </button>
+            )}
+            {canRevertToRegex && (
+              <button
+                type="button"
+                onClick={handleToggleSource}
+                className="flex items-center gap-1 text-xs font-medium text-accent-600 hover:underline"
+              >
+                <IconRefresh className="h-3 w-3" />
+                {showSource ? "Скрыть" : "ИИ написал не то?"}
+              </button>
+            )}
+          </div>
         </div>
         <textarea
           value={description}
