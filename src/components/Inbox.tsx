@@ -44,6 +44,7 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ["f"], description: "Фильтр по тексту" },
   { keys: ["←", "→"], description: "Предыдущий / следующий день" },
   { keys: ["t"], description: "Сегодня" },
+  { keys: ["n"], description: "Новый тикет" },
 ];
 
 const POLL_INTERVAL_MS = 15000;
@@ -96,6 +97,7 @@ export function Inbox() {
     Array<{ message: TelegramMessageDTO; suggested: string }> | null
   >(null);
   const [checkingMissedTickets, setCheckingMissedTickets] = useState(false);
+  const [addingNewIssue, setAddingNewIssue] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const boardSearchRef = useRef<HTMLInputElement>(null);
@@ -231,6 +233,19 @@ export function Inbox() {
       body: JSON.stringify({ archived: true }),
     });
     await loadMessages(date);
+  }
+
+  // Тикет с нуля, без исходного сообщения во "Входящих" — когда ссылку
+  // на Telegram-сообщение прислали в личку/другой чат, куда бот не
+  // подключён, и заводить тикет не от чего кроме самой ссылки.
+  async function handleCreateNewIssue(values: IssueFormValues) {
+    await fetch("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...values, reportDate: date }),
+    });
+    setAddingNewIssue(false);
+    await loadIssues(date);
   }
 
   async function handleCreateIssue(
@@ -641,6 +656,10 @@ export function Inbox() {
     t: () => setDate(todayDateString()),
     b: () => setTab("board"),
     m: () => setTab("messages"),
+    n: () => {
+      setTab("board");
+      setAddingNewIssue(true);
+    },
     f: () => {
       setTab("board");
       // Фокус после переключения вкладки — поле рендерится только на доске.
@@ -841,6 +860,14 @@ export function Inbox() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => setAddingNewIssue(true)}
+                title="Завести тикет по ссылке, которой ещё нет во «Входящих» (например, прислали в личку)"
+                className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-brand-700 active:scale-95"
+              >
+                <IconPlus className="h-3.5 w-3.5" />
+                Новый тикет
+              </button>
               {issues.length >= 2 && (
                 <button
                   onClick={handleFindDuplicates}
@@ -1107,6 +1134,18 @@ export function Inbox() {
             </Modal>
           );
         })()}
+
+      {addingNewIssue && (
+        <Modal onClose={() => setAddingNewIssue(false)} size="lg">
+          <IssueForm
+            groups={groups}
+            currentAgent={currentAgent ?? ""}
+            showGroupPicker
+            onCancel={() => setAddingNewIssue(false)}
+            onSubmit={handleCreateNewIssue}
+          />
+        </Modal>
+      )}
 
       {tab === "messages" && (
         <>
