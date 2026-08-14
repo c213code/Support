@@ -42,13 +42,19 @@ export type DailyReviewResult =
 // разница только в том, для какой даты и при каком условии (см. каждый
 // роут).
 //
+// Собирает текст + клавиатуру сводки за день — общее между вечерней
+// рассылкой (sendDailyReviewMessage ниже, получатель вычисляется по
+// pickRecipient) и командой /report (отправляется прямо тому, кто спросил,
+// в любое время дня, не только по расписанию cron). Возвращает null, если
+// за дату вообще нет тикетов — тогда слать нечего.
+//
 // Показывает не просто цифры, а сам текст будущего репорта
 // (`generateReportText` — то же, что строится на сайте) — иначе "ревью"
-// по кнопке было бы вслепую: агент видел бы только количество тикетов, а
-// не то, что реально уйдёт в чат с боссами.
-export async function sendDailyReviewMessage(
+// было бы вслепую: агент видел бы только количество тикетов, а не то, что
+// реально уйдёт в чат с боссами.
+export async function buildReviewSummary(
   reportDate: string
-): Promise<DailyReviewResult> {
+): Promise<{ text: string; keyboard: InlineKeyboard } | null> {
   const [issues, presets] = await Promise.all([
     prisma.issue.findMany({
       where: { reportDate },
@@ -58,12 +64,7 @@ export async function sendDailyReviewMessage(
   ]);
 
   if (issues.length === 0) {
-    return { sent: false, reason: "no tickets" };
-  }
-
-  const recipientId = await pickRecipient(reportDate);
-  if (!recipientId) {
-    return { sent: false, reason: "no recipient" };
+    return null;
   }
 
   const sentCount = issues.filter((i) => i.status === "SENT").length;
@@ -89,7 +90,7 @@ export async function sendDailyReviewMessage(
       TRUNCATION_NOTE;
   }
 
-  const summaryKeyboard: InlineKeyboard = [
+  const keyboard: InlineKeyboard = [
     [{ text: "📤 Отправить в группу", callback_data: `${REPORT_SEND_PREFIX}${reportDate}` }],
   ];
   const reviewableCount = issues.filter((i) => REVIEWABLE_STATUSES.has(i.status)).length;
@@ -97,7 +98,7 @@ export async function sendDailyReviewMessage(
     // Разбор запускается по кнопке, не сам — сначала видно сводку целиком
     // (сколько чего и в каком статусе), и уже дежурный решает, начинать
     // ли прямо сейчас идти по тикетам одному за другим.
-    summaryKeyboard.push([
+    keyboard.push([
       {
         text: `🔍 Начать разбор тикетов (${reviewableCount})`,
         callback_data: `${START_REVIEW_PREFIX}${reportDate}`,
@@ -108,14 +109,31 @@ export async function sendDailyReviewMessage(
   // если ИИ вообще настроен (иначе кнопка вела бы в тупик) и тикетов
   // хватает хотя бы на пару.
   if (process.env.GROQ_API_KEY && issues.length >= 2) {
-    summaryKeyboard.push([
+    keyboard.push([
       {
         text: "🔗 Найти похожие тикеты",
         callback_data: `${START_DEDUPE_PREFIX}${reportDate}`,
       },
     ]);
   }
-  await sendTelegramMessage(recipientId, preview, summaryKeyboard);
+
+  return { text: preview, keyboard };
+}
+
+export async function sendDailyReviewMessage(
+  reportDate: string
+): Promise<DailyReviewResult> {
+  const summary = await buildReviewSummary(reportDate);
+  if (!summary) {
+    return { sent: false, reason: "no tickets" };
+  }
+
+  const recipientId = await pickRecipient(reportDate);
+  if (!recipientId) {
+    return { sent: false, reason: "no recipient" };
+  }
+
+  await sendTelegramMessage(recipientId, summary.text, summary.keyboard);
 
   return { sent: true, recipientId };
 }

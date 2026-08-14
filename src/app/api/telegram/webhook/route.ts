@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { todayDateString } from "@/lib/date";
+import { todayDateString, formatTimeAlmaty } from "@/lib/date";
 import { isNoiseOnly } from "@/lib/textClean";
 import { buildDescription } from "@/lib/ticketDescription";
 import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
@@ -9,9 +9,15 @@ import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
 import { reactToStatusChange } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { SHARED_AGENT } from "@/lib/agents";
-import { generateReportText } from "@/lib/report";
-import { advanceReviewSession, startReviewSession, goBackReviewSession } from "@/lib/dailyReview";
+import { generateRawBoardText } from "@/lib/report";
+import {
+  advanceReviewSession,
+  startReviewSession,
+  goBackReviewSession,
+  buildReviewSummary,
+} from "@/lib/dailyReview";
 import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
+import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -326,44 +332,12 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
   }
 
   if (data.startsWith(REPORT_SEND_PREFIX)) {
-    const targetChatId = process.env.REPORT_TARGET_CHAT_ID;
-    if (!targetChatId) {
-      await answerCallbackQuery(
-        query.id,
-        "Группа для отправки ещё не настроена (REPORT_TARGET_CHAT_ID)",
-        true
-      );
-      return;
-    }
-
     const reportDate = data.slice(REPORT_SEND_PREFIX.length);
-    const [issues, presets] = await Promise.all([
-      prisma.issue.findMany({ where: { reportDate } }),
-      prisma.groupPreset.findMany(),
-    ]);
-    const text = generateReportText(issues, presets);
-    if (!text) {
-      await answerCallbackQuery(query.id, "За этот день нечего отправлять", true);
+    const result = await sendReportToGroup(reportDate);
+    if (!result.ok) {
+      await answerCallbackQuery(query.id, describeSendFailure(result), true);
       return;
     }
-
-    // Тема (форум-топик) внутри группы — опционально: если чат без "Тем"
-    // или репорт должен идти в общий поток, переменную просто не задают.
-    const targetThreadId = process.env.REPORT_TARGET_THREAD_ID
-      ? Number(process.env.REPORT_TARGET_THREAD_ID)
-      : undefined;
-    await sendTelegramMessage(targetChatId, text, undefined, targetThreadId);
-    // Отмечаем дату отправленной — без этого утренний cron
-    // (/api/cron/morning-report-check) не отличит "уже отправили вечером"
-    // от "забыли" и продублировал бы репорт в чат с боссами. upsert, не
-    // create: кнопку можно нажать повторно (например, случайно дважды
-    // тапнули) — тогда просто обновится sentAt, вместо падения на
-    // уникальном ключе.
-    await prisma.reportSendLog.upsert({
-      where: { reportDate },
-      update: { sentAt: new Date() },
-      create: { reportDate },
-    });
     await answerCallbackQuery(query.id, "Отправлено в группу ✅");
     if (query.message) {
       await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
@@ -372,6 +346,22 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
   }
 
   await answerCallbackQuery(query.id);
+}
+
+// Текст отказа для кнопки "Отправить в группу" и команды /send — общий,
+// чтобы формулировка не разъезжалась между двумя местами вызова
+// sendReportToGroup.
+function describeSendFailure(
+  result: Extract<SendReportResult, { ok: false }>
+): string {
+  switch (result.reason) {
+    case "no-target":
+      return "Группа для отправки ещё не настроена (REPORT_TARGET_CHAT_ID)";
+    case "empty":
+      return "За этот день нечего отправлять";
+    case "already-sent":
+      return `Уже отправлено сегодня в ${formatTimeAlmaty(result.sentAt)}`;
+  }
 }
 
 // Заводит тикет "Отправлено" для уже известной группы, чтобы он сразу был
@@ -487,6 +477,104 @@ async function attachFollowUpToTicket(
   return true;
 }
 
+const HELP_TEXT = [
+  "Команды доступны только в личке с ботом:",
+  "",
+  "/report [дата] — актуальный репорт (то же, что вечерняя сводка), можно в любое время дня",
+  "/raw [дата] — исходный список тикетов группами, включая ещё не выставленные в репорт «Отправлено»",
+  "/send [дата] — отправить репорт в рабочую группу (если уже отправляли за эту дату — просто скажет, когда)",
+  "/dedupe [дата] — найти и разобрать похожие тикеты (ИИ-подсказка, объединение по одному)",
+  "/review [дата] — начать разбор тикетов по одному",
+  "",
+  "Без даты — за сегодня. Дата — в формате YYYY-MM-DD.",
+].join("\n");
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Слэш-команды в личке с ботом ("посмотреть репорт, не заходя на сайт" — в
+// любой момент дня, а не только когда придёт вечерняя сводка). Работают
+// только для известных агентов (AGENT_TELEGRAM_IDS) и только в приватном
+// чате — не в группах поддержки, куда пишут клиенты: там ответ бота на
+// команду был бы виден им, а данные внутренние.
+async function handleBotCommand(chatId: number, fromId: number, text: string): Promise<void> {
+  const actorName = telegramIdToAgent(fromId);
+  if (!actorName) {
+    await sendTelegramMessage(
+      chatId,
+      "Не узнал тебя — попроси добавить твой Telegram id в AGENT_TELEGRAM_IDS."
+    );
+    return;
+  }
+
+  const [rawCommand, dateArg] = text.trim().split(/\s+/);
+  // "@BotName" в конце команды — Telegram сам дописывает его в группах,
+  // где бот один из нескольких; в личке не встречается, но парсим на
+  // всякий случай тем же кодом.
+  const command = rawCommand.split("@")[0].toLowerCase();
+  const reportDate = dateArg && DATE_RE.test(dateArg) ? dateArg : todayDateString();
+
+  switch (command) {
+    case "/start":
+    case "/help": {
+      await sendTelegramMessage(chatId, HELP_TEXT);
+      return;
+    }
+
+    case "/report": {
+      const summary = await buildReviewSummary(reportDate);
+      if (!summary) {
+        await sendTelegramMessage(chatId, `За ${reportDate} тикетов нет.`);
+        return;
+      }
+      await sendTelegramMessage(chatId, summary.text, summary.keyboard);
+      return;
+    }
+
+    case "/raw": {
+      const [issues, presets] = await Promise.all([
+        prisma.issue.findMany({ where: { reportDate }, orderBy: { position: "asc" } }),
+        prisma.groupPreset.findMany(),
+      ]);
+      if (issues.length === 0) {
+        await sendTelegramMessage(chatId, `За ${reportDate} тикетов нет.`);
+        return;
+      }
+      let raw = `📄 Исходный репорт — ${reportDate}\n\n${generateRawBoardText(issues, presets)}`;
+      const truncationNote = "…\n\n(обрезано, полный список — на сайте)";
+      if (raw.length > 4096) {
+        raw = raw.slice(0, 4096 - truncationNote.length) + truncationNote;
+      }
+      await sendTelegramMessage(chatId, raw);
+      return;
+    }
+
+    case "/send": {
+      const result = await sendReportToGroup(reportDate);
+      if (!result.ok) {
+        await sendTelegramMessage(chatId, describeSendFailure(result));
+        return;
+      }
+      await sendTelegramMessage(chatId, "Отправлено в группу ✅");
+      return;
+    }
+
+    case "/dedupe": {
+      await startDedupeReview(chatId, reportDate);
+      return;
+    }
+
+    case "/review": {
+      await startReviewSession(chatId, reportDate);
+      return;
+    }
+
+    default:
+      // Не наша команда (или просто сообщение начинается с "/" случайно) —
+      // молча игнорируем, не шумим в личку в ответ на каждую опечатку.
+      return;
+  }
+}
+
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
@@ -526,6 +614,14 @@ export async function POST(request: NextRequest) {
   const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
 
   const chatId = String(message.chat.id);
+
+  // Слэш-команды — только в личке с ботом, чтобы ответы с внутренними
+  // данными (репорт, разбор тикетов) не улетали в группы поддержки, где их
+  // увидели бы клиенты.
+  if (message.chat.type === "private" && text.startsWith("/") && message.from?.id != null) {
+    await handleBotCommand(message.chat.id, message.from.id, text);
+    return NextResponse.json({ ok: true });
+  }
 
   // Ответ (Reply) на prompt-сообщение "📝 Заметка" (см. ISSUE_NOTE_PREFIX
   // выше) — раньше проверки isOwnAgentMessage ниже, потому что сам агент

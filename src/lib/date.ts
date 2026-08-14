@@ -44,3 +44,13 @@ export function formatDateHuman(date: string): string {
   const weekday = WEEKDAYS_RU[dt.getUTCDay()];
   return `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y} (${weekday})`;
 }
+
+// Время отправки репорта в группу (см. ReportSendLog) для сообщений
+// "уже отправлено в HH:MM" — по Алматы, а не по UTC сервера.
+export function formatTimeAlmaty(date: Date): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}

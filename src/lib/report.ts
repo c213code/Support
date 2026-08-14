@@ -118,3 +118,36 @@ export function generateReportText(
 
   return blocks.join(`\n\n${SEPARATOR}\n`);
 }
+
+// "Исходный" репорт для команды /raw в Telegram — в отличие от
+// generateReportText, не фильтрует SENT: агенту иногда нужно свериться со
+// списком целиком, включая только что заведённые тикеты, а не только с
+// тем, что уйдёт в готовый текст для боссов.
+export function generateRawBoardText(
+  issues: ReportIssue[],
+  presets: ReportGroupPreset[]
+): string {
+  const orderedGroups = groupIssues(issues, presets);
+
+  const blocks = orderedGroups.map(({ name, emoji, items }) => {
+    const header = `${name}${emoji ?? ""}`;
+    const lines: string[] = [header, ""];
+
+    items.forEach((issue, idx) => {
+      const meta = STATUS_META[issue.status];
+      lines.push(`${idx + 1}. [${meta.emoji} ${meta.label}] ${issue.description}`);
+      for (const link of issueLinks(issue)) {
+        lines.push(link);
+      }
+      lines.push("");
+    });
+
+    while (lines[lines.length - 1] === "") {
+      lines.pop();
+    }
+
+    return lines.join("\n");
+  });
+
+  return blocks.join(`\n\n${SEPARATOR}\n`);
+}
