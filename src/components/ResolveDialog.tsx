@@ -36,6 +36,26 @@ export function ResolveDialog({
   const [note, setNote] = useState(defaultNote);
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // "Как это решали в прошлый раз" — половина обращений за день это
+  // повторяющиеся сценарии с почти дословно совпадающими заметками, и
+  // набирать их заново незачем. Только подсказка: подставляется нажатием,
+  // текст потом можно дополнить.
+  const [suggestions, setSuggestions] = useState<
+    { issueId: string; note: string; reportDate: string }[]
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/issues/${issue.id}/similar-resolved`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setSuggestions(data.suggestions ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [issue.id]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -77,6 +97,32 @@ export function ResolveDialog({
             {issue.description}
           </p>
         </div>
+
+        {suggestions.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-slate-500">
+              💡 Похожее решали так — нажми, чтобы подставить
+            </p>
+            <div className="flex flex-col gap-1">
+              {suggestions.map((s) => (
+                <button
+                  key={s.issueId}
+                  type="button"
+                  onClick={() => {
+                    setNote(s.note);
+                    textareaRef.current?.focus();
+                  }}
+                  className="flex items-baseline justify-between gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-left text-xs text-slate-600 transition hover:border-emerald-400 hover:bg-emerald-50"
+                >
+                  <span className="line-clamp-2">{s.note}</span>
+                  <span className="shrink-0 text-[10px] text-slate-400">
+                    {s.reportDate}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="space-y-1">
           <label

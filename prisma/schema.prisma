@@ -163,6 +163,17 @@ model DuplicateReviewSession {
   createdAt    DateTime @default(now())
 }
 
+// Черновик объявления, разосланного командой /broadcast по всем
+// привязанным группам (наблюдалось живьём: одно и то же сообщение про
+// работы на платформе отправляли руками в четыре чата подряд). Хранится
+// отдельной строкой, потому что в callback_data подтверждения текст не
+// влезет — там лимит 64 байта.
+model BroadcastDraft {
+  id        String   @id @default(cuid())
+  text      String
+  createdAt DateTime @default(now())
+}
+
 model Issue {
   id           String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)

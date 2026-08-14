@@ -9,6 +9,7 @@ import {
   type InlineKeyboard,
 } from "@/lib/telegram";
 import { generateReportText } from "@/lib/report";
+import { bestSolution } from "@/lib/solutionLibrary";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -20,6 +21,7 @@ import {
   REPORT_SEND_PREFIX,
   START_REVIEW_PREFIX,
   START_DEDUPE_PREFIX,
+  SOLVE_LIKE_PREFIX,
 } from "@/lib/telegramCallbacks";
 
 const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "ESCALATED"]);
@@ -152,6 +154,9 @@ function buildTicketCard(
     status: IssueStatus;
     telegramLink: string | null;
     botReplies?: string[];
+    // Заметка похожего уже решённого тикета — если такая нашлась, на
+    // карточке появляется кнопка "решить так же" (см. solutionLibrary.ts).
+    suggestedNote?: string | null;
   },
   position: number,
   total: number
@@ -199,6 +204,21 @@ function buildTicketCard(
     // в тексте, который уйдёт боссам.
     { text: "✅ Решено", callback_data: `${ISSUE_RESOLVE_PREFIX}${issue.id}` },
   ];
+  // Отдельной строкой и выше "Пропустить": если подсказка подошла, это
+  // самое быстрое действие на карточке — одно нажатие вместо набора
+  // заметки руками.
+  const solutionRow: InlineKeyboard[number] = [];
+  if (issue.suggestedNote) {
+    const short =
+      issue.suggestedNote.length > 40
+        ? `${issue.suggestedNote.slice(0, 40)}…`
+        : issue.suggestedNote;
+    solutionRow.push({
+      text: `💡 Решить так же: ${short}`,
+      callback_data: `${SOLVE_LIKE_PREFIX}${issue.id}`,
+    });
+  }
+
   const skipRow: InlineKeyboard[number] = [];
   // "Назад" бессмысленна на первом тикете очереди — некуда возвращаться.
   if (position > 1) {
@@ -212,7 +232,12 @@ function buildTicketCard(
     callback_data: `${SKIP_TICKET_PREFIX}${issue.id}`,
   });
 
-  const keyboard = actionRow.length > 0 ? [actionRow, secondRow, skipRow] : [secondRow, skipRow];
+  const keyboard = [
+    ...(actionRow.length > 0 ? [actionRow] : []),
+    secondRow,
+    ...(solutionRow.length > 0 ? [solutionRow] : []),
+    skipRow,
+  ];
   return { text, keyboard };
 }
 
@@ -236,7 +261,11 @@ export async function startReviewSession(
 
   const chatId = String(recipientId);
   const card = buildTicketCard(
-    { ...reviewable[0], botReplies: await botRepliesFor(reviewable[0].id) },
+    {
+      ...reviewable[0],
+      botReplies: await botRepliesFor(reviewable[0].id),
+      suggestedNote: (await bestSolution(reviewable[0]))?.note ?? null,
+    },
     1,
     reviewable.length
   );
@@ -310,7 +339,11 @@ export async function advanceReviewSession(chatId: string): Promise<void> {
   }
 
   const card = buildTicketCard(
-    { ...issue, botReplies: await botRepliesFor(issue.id) },
+    {
+      ...issue,
+      botReplies: await botRepliesFor(issue.id),
+      suggestedNote: (await bestSolution(issue))?.note ?? null,
+    },
     idx + 1,
     session.ticketIds.length
   );
@@ -350,7 +383,11 @@ export async function goBackReviewSession(chatId: string): Promise<void> {
   if (!issue) return;
 
   const card = buildTicketCard(
-    { ...issue, botReplies: await botRepliesFor(issue.id) },
+    {
+      ...issue,
+      botReplies: await botRepliesFor(issue.id),
+      suggestedNote: (await bestSolution(issue))?.note ?? null,
+    },
     idx + 1,
     session.ticketIds.length
   );

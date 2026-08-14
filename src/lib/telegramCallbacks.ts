@@ -41,6 +41,16 @@ export const DEDUPE_SKIP_PREFIX = "dedupe_skip";
 // только если решение пришло из разбора: если агент сам написал в группе
 // "жөңделді", там уже всё сказано.
 export const NOTIFY_RESOLVED_PREFIX = "notify_resolved:";
+// "Решить как в прошлый раз" — применяет заметку похожего уже решённого
+// тикета (см. src/lib/solutionLibrary.ts). В callback_data кладём только id
+// текущего тикета: подсказка пересчитывается в момент нажатия, иначе id
+// обоих тикетов не влезли бы в лимит Telegram в 64 байта.
+export const SOLVE_LIKE_PREFIX = "solve_like:";
+// Подтверждение рассылки объявления по всем привязанным группам (см.
+// /broadcast). Сам текст в callback_data не влезет, поэтому лежит в
+// BroadcastDraft, а сюда попадает только его id.
+export const BROADCAST_SEND_PREFIX = "bcast_send:";
+export const BROADCAST_CANCEL_PREFIX = "bcast_cancel:";
 // Подтверждение "да, это решено" на догадку бота по реплике агента в
 // группе (см. detectAgentIntent) — ведёт в тот же запрос заметки.
 export const CONFIRM_RESOLVED_PREFIX = "confirm_resolved:";

@@ -19,6 +19,7 @@ import {
 import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import { detectAgentIntent } from "@/lib/agentIntent";
+import { bestSolution } from "@/lib/solutionLibrary";
 import { pickResolvedWord } from "@/lib/ai";
 import {
   buildAckText,
@@ -48,12 +49,16 @@ import {
   DEDUPE_SKIP_PREFIX,
   NOTIFY_RESOLVED_PREFIX,
   CONFIRM_RESOLVED_PREFIX,
+  SOLVE_LIKE_PREFIX,
+  BROADCAST_SEND_PREFIX,
+  BROADCAST_CANCEL_PREFIX,
 } from "@/lib/telegramCallbacks";
 import {
   AUTO_ISSUE_CREATOR,
   answerCallbackQuery,
   buildMessageLink,
   editMessageReplyMarkup,
+  editMessageText,
   extractAuthorName,
   extractReplyContextLine,
   extractText,
@@ -177,7 +182,9 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
           : {}),
       },
     });
-    await reactToStatusChange(existing.status, status, existing.telegramLink);
+    // "app": кнопку нажали в разборе, в рабочем чате об этом ещё не
+    // знают — значит бот там отвечает (если автоответы включены).
+    await reactToStatusChange(existing.status, status, existing.telegramLink, "app", issueId);
     await answerCallbackQuery(
       query.id,
       `Статус: ${STATUS_META[status].emoji} ${STATUS_META[status].label}`
@@ -246,7 +253,13 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
           : {}),
       },
     });
-    await reactToStatusChange(existing.status, "ESCALATED", existing.telegramLink);
+    await reactToStatusChange(
+      existing.status,
+      "ESCALATED",
+      existing.telegramLink,
+      "app",
+      issueId
+    );
     await answerCallbackQuery(query.id, `Передано: ${team} ⚠️`);
     if (query.message) {
       // Это сообщение — только клавиатура выбора команды, использована,
@@ -303,6 +316,112 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       "RESOLVED",
       false
     );
+    return;
+  }
+
+  // "Решить так же" — применяет заметку похожего уже закрытого тикета.
+  // Подсказка пересчитывается здесь, а не берётся из callback_data: два
+  // cuid'а туда не влезли бы (лимит 64 байта), а заодно так исключено,
+  // что применится устаревший вариант.
+  if (data.startsWith(SOLVE_LIKE_PREFIX)) {
+    const issueId = data.slice(SOLVE_LIKE_PREFIX.length);
+    const issue = await prisma.issue.findUnique({
+      where: { id: issueId },
+      select: { id: true, description: true, status: true, telegramLink: true, createdBy: true },
+    });
+    if (!issue) {
+      await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
+      return;
+    }
+
+    const suggestion = await bestSolution(issue);
+    if (!suggestion) {
+      await answerCallbackQuery(query.id, "Похожего решения больше не нашлось", true);
+      return;
+    }
+
+    const actorName = telegramIdToAgent(query.from.id);
+    await prisma.issue.update({
+      where: { id: issueId },
+      data: {
+        status: "RESOLVED",
+        note: suggestion.note,
+        ...(actorName && issue.createdBy === AUTO_ISSUE_CREATOR
+          ? { createdBy: actorName }
+          : {}),
+      },
+    });
+    await reactToStatusChange(issue.status, "RESOLVED", issue.telegramLink, "app", issueId);
+    await answerCallbackQuery(query.id, `✅ Решено: ${suggestion.note}`);
+
+    // Как и у обычного "Решено": в рабочем чате об этом ещё не знают,
+    // поэтому предлагаем сообщить туда одной кнопкой.
+    if (query.message && issue.telegramLink && (await isAutoReplyEnabled())) {
+      await sendTelegramMessage(
+        query.message.chat.id,
+        `✅ Решено: ${suggestion.note}`,
+        [
+          [
+            {
+              text: "💬 Сообщить в чат, что решено",
+              callback_data: `${NOTIFY_RESOLVED_PREFIX}${issueId}`,
+            },
+          ],
+        ]
+      );
+    }
+    if (query.message) {
+      await advanceReviewSession(String(query.message.chat.id));
+    }
+    return;
+  }
+
+  // Рассылка объявления по всем привязанным группам. Уходит только после
+  // подтверждения: это сообщение видят сразу все рабочие чаты, и отменить
+  // его потом можно лишь удаляя по одному.
+  if (data.startsWith(BROADCAST_SEND_PREFIX)) {
+    const draftId = data.slice(BROADCAST_SEND_PREFIX.length);
+    const draft = await prisma.broadcastDraft.findUnique({ where: { id: draftId } });
+    if (!draft) {
+      await answerCallbackQuery(query.id, "Черновик не найден", true);
+      return;
+    }
+
+    const presets = await prisma.groupPreset.findMany({
+      where: { chatId: { not: null } },
+      orderBy: { order: "asc" },
+    });
+    let sent = 0;
+    for (const preset of presets) {
+      if (!preset.chatId) continue;
+      if (await sendTelegramMessage(preset.chatId, draft.text)) sent++;
+    }
+
+    await prisma.broadcastDraft.delete({ where: { id: draftId } }).catch(() => {});
+    await answerCallbackQuery(query.id, `Отправлено в ${sent} групп ✅`);
+    if (query.message) {
+      await editMessageText(
+        query.message.chat.id,
+        query.message.message_id,
+        `📢 Разослано в ${sent} групп:\n\n${draft.text}`,
+        null
+      );
+    }
+    return;
+  }
+
+  if (data.startsWith(BROADCAST_CANCEL_PREFIX)) {
+    const draftId = data.slice(BROADCAST_CANCEL_PREFIX.length);
+    await prisma.broadcastDraft.delete({ where: { id: draftId } }).catch(() => {});
+    await answerCallbackQuery(query.id, "Отменено");
+    if (query.message) {
+      await editMessageText(
+        query.message.chat.id,
+        query.message.message_id,
+        "Рассылка отменена.",
+        null
+      );
+    }
     return;
   }
 
@@ -607,6 +726,68 @@ async function applyAgentIntent(
   );
 }
 
+// Ответ на сообщение самого бота — почти всегда это присланная по его же
+// просьбе почта/ссылка ("Тексеру үшін оқушының почтасын жібере аласыз
+// ба?"). Такой ответ обязан приклеиться к тому тикету, по которому бот
+// спрашивал.
+//
+// Отдельно от attachFollowUpToTicket по двум причинам: ответы бота лежат в
+// BotReply, а не в TelegramMessage (там их искать бесполезно), и проверку
+// на мусор тут делать нельзя — голая почта для isNoiseOnly и есть мусор
+// (после чистки не остаётся ничего), хотя это ровно то, что мы просили.
+// Ответ на наш вопрос — не запрос, и мерить его меркой запроса неверно.
+async function attachReplyToBotMessage(
+  message: TelegramMessagePayload,
+  chatId: string,
+  contextualText: string
+): Promise<boolean> {
+  const repliedId = message.reply_to_message?.message_id;
+  if (repliedId == null) return false;
+
+  const botReply = await prisma.botReply.findUnique({
+    where: { chatId_messageId: { chatId, messageId: repliedId } },
+    select: { issueId: true },
+  });
+  if (!botReply) return false;
+
+  const issue = await prisma.issue.findUnique({
+    where: { id: botReply.issueId },
+    select: { id: true, groupName: true, groupEmoji: true, telegramLink: true, extraLinks: true },
+  });
+  if (!issue) return false;
+
+  const messageLink = buildMessageLink(message.chat.id, message.message_id);
+  const alreadyLinked =
+    messageLink === issue.telegramLink || issue.extraLinks.includes(messageLink);
+
+  await prisma.$transaction([
+    prisma.telegramMessage.upsert({
+      where: { chatId_messageId: { chatId, messageId: message.message_id } },
+      update: { usedForIssueId: issue.id, archived: true, viewed: true },
+      create: {
+        chatId,
+        messageId: message.message_id,
+        chatTitle: message.chat.title ?? null,
+        groupName: issue.groupName,
+        groupEmoji: issue.groupEmoji,
+        fromId: message.from?.id != null ? BigInt(message.from.id) : null,
+        authorName: extractAuthorName(message.from),
+        text: contextualText,
+        messageLink,
+        usedForIssueId: issue.id,
+        archived: true,
+        viewed: true,
+      },
+    }),
+    prisma.issue.update({
+      where: { id: issue.id },
+      data: { extraLinks: alreadyLinked ? undefined : { push: messageLink } },
+    }),
+  ]);
+
+  return true;
+}
+
 // Реплай на уже заведённое сообщение — частый паттерн "напоминание":
 // человек отвечает на своё же старое сообщение (или снова пишет по уже
 // "решённому" тикету), на которое так и не ответили. Обычная
@@ -715,6 +896,7 @@ const HELP_TEXT = [
   "/dedupe [дата] — найти и разобрать похожие тикеты (ИИ-подсказка, объединение по одному)",
   "/review [дата] — начать разбор тикетов по одному",
   "/autoreply [on|off] — автоответы бота в рабочих группах; без аргумента покажет, включены ли",
+  "/broadcast <текст> — разослать объявление во все рабочие группы (спросит подтверждение)",
   "",
   "Без даты — за сегодня. Дата — в формате YYYY-MM-DD.",
 ].join("\n");
@@ -807,6 +989,50 @@ async function handleBotCommand(chatId: number, fromId: number, text: string): P
 
     case "/review": {
       await startReviewSession(chatId, reportDate);
+      return;
+    }
+
+    case "/broadcast": {
+      // Текст берём из исходного сообщения целиком, а не из разобранных
+      // аргументов: объявление обычно многострочное, и склеивать его
+      // обратно из токенов бессмысленно.
+      const announcement = text.slice(rawCommand.length).trim();
+      if (!announcement) {
+        await sendTelegramMessage(
+          chatId,
+          "Напиши текст объявления после команды:\n/broadcast Қайырлы күн, ПФ да жөңдеу жұмыстары жүріп жатыр"
+        );
+        return;
+      }
+
+      const presets = await prisma.groupPreset.findMany({
+        where: { chatId: { not: null } },
+        orderBy: { order: "asc" },
+      });
+      if (presets.length === 0) {
+        await sendTelegramMessage(chatId, "Нет ни одной группы с привязанным чатом.");
+        return;
+      }
+
+      const draft = await prisma.broadcastDraft.create({ data: { text: announcement } });
+      await sendTelegramMessage(
+        chatId,
+        `📢 Разослать в ${presets.length} групп?\n${presets.map((p) => `• ${p.name}`).join("\n")}\n\n${announcement}`,
+        [
+          [
+            {
+              text: `📤 Отправить в ${presets.length} групп`,
+              callback_data: `${BROADCAST_SEND_PREFIX}${draft.id}`,
+            },
+          ],
+          [
+            {
+              text: "Отмена",
+              callback_data: `${BROADCAST_CANCEL_PREFIX}${draft.id}`,
+            },
+          ],
+        ]
+      );
       return;
     }
 
@@ -988,6 +1214,13 @@ export async function POST(request: NextRequest) {
     // передал / сделал". Двигаем статус по ней, чтобы вечером не
     // проставлять заново то, что уже сделано днём.
     await applyAgentIntent(message, chatId, text);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Ответ на вопрос бота ("пришлите почту") — самый точный признак связи с
+  // тикетом, поэтому проверяется первым: иначе присланная почта осталась бы
+  // болтаться во "Входящих" отдельным сообщением, не привязанным ни к чему.
+  if (await attachReplyToBotMessage(message, chatId, contextualText)) {
     return NextResponse.json({ ok: true });
   }
 
