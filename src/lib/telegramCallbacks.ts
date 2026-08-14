@@ -11,4 +11,6 @@ export const ISSUE_ESCALATE_PREFIX = "issue_escalate:";
 // многословный префикс.
 export const ISSUE_ESCALATE_TEAM_PREFIX = "esc_team:";
 export const ISSUE_NOTE_PREFIX = "issue_note:";
-export const REFRESH_LIST_PREFIX = "refresh_list:";
+// Пропустить тикет в разборе по одному (см. advanceReviewSession в
+// dailyReview.ts) — не трогает статус, просто идёт к следующему.
+export const SKIP_TICKET_PREFIX = "skip_ticket:";

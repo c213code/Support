@@ -9,13 +9,13 @@ import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
 import { reactToStatusChange } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { generateReportText } from "@/lib/report";
-import { buildUnresolvedListMessage } from "@/lib/dailyReview";
+import { advanceReviewSession } from "@/lib/dailyReview";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
   ISSUE_ESCALATE_TEAM_PREFIX,
   ISSUE_NOTE_PREFIX,
-  REFRESH_LIST_PREFIX,
+  SKIP_TICKET_PREFIX,
   REPORT_SEND_PREFIX,
 } from "@/lib/telegramCallbacks";
 import {
@@ -23,7 +23,6 @@ import {
   answerCallbackQuery,
   buildMessageLink,
   editMessageReplyMarkup,
-  editMessageText,
   extractAuthorName,
   extractReplyContextLine,
   extractText,
@@ -76,24 +75,10 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       query.id,
       `Статус: ${STATUS_META[status].emoji} ${STATUS_META[status].label}`
     );
-    // Сводное сообщение (см. dailyReview.ts) несёт по одной строке кнопок
-    // на тикет — снимаем только строку этого тикета, а не всю клавиатуру,
-    // иначе один клик стирал бы кнопки у всех остальных тикетов в том же
-    // сообщении.
+    // Тикеты дня разбираются по одному (см. dailyReview.ts) — после
+    // действия карточка сама переходит к следующему нерешённому.
     if (query.message) {
-      const remainingRows = (
-        query.message.reply_markup?.inline_keyboard ?? []
-      ).filter(
-        (row) =>
-          !row.some((btn) =>
-            btn.callback_data.startsWith(`${ISSUE_STATUS_PREFIX}${issueId}:`)
-          )
-      );
-      await editMessageReplyMarkup(
-        query.message.chat.id,
-        query.message.message_id,
-        remainingRows.length > 0 ? remainingRows : null
-      );
+      await advanceReviewSession(String(query.message.chat.id));
     }
     return;
   }
@@ -156,12 +141,12 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
     });
     await reactToStatusChange(existing.status, "ESCALATED", existing.telegramLink);
     await answerCallbackQuery(query.id, `Передано: ${team} ⚠️`);
-    // Это сообщение — только клавиатура выбора команды, целиком её убрать
-    // безопасно (в отличие от сводного списка тикетов, где ISSUE_STATUS_
-    // PREFIX выше снимает только одну строку). Сам список тикетов при этом
-    // не обновляется автоматически — за этим "🔁 Обновить список".
     if (query.message) {
+      // Это сообщение — только клавиатура выбора команды, использована,
+      // больше не нужна. Карточка разбора (dailyReview.ts) — отдельное
+      // сообщение в том же чате, её и двигаем к следующему тикету.
       await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
+      await advanceReviewSession(String(query.message.chat.id));
     }
     return;
   }
@@ -206,31 +191,13 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
     return;
   }
 
-  // Список тикетов мог устареть с момента отправки (другой агент поменял
-  // статус, или это уже не первый клик по этому сообщению) — пересобираем
-  // текст и клавиатуру заново и переписываем то же сообщение на месте
-  // (см. buildUnresolvedListMessage в lib/dailyReview.ts), а не шлём новое
-  // поверх старого.
-  if (data.startsWith(REFRESH_LIST_PREFIX)) {
-    const reportDate = data.slice(REFRESH_LIST_PREFIX.length);
-    const rebuilt = await buildUnresolvedListMessage(reportDate);
-    if (!query.message) {
-      await answerCallbackQuery(query.id);
-      return;
+  // Пропустить текущий тикет разбора без изменения статуса — просто
+  // переходим к следующему.
+  if (data.startsWith(SKIP_TICKET_PREFIX)) {
+    await answerCallbackQuery(query.id);
+    if (query.message) {
+      await advanceReviewSession(String(query.message.chat.id));
     }
-    if (!rebuilt) {
-      await answerCallbackQuery(query.id, "Нерешённых тикетов не осталось 🎉", true);
-      await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
-      return;
-    }
-    await editMessageText(
-      query.message.chat.id,
-      query.message.message_id,
-      rebuilt.text,
-      rebuilt.keyboard,
-      "HTML"
-    );
-    await answerCallbackQuery(query.id, "Обновлено");
     return;
   }
 
@@ -463,6 +430,7 @@ export async function POST(request: NextRequest) {
           },
         });
         await sendTelegramMessage(chatId, "✅ Заметка сохранена");
+        await advanceReviewSession(chatId);
       }
       await prisma.pendingNotePrompt
         .delete({ where: { id: pending.id } })

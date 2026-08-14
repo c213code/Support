@@ -1,18 +1,22 @@
 import { prisma } from "@/lib/prisma";
 import { dayRangeUtc } from "@/lib/date";
-import { STATUS_META } from "@/lib/status";
+import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { agentTelegramEntries } from "@/lib/agentTelegram";
-import { sendTelegramMessage, escapeHtml, type InlineKeyboard } from "@/lib/telegram";
+import {
+  sendTelegramMessage,
+  editMessageText,
+  escapeHtml,
+  type InlineKeyboard,
+} from "@/lib/telegram";
 import { generateReportText } from "@/lib/report";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
   ISSUE_NOTE_PREFIX,
-  REFRESH_LIST_PREFIX,
+  SKIP_TICKET_PREFIX,
   REPORT_SEND_PREFIX,
 } from "@/lib/telegramCallbacks";
 
-const UNRESOLVED_TICKET_CAP = 15;
 const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "ESCALATED"]);
 // Лимит длины сообщения в Telegram — 4096 символов.
 const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -81,104 +85,132 @@ export async function sendDailyReviewMessage(
   ];
   await sendTelegramMessage(recipientId, preview, summaryKeyboard);
 
-  const listMessage = await buildUnresolvedListMessage(reportDate);
-  if (listMessage) {
-    await sendTelegramMessage(
-      recipientId,
-      listMessage.text,
-      listMessage.keyboard,
-      undefined,
-      "HTML"
-    );
-  }
+  await startReviewSession(recipientId, reportDate);
 
   return { sent: true, recipientId };
 }
 
-export type UnresolvedListMessage = { text: string; keyboard: InlineKeyboard };
+type TicketCard = { text: string; keyboard: InlineKeyboard };
 
-// Пронумерованный список нерешённых тикетов дня + клавиатура под ним, по
-// строке кнопок на тикет (номер строки = номер в списке). Раньше — по
-// отдельному сообщению на тикет, но на насыщенный день это стена из 15
-// одинаковых бабблов, в которых легко потеряться. Вынесено в отдельную
-// функцию — её же дёргает кнопка "🔁 Обновить список" (REFRESH_LIST_PREFIX
-// в вебхуке), чтобы пересобрать актуальную версию через editMessageText, а
-// не слать новое сообщение поверх старого. Капаем список, а не показываем
-// все: и сообщение, и клавиатура не бесконечны.
-export async function buildUnresolvedListMessage(
+// Карточка одного тикета — текст + до 4 кнопок действий (пропускаются,
+// если уже неактуальны для текущего статуса) плюс "⏭ Пропустить". Номер
+// в заголовке — позиция в очереди этого прохода, не id и не место на
+// доске.
+function buildTicketCard(
+  issue: { id: string; groupName: string; description: string; status: IssueStatus; telegramLink: string | null },
+  position: number,
+  total: number
+): TicketCard {
+  const meta = STATUS_META[issue.status];
+  const link = issue.telegramLink
+    ? `\n<a href="${escapeHtml(issue.telegramLink)}">🔗 Открыть в Telegram</a>`
+    : "";
+  const text = `Тикет ${position}/${total}\n\n${meta.emoji} ${escapeHtml(issue.groupName)}\n${escapeHtml(issue.description)}${link}`;
+
+  const actionRow: InlineKeyboard[number] = [];
+  if (issue.status !== "IN_PROGRESS") {
+    actionRow.push({
+      text: "🔄 В работе",
+      callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:IN_PROGRESS`,
+    });
+  }
+  if (issue.status !== "ESCALATED") {
+    actionRow.push({
+      text: "⚠️ Передать",
+      callback_data: `${ISSUE_ESCALATE_PREFIX}${issue.id}`,
+    });
+  }
+  const secondRow: InlineKeyboard[number] = [
+    { text: "📝 Заметка", callback_data: `${ISSUE_NOTE_PREFIX}${issue.id}` },
+    { text: "✅ Решено", callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:RESOLVED` },
+  ];
+  const skipRow: InlineKeyboard[number] = [
+    { text: "⏭ Пропустить", callback_data: `${SKIP_TICKET_PREFIX}${issue.id}` },
+  ];
+
+  const keyboard = actionRow.length > 0 ? [actionRow, secondRow, skipRow] : [secondRow, skipRow];
+  return { text, keyboard };
+}
+
+// Открывает разбор дня: очередь id нерешённых тикетов фиксируется сразу
+// (не пересчитывается по ходу, кроме пропуска уже решённых где-то ещё —
+// см. advanceReviewSession), первая карточка уходит отдельным сообщением,
+// его id и запоминаем в ReviewSession, чтобы дальше редактировать на
+// месте, а не слать новое на каждый шаг.
+async function startReviewSession(
+  recipientId: number,
   reportDate: string
-): Promise<UnresolvedListMessage | null> {
+): Promise<void> {
   const unresolved = await prisma.issue.findMany({
     where: { reportDate, status: { not: "RESOLVED" } },
     orderBy: { position: "asc" },
+    select: { id: true, groupName: true, description: true, status: true, telegramLink: true },
   });
-  if (unresolved.length === 0) return null;
+  if (unresolved.length === 0) return;
 
-  const capped = unresolved.slice(0, UNRESOLVED_TICKET_CAP);
-  const listLines = capped.map((issue, idx) => {
-    const meta = STATUS_META[issue.status];
-    // Компактная кликабельная ссылка (🔗) вместо голого URL — тот на
-    // отдельной длинной строке тратил бы половину списка на "буквы",
-    // parse_mode "HTML" ниже требует экранировать пользовательский текст
-    // (описание/группа), сама ссылка — доверенное значение из БД.
-    const link = issue.telegramLink
-      ? ` <a href="${escapeHtml(issue.telegramLink)}">🔗</a>`
-      : "";
-    return `${idx + 1}. ${meta.emoji} ${escapeHtml(issue.groupName)}: ${escapeHtml(issue.description)}${link}`;
+  const chatId = String(recipientId);
+  const card = buildTicketCard(unresolved[0], 1, unresolved.length);
+  const sent = await sendTelegramMessage(recipientId, card.text, card.keyboard, undefined, "HTML");
+  if (!sent) return;
+
+  await prisma.reviewSession.upsert({
+    where: { chatId },
+    update: {
+      reportDate,
+      messageId: sent.message_id,
+      ticketIds: unresolved.map((i) => i.id),
+      currentIndex: 0,
+    },
+    create: {
+      chatId,
+      reportDate,
+      messageId: sent.message_id,
+      ticketIds: unresolved.map((i) => i.id),
+    },
   });
-  if (unresolved.length > UNRESOLVED_TICKET_CAP) {
-    listLines.push(
-      `\n… и ещё ${unresolved.length - UNRESOLVED_TICKET_CAP} тикет(ов) без быстрых кнопок — остальное на сайте.`
-    );
+}
+
+// Двигает активную сессию разбора к следующему тикету — после того, как
+// по текущему что-то сделали (статус/эскалация/заметка) или явно
+// пропустили. Молча выходит, если для этого чата сессии нет (действие
+// пришло не из карточки разбора — такого сейчас не бывает, но на будущее
+// безопаснее, чем падать). Если следующий тикет по дороге кем-то уже
+// решён (например, на сайте) — пропускает его тоже, а не показывает
+// неактуальную карточку.
+export async function advanceReviewSession(chatId: string): Promise<void> {
+  const session = await prisma.reviewSession.findUnique({ where: { chatId } });
+  if (!session) return;
+
+  let idx = session.currentIndex + 1;
+  let issue: {
+    id: string;
+    groupName: string;
+    description: string;
+    status: IssueStatus;
+    telegramLink: string | null;
+  } | null = null;
+
+  while (idx < session.ticketIds.length) {
+    const candidate = await prisma.issue.findUnique({
+      where: { id: session.ticketIds[idx] },
+      select: { id: true, groupName: true, description: true, status: true, telegramLink: true },
+    });
+    if (candidate && candidate.status !== "RESOLVED") {
+      issue = candidate;
+      break;
+    }
+    idx++;
   }
 
-  let listText = listLines.join("\n");
-  if (listText.length > TELEGRAM_MESSAGE_LIMIT) {
-    // Режем по целым строкам, не по символам — обрубить HTML-тег ссылки
-    // посередине означало бы, что Telegram отклонит сообщение целиком
-    // из-за незакрытого тега.
-    const kept: string[] = [];
-    let length = TRUNCATION_NOTE.length;
-    for (const line of listLines) {
-      if (length + line.length + 1 > TELEGRAM_MESSAGE_LIMIT) break;
-      kept.push(line);
-      length += line.length + 1;
-    }
-    listText = `${kept.join("\n")}\n${TRUNCATION_NOTE}`;
+  if (!issue) {
+    await editMessageText(chatId, session.messageId, "✅ Все тикеты дня разобраны!", null);
+    await prisma.reviewSession.delete({ where: { chatId } });
+    return;
   }
 
-  const statusKeyboard: InlineKeyboard = capped.map((issue, idx) => {
-    const row: InlineKeyboard[number] = [];
-    if (issue.status !== "IN_PROGRESS") {
-      row.push({
-        text: `${idx + 1} 🔄`,
-        callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:IN_PROGRESS`,
-      });
-    }
-    if (issue.status !== "ESCALATED") {
-      row.push({
-        text: `${idx + 1} ⚠️`,
-        callback_data: `${ISSUE_ESCALATE_PREFIX}${issue.id}`,
-      });
-    }
-    row.push({
-      text: `${idx + 1} 📝`,
-      callback_data: `${ISSUE_NOTE_PREFIX}${issue.id}`,
-    });
-    row.push({
-      text: `${idx + 1} ✅`,
-      callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:RESOLVED`,
-    });
-    return row;
-  });
-  // Отдельной строкой — не смешана с рядами тикетов, поэтому снятие одной
-  // строки тикета (см. ISSUE_STATUS_PREFIX/ISSUE_ESCALATE_PREFIX в
-  // вебхуке — они фильтруют по id конкретного тикета) её не заденет.
-  statusKeyboard.push([
-    { text: "🔁 Обновить список", callback_data: `${REFRESH_LIST_PREFIX}${reportDate}` },
-  ]);
-
-  return { text: listText, keyboard: statusKeyboard };
+  const card = buildTicketCard(issue, idx + 1, session.ticketIds.length);
+  await editMessageText(chatId, session.messageId, card.text, card.keyboard, "HTML");
+  await prisma.reviewSession.update({ where: { chatId }, data: { currentIndex: idx } });
 }
 
 // "Кто дежурил в этот день" в системе нигде явно не записано, поэтому

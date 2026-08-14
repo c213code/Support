@@ -94,6 +94,22 @@ model PendingNotePrompt {
   @@unique([chatId, messageId])
 }
 
+// Разбор нерешённых тикетов дня по одному, а не сеткой кнопок на все
+// сразу (на насыщенный день — 40+ кнопок в одном сообщении, нечитаемо) —
+// см. buildTicketCard/advanceReviewSession в src/lib/dailyReview.ts. На
+// чат — одна активная сессия: очередь id тикетов зафиксирована на момент
+// старта (currentIndex — позиция в ней); каждое действие
+// (статус/эскалация/заметка/пропустить) редактирует то же самое
+// сообщение и сразу показывает следующий тикет.
+model ReviewSession {
+  chatId       String   @id
+  reportDate   String
+  messageId    Int
+  ticketIds    String[]
+  currentIndex Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
 model Issue {
   id           String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)
