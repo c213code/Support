@@ -22,6 +22,7 @@ import {
   START_REVIEW_PREFIX,
   START_DEDUPE_PREFIX,
   SOLVE_LIKE_PREFIX,
+  BOT_REPLIES_PREFIX,
 } from "@/lib/telegramCallbacks";
 
 const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "ESCALATED"]);
@@ -231,6 +232,14 @@ function buildTicketCard(
   }
 
   const skipRow: InlineKeyboard[number] = [];
+  // Кнопка появляется, только если боту есть что убирать — иначе она
+  // просто занимала бы место на каждой карточке.
+  if (issue.botReplies && issue.botReplies.length > 0) {
+    skipRow.push({
+      text: "🤖 Ответы бота",
+      callback_data: `${BOT_REPLIES_PREFIX}${issue.id}`,
+    });
+  }
   // "Назад" бессмысленна на первом тикете очереди — некуда возвращаться.
   if (position > 1) {
     skipRow.push({

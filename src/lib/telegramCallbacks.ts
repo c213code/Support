@@ -51,6 +51,13 @@ export const SOLVE_LIKE_PREFIX = "solve_like:";
 // BroadcastDraft, а сюда попадает только его id.
 export const BROADCAST_SEND_PREFIX = "bcast_send:";
 export const BROADCAST_CANCEL_PREFIX = "bcast_cancel:";
+
+// Управление тем, что бот уже сказал в группе, из личного чата: показать
+// список и удалить конкретное сообщение. На сайте это же есть на карточке
+// тикета, но дежурный сидит в телефоне, а не на сайте, — значит и убрать
+// неудачный ответ надо уметь оттуда же.
+export const BOT_REPLIES_PREFIX = "bot_replies:";
+export const BOT_REPLY_DELETE_PREFIX = "br_del:";
 // Подтверждение "да, это решено" на догадку бота по реплике агента в
 // группе (см. detectAgentIntent) — ведёт в тот же запрос заметки.
 export const CONFIRM_RESOLVED_PREFIX = "confirm_resolved:";

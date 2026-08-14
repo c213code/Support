@@ -30,6 +30,8 @@ import {
   sendBotReply,
   hasBotReplied,
   agentAlreadyReplied,
+  deleteBotReply,
+  describeBotReplyFailure,
 } from "@/lib/botReply";
 import {
   isAutoReplyEnabled,
@@ -56,6 +58,8 @@ import {
   SOLVE_LIKE_PREFIX,
   BROADCAST_SEND_PREFIX,
   BROADCAST_CANCEL_PREFIX,
+  BOT_REPLIES_PREFIX,
+  BOT_REPLY_DELETE_PREFIX,
 } from "@/lib/telegramCallbacks";
 import {
   AUTO_ISSUE_CREATOR,
@@ -425,6 +429,53 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
         "Рассылка отменена.",
         null
       );
+    }
+    return;
+  }
+
+  // Список того, что бот сказал в группе по этому тикету, с кнопкой
+  // удаления у каждого сообщения. На сайте это же есть на карточке, но
+  // дежурный сидит в телефоне — значит и убрать неудачный ответ надо уметь
+  // отсюда.
+  if (data.startsWith(BOT_REPLIES_PREFIX)) {
+    const issueId = data.slice(BOT_REPLIES_PREFIX.length);
+    const replies = await prisma.botReply.findMany({
+      where: { issueId, deleted: false },
+      orderBy: { sentAt: "asc" },
+    });
+    await answerCallbackQuery(query.id);
+    if (!query.message) return;
+
+    if (replies.length === 0) {
+      await sendTelegramMessage(query.message.chat.id, "По этому тикету бот ничего не писал.");
+      return;
+    }
+
+    await sendTelegramMessage(
+      query.message.chat.id,
+      `🤖 Бот написал в группу:\n\n${replies.map((r, i) => `${i + 1}. ${r.text}`).join("\n\n")}`,
+      replies.map((r, i) => [
+        {
+          text: `🗑 Удалить ${i + 1}`,
+          callback_data: `${BOT_REPLY_DELETE_PREFIX}${r.id}`,
+        },
+      ])
+    );
+    return;
+  }
+
+  if (data.startsWith(BOT_REPLY_DELETE_PREFIX)) {
+    const result = await deleteBotReply(data.slice(BOT_REPLY_DELETE_PREFIX.length));
+    await answerCallbackQuery(
+      query.id,
+      result.ok ? "Удалено из группы ✅" : describeBotReplyFailure(result.reason),
+      !result.ok
+    );
+    if (result.ok && query.message) {
+      // Клавиатуру снимаем целиком: остальные кнопки в этом сообщении
+      // ссылаются на номера из уже устаревшего списка, и жать их вслепую
+      // опаснее, чем открыть список заново.
+      await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
     }
     return;
   }

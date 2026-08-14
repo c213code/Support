@@ -50,7 +50,7 @@ export function BotReplies({
   return (
     <div className="mt-2 flex flex-col gap-1 rounded-lg bg-slate-50 p-2">
       {replies.map((reply) => (
-        <div key={reply.id} className="group/reply text-[11px] leading-snug">
+        <div key={reply.id} className="text-[11px] leading-snug">
           {editingId === reply.id ? (
             <div className="flex flex-col gap-1">
               <textarea
@@ -80,14 +80,17 @@ export function BotReplies({
             <div className="flex items-start gap-1">
               <span className="shrink-0 text-slate-400">🤖</span>
               <span className="flex-1 text-slate-600">{reply.text}</span>
-              <span className="flex shrink-0 gap-1 opacity-0 transition group-hover/reply:opacity-100">
+              {/* Кнопки видны всегда, а не по наведению: основное
+                  устройство дежурного — телефон, где наведения нет вовсе,
+                  и спрятанное под hover там просто не существует. */}
+              <span className="flex shrink-0 gap-1.5">
                 <button
                   onClick={() => {
                     setEditingId(reply.id);
                     setDraft(reply.text);
                   }}
                   title="Исправить сообщение в группе"
-                  className="text-slate-400 hover:text-brand-600"
+                  className="rounded px-1 py-0.5 text-slate-400 hover:bg-white hover:text-brand-600"
                 >
                   ✎
                 </button>
@@ -99,7 +102,7 @@ export function BotReplies({
                     }
                   }}
                   title="Удалить сообщение из группы"
-                  className="text-slate-400 hover:text-red-500"
+                  className="rounded px-1 py-0.5 text-slate-400 hover:bg-white hover:text-red-500"
                 >
                   ✕
                 </button>
