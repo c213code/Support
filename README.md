@@ -151,7 +151,6 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setMyCommands" \
   -d '{
     "commands": [
       {"command": "report", "description": "Актуальный репорт за сегодня"},
-      {"command": "raw", "description": "Исходный список тикетов (все статусы)"},
       {"command": "send", "description": "Отправить репорт в группу"},
       {"command": "dedupe", "description": "Найти и объединить похожие тикеты"},
       {"command": "review", "description": "Начать разбор тикетов по одному"},
@@ -881,11 +880,6 @@ cron'а с разным назначением:
 - **`/report [дата]`** — та же сводка, что шлёт вечерний cron
   (`buildReviewSummary`, общая функция с `sendDailyReviewMessage`), только
   сразу в ответ спросившему, а не тому, кто больше всех писал в тот день.
-- **`/raw [дата]`** — "исходный" список тикетов по группам **со всеми**
-  статусами, включая ещё не выставленные в готовый репорт "Отправлено"
-  (`generateRawBoardText` в `src/lib/report.ts` — в отличие от
-  `generateReportText`, не фильтрует `SENT`). Пригодится свериться со
-  списком целиком, а не только с тем, что уйдёт боссам.
 - **`/send [дата]`** — отправляет репорт в `REPORT_TARGET_CHAT_ID` напрямую,
   без захода в `/report`. Общая с кнопкой "📤 Отправить в группу" логика
   (`sendReportToGroup` в `src/lib/reportSend.ts`) теперь **сама** не даёт

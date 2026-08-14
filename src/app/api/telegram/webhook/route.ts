@@ -9,7 +9,6 @@ import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
 import { reactToStatusChange } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { SHARED_AGENT } from "@/lib/agents";
-import { generateRawBoardText } from "@/lib/report";
 import {
   advanceReviewSession,
   startReviewSession,
@@ -891,7 +890,6 @@ const HELP_TEXT = [
   "Команды доступны только в личке с ботом:",
   "",
   "/report [дата] — актуальный репорт (то же, что вечерняя сводка), можно в любое время дня",
-  "/raw [дата] — исходный список тикетов группами, включая ещё не выставленные в репорт «Отправлено»",
   "/send [дата] — отправить репорт в рабочую группу (если уже отправляли за эту дату — просто скажет, когда)",
   "/dedupe [дата] — найти и разобрать похожие тикеты (ИИ-подсказка, объединение по одному)",
   "/review [дата] — начать разбор тикетов по одному",
@@ -951,24 +949,6 @@ async function handleBotCommand(chatId: number, fromId: number, text: string): P
         return;
       }
       await sendTelegramMessage(chatId, summary.text, summary.keyboard);
-      return;
-    }
-
-    case "/raw": {
-      const [issues, presets] = await Promise.all([
-        prisma.issue.findMany({ where: { reportDate }, orderBy: { position: "asc" } }),
-        prisma.groupPreset.findMany(),
-      ]);
-      if (issues.length === 0) {
-        await sendTelegramMessage(chatId, `За ${reportDate} тикетов нет.`);
-        return;
-      }
-      let raw = `📄 Исходный репорт — ${reportDate}\n\n${generateRawBoardText(issues, presets)}`;
-      const truncationNote = "…\n\n(обрезано, полный список — на сайте)";
-      if (raw.length > 4096) {
-        raw = raw.slice(0, 4096 - truncationNote.length) + truncationNote;
-      }
-      await sendTelegramMessage(chatId, raw);
       return;
     }
 
