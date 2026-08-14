@@ -68,8 +68,24 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       query.id,
       `Статус: ${STATUS_META[status].emoji} ${STATUS_META[status].label}`
     );
+    // Сводное сообщение (см. dailyReview.ts) несёт по одной строке кнопок
+    // на тикет — снимаем только строку этого тикета, а не всю клавиатуру,
+    // иначе один клик стирал бы кнопки у всех остальных тикетов в том же
+    // сообщении.
     if (query.message) {
-      await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
+      const remainingRows = (
+        query.message.reply_markup?.inline_keyboard ?? []
+      ).filter(
+        (row) =>
+          !row.some((btn) =>
+            btn.callback_data.startsWith(`${ISSUE_STATUS_PREFIX}${issueId}:`)
+          )
+      );
+      await editMessageReplyMarkup(
+        query.message.chat.id,
+        query.message.message_id,
+        remainingRows.length > 0 ? remainingRows : null
+      );
     }
     return;
   }

@@ -26,6 +26,10 @@ export type TelegramCallbackQuery = {
   message?: {
     message_id: number;
     chat: { id: number };
+    // Нужна, чтобы точечно убрать одну строку кнопок (один тикет) из
+    // сводного сообщения с несколькими тикетами, не трогая остальные
+    // строки — см. ISSUE_STATUS_PREFIX в вебхуке.
+    reply_markup?: { inline_keyboard: InlineKeyboardButton[][] };
   };
 };
 

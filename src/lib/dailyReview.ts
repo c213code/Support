@@ -74,32 +74,51 @@ export async function sendDailyReviewMessage(
   ];
   await sendTelegramMessage(recipientId, preview, summaryKeyboard);
 
-  // Быстрые кнопки статуса под каждым ещё не решённым тикетом — чтобы
-  // закрыть очевидное можно было сразу тут, не открывая сайт. Капаем
-  // список, а не шлём все: на насыщенный день сообщений на 30+ штук в
-  // личку — уже спам, а не сводка.
+  // Быстрые кнопки статуса под нерешёнными тикетами — чтобы закрыть
+  // очевидное можно было сразу тут, не открывая сайт. Раньше — по
+  // отдельному сообщению на тикет, но на насыщенный день это superflow из
+  // 15 одинаковых бабблов, в которых легко потеряться. Вместо этого —
+  // ОДНО сообщение с пронумерованным списком и клавиатурой, где строка
+  // клавиатуры = номер тикета в списке; ISSUE_STATUS_PREFIX в вебхуке при
+  // нажатии снимает только эту одну строку, остальные остаются рабочими.
+  // Капаем список, а не шлём все: и сообщение, и клавиатура не бесконечны.
   const unresolved = issues.filter((i) => i.status !== "RESOLVED");
-  for (const issue of unresolved.slice(0, UNRESOLVED_TICKET_CAP)) {
-    const meta = STATUS_META[issue.status];
-    const text = `${meta.emoji} ${issue.groupName}: ${issue.description}`;
-    const row: InlineKeyboard[number] = [];
-    if (issue.status !== "IN_PROGRESS") {
-      row.push({
-        text: "🔄 В работе",
-        callback_data: `issue_status:${issue.id}:IN_PROGRESS`,
-      });
-    }
-    row.push({
-      text: "✅ Решено",
-      callback_data: `issue_status:${issue.id}:RESOLVED`,
+  const capped = unresolved.slice(0, UNRESOLVED_TICKET_CAP);
+  if (capped.length > 0) {
+    const listLines = capped.map((issue, idx) => {
+      const meta = STATUS_META[issue.status];
+      return `${idx + 1}. ${meta.emoji} ${issue.groupName}: ${issue.description}`;
     });
-    await sendTelegramMessage(recipientId, text, [row]);
-  }
-  if (unresolved.length > UNRESOLVED_TICKET_CAP) {
-    await sendTelegramMessage(
-      recipientId,
-      `… и ещё ${unresolved.length - UNRESOLVED_TICKET_CAP} тикет(ов) без быстрых кнопок — остальное на сайте.`
-    );
+    let listText = listLines.join("\n");
+    if (listText.length > TELEGRAM_MESSAGE_LIMIT) {
+      listText =
+        listText.slice(0, TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTE.length) +
+        TRUNCATION_NOTE;
+    }
+
+    const statusKeyboard: InlineKeyboard = capped.map((issue, idx) => {
+      const row: InlineKeyboard[number] = [];
+      if (issue.status !== "IN_PROGRESS") {
+        row.push({
+          text: `${idx + 1} 🔄`,
+          callback_data: `issue_status:${issue.id}:IN_PROGRESS`,
+        });
+      }
+      row.push({
+        text: `${idx + 1} ✅`,
+        callback_data: `issue_status:${issue.id}:RESOLVED`,
+      });
+      return row;
+    });
+
+    await sendTelegramMessage(recipientId, listText, statusKeyboard);
+
+    if (unresolved.length > UNRESOLVED_TICKET_CAP) {
+      await sendTelegramMessage(
+        recipientId,
+        `… и ещё ${unresolved.length - UNRESOLVED_TICKET_CAP} тикет(ов) без быстрых кнопок — остальное на сайте.`
+      );
+    }
   }
 
   return { sent: true, recipientId };
