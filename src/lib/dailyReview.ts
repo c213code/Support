@@ -1,0 +1,136 @@
+import { prisma } from "@/lib/prisma";
+import { dayRangeUtc } from "@/lib/date";
+import { STATUS_META } from "@/lib/status";
+import { agentTelegramEntries } from "@/lib/agentTelegram";
+import { sendTelegramMessage, type InlineKeyboard } from "@/lib/telegram";
+import { generateReportText } from "@/lib/report";
+
+const UNRESOLVED_TICKET_CAP = 15;
+const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "ESCALATED"]);
+// Лимит длины сообщения в Telegram — 4096 символов.
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+const TRUNCATION_NOTE = "…\n\n(обрезано, полный текст — на сайте)";
+
+export type DailyReviewResult =
+  | { sent: true; recipientId: number }
+  | { sent: false; reason: "no tickets" | "no recipient" };
+
+// Общая логика для двух cron-эндпоинтов: вечерней сводки за сегодня
+// (`/api/cron/evening-report`, ~22:00) и утреннего напоминания по
+// вчерашнему репорту, если его вечером так и не отправили
+// (`/api/cron/morning-report-check`, ~09:00). Обе дёргают одно и то же —
+// разница только в том, для какой даты и при каком условии (см. каждый
+// роут).
+//
+// Показывает не просто цифры, а сам текст будущего репорта
+// (`generateReportText` — то же, что строится на сайте) — иначе "ревью"
+// по кнопке было бы вслепую: агент видел бы только количество тикетов, а
+// не то, что реально уйдёт в чат с боссами.
+export async function sendDailyReviewMessage(
+  reportDate: string
+): Promise<DailyReviewResult> {
+  const [issues, presets] = await Promise.all([
+    prisma.issue.findMany({
+      where: { reportDate },
+      orderBy: { position: "asc" },
+    }),
+    prisma.groupPreset.findMany(),
+  ]);
+
+  if (issues.length === 0) {
+    return { sent: false, reason: "no tickets" };
+  }
+
+  const recipientId = await pickRecipient(reportDate);
+  if (!recipientId) {
+    return { sent: false, reason: "no recipient" };
+  }
+
+  const sentCount = issues.filter((i) => i.status === "SENT").length;
+  const activeCount = issues.filter((i) => ACTIVE_STATUSES.has(i.status)).length;
+  const resolvedCount = issues.filter((i) => i.status === "RESOLVED").length;
+
+  const reportText = generateReportText(issues, presets);
+  const body =
+    reportText ||
+    "Пока нечего показать — все тикеты ещё «Отправлено», статус по ним не выставлен.";
+  const header = [
+    `🌙 Репорт — ${reportDate}`,
+    `📨 Отправлено: ${sentCount} · 🔄 В работе/Пендинг/Передано: ${activeCount} · ✅ Решено: ${resolvedCount}`,
+    "",
+    "Вот что уйдёт в группу:",
+    "",
+  ].join("\n");
+
+  let preview = header + body;
+  if (preview.length > TELEGRAM_MESSAGE_LIMIT) {
+    preview =
+      preview.slice(0, TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTE.length) +
+      TRUNCATION_NOTE;
+  }
+
+  const summaryKeyboard: InlineKeyboard = [
+    [{ text: "📤 Отправить в группу", callback_data: `report_send:${reportDate}` }],
+  ];
+  await sendTelegramMessage(recipientId, preview, summaryKeyboard);
+
+  // Быстрые кнопки статуса под каждым ещё не решённым тикетом — чтобы
+  // закрыть очевидное можно было сразу тут, не открывая сайт. Капаем
+  // список, а не шлём все: на насыщенный день сообщений на 30+ штук в
+  // личку — уже спам, а не сводка.
+  const unresolved = issues.filter((i) => i.status !== "RESOLVED");
+  for (const issue of unresolved.slice(0, UNRESOLVED_TICKET_CAP)) {
+    const meta = STATUS_META[issue.status];
+    const text = `${meta.emoji} ${issue.groupName}: ${issue.description}`;
+    const row: InlineKeyboard[number] = [];
+    if (issue.status !== "IN_PROGRESS") {
+      row.push({
+        text: "🔄 В работе",
+        callback_data: `issue_status:${issue.id}:IN_PROGRESS`,
+      });
+    }
+    row.push({
+      text: "✅ Решено",
+      callback_data: `issue_status:${issue.id}:RESOLVED`,
+    });
+    await sendTelegramMessage(recipientId, text, [row]);
+  }
+  if (unresolved.length > UNRESOLVED_TICKET_CAP) {
+    await sendTelegramMessage(
+      recipientId,
+      `… и ещё ${unresolved.length - UNRESOLVED_TICKET_CAP} тикет(ов) без быстрых кнопок — остальное на сайте.`
+    );
+  }
+
+  return { sent: true, recipientId };
+}
+
+// "Кто дежурил в этот день" в системе нигде явно не записано, поэтому
+// судим по факту — кто больше всех писал агентских сообщений в
+// привязанные чаты в тот день (см. isOwnAgentMessage в вебхуке — только
+// после того, как свои сообщения агентов начали сохраняться, это стало
+// возможно посчитать).
+async function pickRecipient(reportDate: string): Promise<number | null> {
+  const entries = agentTelegramEntries();
+  if (entries.length === 0) return null;
+
+  const { start, end } = dayRangeUtc(reportDate);
+  const ids = entries.map(([, id]) => BigInt(id));
+
+  const counts = await prisma.telegramMessage.groupBy({
+    by: ["fromId"],
+    where: { fromId: { in: ids }, receivedAt: { gte: start, lt: end } },
+    _count: { _all: true },
+  });
+
+  if (counts.length === 0) {
+    // Тихий день без агентской переписки в привязанных чатах — шлём
+    // первому из списка, чтобы сводка не потерялась молча.
+    return entries[0][1];
+  }
+
+  const top = counts.reduce((best, row) =>
+    row._count._all > best._count._all ? row : best
+  );
+  return top.fromId != null ? Number(top.fromId) : entries[0][1];
+}

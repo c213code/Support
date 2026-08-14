@@ -68,6 +68,16 @@ model AppSetting {
   updatedAt         DateTime @updatedAt
 }
 
+// Отмечает, что репорт за конкретный день уже был отправлен в рабочую
+// группу (кнопкой "📤 Отправить в группу" — из вечерней сводки или
+// утреннего напоминания, см. /api/cron/*). Без этого утренний cron не
+// смог бы отличить "ещё не отправляли" от "отправили вчера вечером" и
+// продублировал бы репорт в чат с боссами.
+model ReportSendLog {
+  reportDate String   @id
+  sentAt     DateTime @default(now())
+}
+
 model Issue {
   id           String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)

@@ -97,6 +97,17 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
     }
 
     await sendTelegramMessage(targetChatId, text);
+    // Отмечаем дату отправленной — без этого утренний cron
+    // (/api/cron/morning-report-check) не отличит "уже отправили вечером"
+    // от "забыли" и продублировал бы репорт в чат с боссами. upsert, не
+    // create: кнопку можно нажать повторно (например, случайно дважды
+    // тапнули) — тогда просто обновится sentAt, вместо падения на
+    // уникальном ключе.
+    await prisma.reportSendLog.upsert({
+      where: { reportDate },
+      update: { sentAt: new Date() },
+      create: { reportDate },
+    });
     await answerCallbackQuery(query.id, "Отправлено в группу ✅");
     if (query.message) {
       await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
