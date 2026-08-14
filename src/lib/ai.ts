@@ -9,6 +9,8 @@
 // любой ошибке/таймауте/отсутствии ключа возвращаем null, и вызывающий код
 // молча откатывается на cleanTicketDescription, а не роняет обработку
 // сообщения.
+import { buildAiContext } from "@/lib/projectContext";
+
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 // Groq free tier: 100k токенов/день, лимит висит на аккаунте целиком (не на
@@ -147,7 +149,7 @@ export async function rewriteTicketDescriptionWithAI(
         temperature: 0.15,
         max_tokens: 150,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: SYSTEM_PROMPT + (await buildAiContext()) },
           ...FEW_SHOT_TURNS.flatMap(({ user, assistant }) => [
             { role: "user", content: user },
             { role: "assistant", content: assistant },
@@ -203,7 +205,7 @@ export async function findDuplicateGroups(
         max_tokens: 1000,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: DUPLICATE_SYSTEM_PROMPT },
+          { role: "system", content: DUPLICATE_SYSTEM_PROMPT + (await buildAiContext()) },
           { role: "user", content: list },
         ],
       },
@@ -260,7 +262,7 @@ export async function pickResolvedWord(
         temperature: 0,
         max_tokens: 5,
         messages: [
-          { role: "system", content: RESOLVED_WORD_SYSTEM_PROMPT },
+          { role: "system", content: RESOLVED_WORD_SYSTEM_PROMPT + (await buildAiContext()) },
           {
             role: "user",
             content: note ? `Обращение: ${description}\nЧто сделали: ${note}` : description,
@@ -275,5 +277,77 @@ export async function pickResolvedWord(
     return text.toUpperCase().includes("CHANGED") ? "CHANGED" : "FIXED";
   } catch {
     return "FIXED";
+  }
+}
+
+const GLOSSARY_TIMEOUT_MS = 20000;
+// Сколько тикетов показываем модели за раз. Больше — точнее словарь, но
+// длиннее промпт; на бесплатной квоте Groq это ощутимо.
+const MAX_ISSUES_FOR_GLOSSARY = 120;
+
+const GLOSSARY_SYSTEM_PROMPT = `Ты собираешь словарь внутреннего жаргона службы поддержки онлайн-школы JUZ40 (Казахстан). Обращения приходят на казахском и русском, вперемешку.
+
+На входе — реальные тикеты и то, чем они закончились.
+
+Найди СОКРАЩЕНИЯ и внутренние термины, которые повторяются и непонятны человеку со стороны: аббревиатуры (ДТ, ПФ, АА, ҚЖ, ЖМ), названия внутренних систем и разделов платформы, устойчивые обозначения ролей.
+
+Для каждого дай короткое объяснение по-русски — что это такое на самом деле, выведи из контекста употребления.
+
+НЕ включай:
+- обычные слова казахского и русского языка (оқушы, курс, почта, ошибка)
+- имена людей и названия компаний
+- то, что встретилось один раз и по чему нельзя понять смысл
+
+Верни строго JSON: {"terms": [{"term": "ДТ", "meaning": "диагностический тест, который проходят ученики"}]}
+Максимум 25 терминов, самые частые. Если ничего надёжного не нашлось — {"terms": []}.`;
+
+// Собирает словарь внутреннего жаргона из уже решённых тикетов. Это то
+// знание, которого у модели нет и быть не может: "ДТ" и "ПФ" придумали
+// внутри компании, и без расшифровки ИИ разбирает обращения вслепую.
+// Результат складывается в GlossaryTerm и подмешивается во все последующие
+// запросы (см. src/lib/projectContext.ts).
+export async function extractGlossaryTerms(
+  issues: Array<{ description: string; note: string | null }>
+): Promise<Array<{ term: string; meaning: string }> | null> {
+  if (groqApiKeys().length === 0 || issues.length === 0) return null;
+
+  const corpus = issues
+    .slice(0, MAX_ISSUES_FOR_GLOSSARY)
+    .map((i) => (i.note ? `${i.description} → ${i.note}` : i.description))
+    .join("\n");
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 1500,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: GLOSSARY_SYSTEM_PROMPT },
+          { role: "user", content: corpus },
+        ],
+      },
+      GLOSSARY_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const text = data?.choices?.[0]?.message?.content;
+    if (typeof text !== "string") return null;
+
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed?.terms)) return null;
+
+    return (parsed.terms as unknown[])
+      .filter(
+        (t): t is { term: string; meaning: string } =>
+          typeof t === "object" &&
+          t !== null &&
+          typeof (t as { term?: unknown }).term === "string" &&
+          typeof (t as { meaning?: unknown }).meaning === "string"
+      )
+      .map((t) => ({ term: t.term.trim(), meaning: t.meaning.trim() }))
+      .filter((t) => t.term.length > 0 && t.term.length <= 40 && t.meaning.length > 0);
+  } catch {
+    return null;
   }
 }

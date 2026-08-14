@@ -5,6 +5,7 @@ import type { GroupPresetDTO, IssueDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { BotSettingsMenu } from "@/components/BotSettingsMenu";
+import { GlossaryPanel } from "@/components/GlossaryPanel";
 import { ResolveDialog } from "@/components/ResolveDialog";
 import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
 import { AttachToIssuePicker } from "@/components/AttachToIssuePicker";
@@ -102,6 +103,7 @@ export function Inbox() {
   const [checkingMissedTickets, setCheckingMissedTickets] = useState(false);
   const [addingNewIssue, setAddingNewIssue] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showGlossary, setShowGlossary] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const boardSearchRef = useRef<HTMLInputElement>(null);
   const currentAgent = useCurrentAgent();
@@ -784,6 +786,14 @@ export function Inbox() {
         actions={paletteActions}
         onPickIssue={focusIssue}
       />
+      {showGlossary && (
+        <GlossaryPanel
+          onClose={() => setShowGlossary(false)}
+          onError={(m) => toast(m, "error")}
+          onInfo={(m) => toast(m, "success")}
+        />
+      )}
+
       {showShortcuts && (
         <ShortcutsHelp
           shortcuts={SHORTCUTS}
@@ -794,6 +804,14 @@ export function Inbox() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-slate-900">Входящие</h1>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowGlossary(true)}
+            title="Что ИИ знает о нашем проекте — внутренние сокращения из переписки"
+            className="rounded-full border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-50"
+          >
+            🧠 Словарь
+          </button>
           <BotSettingsMenu
             toggles={[
               {
