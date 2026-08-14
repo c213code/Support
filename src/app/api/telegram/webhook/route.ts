@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
 import { isNoiseOnly } from "@/lib/textClean";
 import { buildDescription } from "@/lib/ticketDescription";
-import { isIssueStatus, STATUS_META } from "@/lib/status";
+import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
 import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
 import { reactToStatusChange } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
@@ -15,6 +15,8 @@ import {
   ISSUE_ESCALATE_PREFIX,
   ISSUE_ESCALATE_TEAM_PREFIX,
   ISSUE_NOTE_PREFIX,
+  ISSUE_RESOLVE_PREFIX,
+  ISSUE_PENDING_PREFIX,
   SKIP_TICKET_PREFIX,
   REPORT_SEND_PREFIX,
 } from "@/lib/telegramCallbacks";
@@ -32,6 +34,51 @@ import {
   type TelegramMessagePayload,
   type TelegramUpdate,
 } from "@/lib/telegram";
+
+// Общий шаг для "📝 Заметка"/"✅ Решено"/"⏳ Пендинг" на карточке разбора:
+// кнопкой текст не набрать, поэтому просим ответить (Reply) на отдельное
+// сообщение и запоминаем связь message_id → issueId (+ опционально
+// targetStatus) в PendingNotePrompt — по ней POST-хендлер вебхука узнаёт,
+// что реплай от агента не обычное сообщение, а ответ на этот prompt.
+async function sendNotePrompt(
+  query: TelegramCallbackQuery,
+  issueId: string,
+  promptText: string,
+  targetStatus: IssueStatus | null
+): Promise<void> {
+  const existing = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { description: true },
+  });
+  if (!existing) {
+    await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
+    return;
+  }
+  await answerCallbackQuery(query.id);
+  if (!query.message) return;
+
+  const prompt = await sendTelegramMessage(
+    query.message.chat.id,
+    `${promptText}\n${existing.description}`
+  );
+  if (!prompt) return;
+
+  await prisma.pendingNotePrompt.upsert({
+    where: {
+      chatId_messageId: {
+        chatId: String(query.message.chat.id),
+        messageId: prompt.message_id,
+      },
+    },
+    update: { issueId, targetStatus },
+    create: {
+      chatId: String(query.message.chat.id),
+      messageId: prompt.message_id,
+      issueId,
+      targetStatus,
+    },
+  });
+}
 
 // Нажатия на инлайн-кнопки под вечерней сводкой (см.
 // /api/cron/evening-report) и под карточками отдельных тикетов — дают
@@ -154,40 +201,41 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
   // Заметку через кнопку не набрать — просим ответить (Reply) текстом на
   // отдельное сообщение и запоминаем связь message_id → issueId
   // (PendingNotePrompt), чтобы в основном обработчике POST отличить такой
-  // ответ от обычного сообщения агента.
+  // ответ от обычного сообщения агента. targetStatus — если задан, статус
+  // применяется вместе с заметкой по приходу ответа (см. "✅ Решено" /
+  // "⏳ Пендинг" ниже); null — старое поведение "просто заметка".
   if (data.startsWith(ISSUE_NOTE_PREFIX)) {
-    const issueId = data.slice(ISSUE_NOTE_PREFIX.length);
-    const existing = await prisma.issue.findUnique({
-      where: { id: issueId },
-      select: { description: true },
-    });
-    if (!existing) {
-      await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
-      return;
-    }
-    await answerCallbackQuery(query.id);
-    if (query.message) {
-      const prompt = await sendTelegramMessage(
-        query.message.chat.id,
-        `✍️ Ответь на ЭТО сообщение текстом — он станет заметкой для тикета:\n${existing.description}`
-      );
-      if (prompt) {
-        await prisma.pendingNotePrompt.upsert({
-          where: {
-            chatId_messageId: {
-              chatId: String(query.message.chat.id),
-              messageId: prompt.message_id,
-            },
-          },
-          update: { issueId },
-          create: {
-            chatId: String(query.message.chat.id),
-            messageId: prompt.message_id,
-            issueId,
-          },
-        });
-      }
-    }
+    await sendNotePrompt(
+      query,
+      data.slice(ISSUE_NOTE_PREFIX.length),
+      "✍️ Ответь на ЭТО сообщение текстом — он станет заметкой для тикета:",
+      null
+    );
+    return;
+  }
+
+  // "✅ Решено"/"⏳ Пендинг" не меняют статус сразу — сначала спрашивают
+  // "как решили"/"что сейчас" тем же реплай-механизмом, что и заметка: без
+  // текста статус применять нет смысла — именно эта заметка попадёт в
+  // репорт, который уйдёт боссам (см. ResolveDialog на сайте — там та же
+  // логика).
+  if (data.startsWith(ISSUE_RESOLVE_PREFIX)) {
+    await sendNotePrompt(
+      query,
+      data.slice(ISSUE_RESOLVE_PREFIX.length),
+      "✅ Как решили? Ответь на ЭТО сообщение текстом — тикет:",
+      "RESOLVED"
+    );
+    return;
+  }
+
+  if (data.startsWith(ISSUE_PENDING_PREFIX)) {
+    await sendNotePrompt(
+      query,
+      data.slice(ISSUE_PENDING_PREFIX.length),
+      "⏳ Что сейчас с этим тикетом? Ответь на ЭТО сообщение текстом — тикет:",
+      "PENDING"
+    );
     return;
   }
 
@@ -415,7 +463,7 @@ export async function POST(request: NextRequest) {
     if (pending) {
       const issue = await prisma.issue.findUnique({
         where: { id: pending.issueId },
-        select: { createdBy: true },
+        select: { status: true, telegramLink: true, createdBy: true },
       });
       if (issue) {
         const actorName =
@@ -424,12 +472,21 @@ export async function POST(request: NextRequest) {
           where: { id: pending.issueId },
           data: {
             note: text.trim(),
+            ...(pending.targetStatus ? { status: pending.targetStatus } : {}),
             ...(actorName && issue.createdBy === AUTO_ISSUE_CREATOR
               ? { createdBy: actorName }
               : {}),
           },
         });
-        await sendTelegramMessage(chatId, "✅ Заметка сохранена");
+        if (pending.targetStatus) {
+          await reactToStatusChange(issue.status, pending.targetStatus, issue.telegramLink);
+        }
+        await sendTelegramMessage(
+          chatId,
+          pending.targetStatus
+            ? `${STATUS_META[pending.targetStatus].emoji} ${STATUS_META[pending.targetStatus].label}: заметка сохранена`
+            : "✅ Заметка сохранена"
+        );
         await advanceReviewSession(chatId);
       }
       await prisma.pendingNotePrompt

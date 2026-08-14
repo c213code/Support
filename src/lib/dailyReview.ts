@@ -13,6 +13,8 @@ import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
   ISSUE_NOTE_PREFIX,
+  ISSUE_RESOLVE_PREFIX,
+  ISSUE_PENDING_PREFIX,
   SKIP_TICKET_PREFIX,
   REPORT_SEND_PREFIX,
 } from "@/lib/telegramCallbacks";
@@ -114,6 +116,15 @@ function buildTicketCard(
       callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:IN_PROGRESS`,
     });
   }
+  if (issue.status !== "PENDING") {
+    // Как и "✅ Решено" — не меняет статус сразу, сначала спрашивает "что
+    // сейчас с этим тикетом" тем же реплай-механизмом, что и заметка (см.
+    // ISSUE_PENDING_PREFIX в вебхуке).
+    actionRow.push({
+      text: "⏳ Пендинг",
+      callback_data: `${ISSUE_PENDING_PREFIX}${issue.id}`,
+    });
+  }
   if (issue.status !== "ESCALATED") {
     actionRow.push({
       text: "⚠️ Передать",
@@ -122,7 +133,11 @@ function buildTicketCard(
   }
   const secondRow: InlineKeyboard[number] = [
     { text: "📝 Заметка", callback_data: `${ISSUE_NOTE_PREFIX}${issue.id}` },
-    { text: "✅ Решено", callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:RESOLVED` },
+    // "✅ Решено" тоже сначала спрашивает "как решили" — по аналогии с
+    // ResolveDialog на сайте: заметка о решении и есть то, что попадёт в
+    // репорт, применять статус без неё означало бы пустую строку "Статус:"
+    // в тексте, который уйдёт боссам.
+    { text: "✅ Решено", callback_data: `${ISSUE_RESOLVE_PREFIX}${issue.id}` },
   ];
   const skipRow: InlineKeyboard[number] = [
     { text: "⏭ Пропустить", callback_data: `${SKIP_TICKET_PREFIX}${issue.id}` },

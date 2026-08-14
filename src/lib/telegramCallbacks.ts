@@ -11,6 +11,12 @@ export const ISSUE_ESCALATE_PREFIX = "issue_escalate:";
 // многословный префикс.
 export const ISSUE_ESCALATE_TEAM_PREFIX = "esc_team:";
 export const ISSUE_NOTE_PREFIX = "issue_note:";
+// "✅ Решено" / "⏳ Пендинг" на карточке разбора не меняют статус сразу —
+// сначала спрашивают "как решили"/"что сейчас" тем же механизмом реплая,
+// что и ISSUE_NOTE_PREFIX (PendingNotePrompt.targetStatus), и только по
+// ответу применяют и заметку, и статус вместе.
+export const ISSUE_RESOLVE_PREFIX = "issue_resolve:";
+export const ISSUE_PENDING_PREFIX = "issue_pending:";
 // Пропустить тикет в разборе по одному (см. advanceReviewSession в
 // dailyReview.ts) — не трогает статус, просто идёт к следующему.
 export const SKIP_TICKET_PREFIX = "skip_ticket:";

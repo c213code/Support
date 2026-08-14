@@ -89,6 +89,12 @@ model PendingNotePrompt {
   chatId    String
   messageId Int
   issueId   String
+  // Если задан — при получении ответа применяется не только текст
+  // заметки, но и этот статус ("✅ Решено"/"⏳ Пендинг" на карточке
+  // разбора требуют "как решили"/"что сейчас" перед сменой статуса, по
+  // аналогии с ResolveDialog на сайте). Null — старое поведение "просто
+  // заметка" (кнопка "📝 Заметка"), статус не трогаем.
+  targetStatus IssueStatus?
   createdAt DateTime @default(now())
 
   @@unique([chatId, messageId])
