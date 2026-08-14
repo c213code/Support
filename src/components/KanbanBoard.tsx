@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { IssueDTO } from "@/lib/types";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { Avatar } from "@/components/Avatar";
+import { BotReplies } from "@/components/BotReplies";
 import { groupColor } from "@/lib/groups";
 import { issueLinks } from "@/lib/report";
 import {
@@ -61,6 +62,8 @@ export function KanbanBoard({
   onMerge,
   onEscalate,
   onDetach,
+  onBotRepliesChanged,
+  onBotReplyError,
   size = "compact",
   highlightId,
 }: {
@@ -78,6 +81,10 @@ export function KanbanBoard({
   // нужно ещё выбрать команду. Поэтому вместо прямого onStatusChange у него
   // отдельный колбэк, открывающий диалог (см. EscalateDialog).
   onEscalate?: (issue: IssueDTO) => void;
+  // Ответы бота на карточке правятся и удаляются прямо там (см.
+  // BotReplies) — доске остаётся перечитать список и показать ошибку.
+  onBotRepliesChanged?: () => void;
+  onBotReplyError?: (message: string) => void;
   size?: "compact" | "large";
   // Тикет, на который надо обратить внимание (нашли через ⌘K) — подсвечиваем
   // кольцом на пару секунд, иначе после закрытия поиска непонятно, куда
@@ -270,6 +277,14 @@ export function KanbanBoard({
                         )}
                       </span>
                     ))}
+                    {onBotRepliesChanged && onBotReplyError && (
+                      <BotReplies
+                        issueId={issue.id}
+                        replies={issue.botReplies ?? []}
+                        onChanged={onBotRepliesChanged}
+                        onError={onBotReplyError}
+                      />
+                    )}
                     {issue.escalatedTeam && (
                       <p className="mt-1 flex items-center gap-1 text-xs text-orange-600">
                         <IconSend className="h-3 w-3 shrink-0" />

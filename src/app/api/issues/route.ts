@@ -17,7 +17,27 @@ export async function GET(request: NextRequest) {
     orderBy: [{ position: "asc" }],
   });
 
-  return NextResponse.json({ issues });
+  // Что бот успел написать в рабочие группы по этим тикетам — приезжает
+  // вместе со списком, одним запросом на всю доску: иначе карточкам
+  // пришлось бы ходить за этим по одной, а их за активный день несколько
+  // десятков.
+  const botReplies = await prisma.botReply.findMany({
+    where: { issueId: { in: issues.map((i) => i.id) }, deleted: false },
+    orderBy: { sentAt: "asc" },
+  });
+  const byIssue = new Map<string, typeof botReplies>();
+  for (const reply of botReplies) {
+    const list = byIssue.get(reply.issueId) ?? [];
+    list.push(reply);
+    byIssue.set(reply.issueId, list);
+  }
+
+  return NextResponse.json({
+    issues: issues.map((issue) => ({
+      ...issue,
+      botReplies: byIssue.get(issue.id) ?? [],
+    })),
+  });
 }
 
 export async function POST(request: NextRequest) {

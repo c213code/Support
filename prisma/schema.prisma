@@ -65,7 +65,35 @@ model TelegramMessage {
 model AppSetting {
   id                String   @id @default("singleton")
   aiCleaningEnabled Boolean  @default(false)
+  // Общий рубильник автоответов бота в рабочие группы (подтверждение
+  // приёма, реакция на смену статуса — см. src/lib/autoReply.ts). Выключен
+  // по умолчанию осознанно: это единственная фича, которая пишет от имени
+  // школы в чат, где сидят коллеги, — включать её должен человек, а не
+  // деплой.
+  autoReplyEnabled  Boolean  @default(false)
   updatedAt         DateTime @updatedAt
+}
+
+// Что именно бот написал в рабочую группу по конкретному тикету. Нужна
+// ровно для двух вещей: не отправить одно и то же дважды и суметь потом
+// исправить/удалить неудачный ответ (Telegram позволяет это только по
+// message_id и только в течение 48 часов — см. src/lib/botReply.ts).
+model BotReply {
+  id        String   @id @default(cuid())
+  issueId   String
+  chatId    String
+  messageId Int
+  // Какой это был ответ: ACK (подтверждение приёма), статусный (по имени
+  // IssueStatus) или FOLLOW_UP (ответ на повторное обращение). Строкой, а
+  // не enum: набор поводов будет прирастать, а заводить миграцию ради
+  // каждого нового повода незачем.
+  kind      String
+  text      String
+  deleted   Boolean  @default(false)
+  sentAt    DateTime @default(now())
+
+  @@unique([chatId, messageId])
+  @@index([issueId])
 }
 
 // Отмечает, что репорт за конкретный день уже был отправлен в рабочую
@@ -95,6 +123,11 @@ model PendingNotePrompt {
   // аналогии с ResolveDialog на сайте). Null — старое поведение "просто
   // заметка" (кнопка "📝 Заметка"), статус не трогаем.
   targetStatus IssueStatus?
+  // Предлагать ли после сохранения заметки кнопку "сообщить в чат". Нужно,
+  // только когда решение пришло из разбора: в группе о нём ещё не знают.
+  // Если же статус проставился потому, что агент сам написал в группе
+  // "жөңделді", предлагать нечего — там уже всё сказано.
+  offerChatReply Boolean @default(false)
   createdAt DateTime @default(now())
 
   @@unique([chatId, messageId])

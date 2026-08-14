@@ -18,6 +18,20 @@ import {
 } from "@/lib/dailyReview";
 import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
+import { detectAgentIntent } from "@/lib/agentIntent";
+import { pickResolvedWord } from "@/lib/ai";
+import {
+  buildAckText,
+  buildResolvedText,
+  buildStatusReplyText,
+  pickLanguage,
+} from "@/lib/autoReply";
+import {
+  sendBotReply,
+  hasBotReplied,
+  agentAlreadyReplied,
+} from "@/lib/botReply";
+import { isAutoReplyEnabled, setAutoReplyEnabled } from "@/lib/settings";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -32,6 +46,8 @@ import {
   START_DEDUPE_PREFIX,
   DEDUPE_MERGE_PREFIX,
   DEDUPE_SKIP_PREFIX,
+  NOTIFY_RESOLVED_PREFIX,
+  CONFIRM_RESOLVED_PREFIX,
 } from "@/lib/telegramCallbacks";
 import {
   AUTO_ISSUE_CREATOR,
@@ -42,6 +58,7 @@ import {
   extractReplyContextLine,
   extractText,
   isOwnAgentMessage,
+  ownAgentTelegramIdList,
   sendTelegramMessage,
   type TelegramCallbackQuery,
   type TelegramMessagePayload,
@@ -57,7 +74,10 @@ async function sendNotePrompt(
   query: TelegramCallbackQuery,
   issueId: string,
   promptText: string,
-  targetStatus: IssueStatus | null
+  targetStatus: IssueStatus | null,
+  // Предложить ли после сохранения заметки сообщить о решении в рабочий
+  // чат. true — когда решение пришло из разбора (в группе ещё не знают).
+  offerChatReply = false
 ): Promise<void> {
   const existing = await prisma.issue.findUnique({
     where: { id: issueId },
@@ -83,13 +103,40 @@ async function sendNotePrompt(
         messageId: prompt.message_id,
       },
     },
-    update: { issueId, targetStatus },
+    update: { issueId, targetStatus, offerChatReply },
     create: {
       chatId: String(query.message.chat.id),
       messageId: prompt.message_id,
       issueId,
       targetStatus,
+      offerChatReply,
     },
+  });
+}
+
+// Шлёт в рабочую группу единственный автоответ, утверждающий факт:
+// "Жөңделді"/"Өзгертілді". Слово выбирает ИИ по сути тикета, язык — по
+// исходному сообщению. Вызывается только по явному нажатию человека.
+async function notifyResolvedInChat(issueId: string): Promise<boolean> {
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { description: true, note: true, telegramLink: true },
+  });
+  if (!issue?.telegramLink) return false;
+
+  const source = await prisma.telegramMessage.findFirst({
+    where: { messageLink: issue.telegramLink },
+    select: { chatId: true, messageId: true, text: true },
+  });
+  if (!source) return false;
+
+  const kind = await pickResolvedWord(issue.description, issue.note);
+  return sendBotReply({
+    issueId,
+    chatId: source.chatId,
+    replyToMessageId: source.messageId,
+    kind: "RESOLVED",
+    text: buildResolvedText(kind, pickLanguage(source.text ?? "")),
   });
 }
 
@@ -237,8 +284,41 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       query,
       data.slice(ISSUE_RESOLVE_PREFIX.length),
       "✅ Как решили? Ответь на ЭТО сообщение текстом — тикет:",
-      "RESOLVED"
+      "RESOLVED",
+      // Решение пришло из разбора — в рабочем чате об этом ещё не знают,
+      // поэтому после заметки предложим туда написать.
+      true
     );
+    return;
+  }
+
+  // Тот же запрос заметки, но по догадке бота: агент написал в группе
+  // "жөңделді", бот уточняет в личке. Сообщать в чат не предлагаем — там
+  // уже всё сказано живым человеком.
+  if (data.startsWith(CONFIRM_RESOLVED_PREFIX)) {
+    await sendNotePrompt(
+      query,
+      data.slice(CONFIRM_RESOLVED_PREFIX.length),
+      "✅ Что именно сделали? Ответь на ЭТО сообщение — заметка уйдёт в репорт. Тикет:",
+      "RESOLVED",
+      false
+    );
+    return;
+  }
+
+  if (data.startsWith(NOTIFY_RESOLVED_PREFIX)) {
+    const issueId = data.slice(NOTIFY_RESOLVED_PREFIX.length);
+    const sent = await notifyResolvedInChat(issueId);
+    await answerCallbackQuery(
+      query.id,
+      sent
+        ? "Отправлено в чат ✅"
+        : "Не получилось — проверь, включены ли автоответы",
+      !sent
+    );
+    if (sent && query.message) {
+      await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
+    }
     return;
   }
 
@@ -397,6 +477,136 @@ async function createAutoIssue(
   });
 }
 
+// Подтверждение приёма: бот отвечает реплаем сразу, как завёлся тикет —
+// "жақсы, қарап береміз", и если в обращении не было ни почты, ни ссылки,
+// ни номера, тут же просит их прислать (60% обращений приходят без них, и
+// первый ответ агента уходит именно на это).
+//
+// Два предохранителя от дубля: один ACK на тикет (сообщения одного автора
+// склеиваются, а вебхук может доставиться повторно) и молчание, если по
+// этому обращению уже успел ответить живой человек.
+async function sendAcknowledgement(
+  issueId: string,
+  chatId: string,
+  messageId: number,
+  incomingText: string
+): Promise<void> {
+  if (await hasBotReplied(issueId, "ACK")) return;
+  if (await agentAlreadyReplied(chatId, messageId, ownAgentTelegramIdList())) return;
+
+  await sendBotReply({
+    issueId,
+    chatId,
+    replyToMessageId: messageId,
+    kind: "ACK",
+    text: buildAckText(incomingText),
+  });
+}
+
+// Обратная связь из чата в статус: агент отвечает в группе как привык, а
+// система понимает, что произошло, и двигает статус сама — чтобы вечерний
+// разбор был проверкой, а не пересказом собственного дня.
+//
+// Тикет определяем консервативно: либо агент ответил реплаем на конкретное
+// обращение, либо в этом чате за сегодня открыт ровно один разбираемый
+// тикет. Если кандидатов несколько и реплая нет — молчим: ошибиться
+// статусом хуже, чем не проставить его вовсе, потому что статус уходит в
+// репорт боссам.
+async function applyAgentIntent(
+  message: TelegramMessagePayload,
+  chatId: string,
+  ownText: string
+): Promise<void> {
+  const intent = detectAgentIntent(ownText);
+  if (!intent) return;
+
+  let issueId: string | null = null;
+  const repliedId = message.reply_to_message?.message_id;
+  if (repliedId != null) {
+    const replied = await prisma.telegramMessage.findUnique({
+      where: { chatId_messageId: { chatId, messageId: repliedId } },
+      select: { usedForIssueId: true },
+    });
+    issueId = replied?.usedForIssueId ?? null;
+  }
+
+  if (!issueId) {
+    // Тикеты этого чата ищем через сообщения, которые их породили —
+    // связь чат→тикет живёт именно там (у самого Issue есть только ссылка
+    // строкой, по ней фильтровать пришлось бы префиксом).
+    const linked = await prisma.telegramMessage.findMany({
+      where: { chatId, usedForIssueId: { not: null } },
+      select: { usedForIssueId: true },
+      orderBy: { receivedAt: "desc" },
+      take: 30,
+    });
+    const ids = Array.from(
+      new Set(linked.map((m) => m.usedForIssueId).filter((id): id is string => id !== null))
+    );
+    if (ids.length === 0) return;
+
+    const open = await prisma.issue.findMany({
+      where: {
+        id: { in: ids },
+        reportDate: todayDateString(),
+        status: { in: ["SENT", "IN_PROGRESS", "PENDING"] },
+      },
+      select: { id: true },
+      take: 2,
+    });
+    if (open.length !== 1) return;
+    issueId = open[0].id;
+  }
+
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { status: true, telegramLink: true, createdBy: true },
+  });
+  if (!issue || issue.status === intent.status) return;
+
+  const actorName =
+    message.from?.id != null ? telegramIdToAgent(message.from.id) : null;
+
+  // "Решено" молча не ставим: оно уходит в репорт боссам, а само
+  // "жөңделді" — плохая заметка. Спрашиваем в личке у того, кто написал,
+  // и заодно просим нормальный текст.
+  if (intent.needsConfirmation) {
+    if (message.from?.id == null) return;
+    await sendTelegramMessage(
+      message.from.id,
+      `Похоже, этот тикет решён — отметить?\n\n${issue.telegramLink ?? ""}`.trim(),
+      [
+        [
+          {
+            text: "✅ Да, решено",
+            callback_data: `${CONFIRM_RESOLVED_PREFIX}${issueId}`,
+          },
+        ],
+      ]
+    );
+    return;
+  }
+
+  await prisma.issue.update({
+    where: { id: issueId },
+    data: {
+      status: intent.status,
+      ...(actorName && issue.createdBy === AUTO_ISSUE_CREATOR
+        ? { createdBy: actorName }
+        : {}),
+    },
+  });
+  // source: "chat" — в группе агент уже всё сказал сам, повторять за ним
+  // не нужно; ставим только реакцию на исходном сообщении.
+  await reactToStatusChange(
+    issue.status,
+    intent.status,
+    issue.telegramLink,
+    "chat",
+    issueId
+  );
+}
+
 // Реплай на уже заведённое сообщение — частый паттерн "напоминание":
 // человек отвечает на своё же старое сообщение (или снова пишет по уже
 // "решённому" тикету), на которое так и не ответили. Обычная
@@ -474,6 +684,25 @@ async function attachFollowUpToTicket(
     }),
   ]);
 
+  // Написали повторно по тому, что считалось решённым, — человек пишет
+  // второй раз именно потому, что ему не ответили, и молчание здесь и есть
+  // сама проблема. Этот путь меняет статус в обход reactToStatusChange,
+  // поэтому ответ отправляем явно, иначе самый ценный случай остался бы
+  // единственным без ответа.
+  if (wasResolved) {
+    const language = pickLanguage(ownText);
+    const text = buildStatusReplyText("SENT", language);
+    if (text) {
+      await sendBotReply({
+        issueId: issue.id,
+        chatId,
+        replyToMessageId: message.message_id,
+        kind: "FOLLOW_UP",
+        text,
+      });
+    }
+  }
+
   return true;
 }
 
@@ -485,8 +714,21 @@ const HELP_TEXT = [
   "/send [дата] — отправить репорт в рабочую группу (если уже отправляли за эту дату — просто скажет, когда)",
   "/dedupe [дата] — найти и разобрать похожие тикеты (ИИ-подсказка, объединение по одному)",
   "/review [дата] — начать разбор тикетов по одному",
+  "/autoreply [on|off] — автоответы бота в рабочих группах; без аргумента покажет, включены ли",
   "",
   "Без даты — за сегодня. Дата — в формате YYYY-MM-DD.",
+].join("\n");
+
+const AUTOREPLY_HELP = [
+  "Когда включено, бот сам отвечает в рабочих группах:",
+  "• на новое обращение — «жақсы, қарап береміз», и просит почту/ссылку, если их не прислали;",
+  "• при смене статуса на сайте или в разборе — «жұмысқа алдық» / «әріптестеріме жібердім»;",
+  "• если написали повторно по решённому — извиняется за задержку.",
+  "",
+  "Бот молчит там, где ты уже ответил сам, — и наоборот, твоя реплика в группе сама двигает статус.",
+  "«Решено» в чат уходит только по твоей кнопке.",
+  "",
+  "Включить: /autoreply on · Выключить: /autoreply off",
 ].join("\n");
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -565,6 +807,26 @@ async function handleBotCommand(chatId: number, fromId: number, text: string): P
 
     case "/review": {
       await startReviewSession(chatId, reportDate);
+      return;
+    }
+
+    case "/autoreply": {
+      const arg = (dateArg ?? "").toLowerCase();
+      if (arg !== "on" && arg !== "off") {
+        const enabled = await isAutoReplyEnabled();
+        await sendTelegramMessage(
+          chatId,
+          `${enabled ? "🟢 Автоответы включены" : "⚪️ Автоответы выключены"}\n\n${AUTOREPLY_HELP}`
+        );
+        return;
+      }
+      await setAutoReplyEnabled(arg === "on");
+      await sendTelegramMessage(
+        chatId,
+        arg === "on"
+          ? "🟢 Автоответы включены — бот начнёт отвечать в рабочих группах."
+          : "⚪️ Автоответы выключены — бот больше ничего не пишет в группы."
+      );
       return;
     }
 
@@ -651,13 +913,38 @@ export async function POST(request: NextRequest) {
           },
         });
         if (pending.targetStatus) {
-          await reactToStatusChange(issue.status, pending.targetStatus, issue.telegramLink);
+          await reactToStatusChange(
+            issue.status,
+            pending.targetStatus,
+            issue.telegramLink,
+            "app",
+            pending.issueId
+          );
         }
+        // Решили из разбора — в рабочем чате об этом ещё не знают, поэтому
+        // предлагаем сообщить туда одной кнопкой. Если решение пришло с
+        // догадки по реплике агента в группе, offerChatReply = false:
+        // повторять за живым человеком не нужно.
+        const offerNotify =
+          pending.targetStatus === "RESOLVED" &&
+          pending.offerChatReply &&
+          issue.telegramLink != null &&
+          (await isAutoReplyEnabled());
         await sendTelegramMessage(
           chatId,
           pending.targetStatus
             ? `${STATUS_META[pending.targetStatus].emoji} ${STATUS_META[pending.targetStatus].label}: заметка сохранена`
-            : "✅ Заметка сохранена"
+            : "✅ Заметка сохранена",
+          offerNotify
+            ? [
+                [
+                  {
+                    text: "💬 Сообщить в чат, что решено",
+                    callback_data: `${NOTIFY_RESOLVED_PREFIX}${pending.issueId}`,
+                  },
+                ],
+              ]
+            : undefined
         );
         await advanceReviewSession(chatId);
       }
@@ -697,6 +984,10 @@ export async function POST(request: NextRequest) {
         viewed: true,
       },
     });
+    // Реплика агента в группе — это и есть сигнал "взял в работу /
+    // передал / сделал". Двигаем статус по ней, чтобы вечером не
+    // проставлять заново то, что уже сделано днём.
+    await applyAgentIntent(message, chatId, text);
     return NextResponse.json({ ok: true });
   }
 
@@ -772,6 +1063,10 @@ export async function POST(request: NextRequest) {
           where: { id: recent.id },
           data: { usedForIssueId: issue.id },
         });
+        // Отвечаем на последнее сообщение серии, а не на первое: именно
+        // в нём чаще всего и оказывается сама проблема (первое сплошь и
+        // рядом — просто "Қайырлы күн").
+        await sendAcknowledgement(issue.id, chatId, message.message_id, mergedOwn);
       }
     }
     return NextResponse.json({ ok: true });
@@ -814,6 +1109,7 @@ export async function POST(request: NextRequest) {
         where: { id: savedMessage.id },
         data: { usedForIssueId: issue.id },
       });
+      await sendAcknowledgement(issue.id, chatId, message.message_id, text);
     }
   }
 

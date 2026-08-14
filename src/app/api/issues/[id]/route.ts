@@ -69,7 +69,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     await reactToStatusChange(
       existing.status,
       data.status as IssueStatus,
-      existing.telegramLink
+      existing.telegramLink,
+      "app",
+      id
     );
   }
 

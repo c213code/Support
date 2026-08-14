@@ -83,6 +83,7 @@ export function Inbox() {
   const [aiCleaningEnabled, setAiCleaningEnabled] = useState<boolean | null>(
     null
   );
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState<boolean | null>(null);
   const [boardQuery, setBoardQuery] = useState("");
   const [duplicateGroups, setDuplicateGroups] = useState<IssueDTO[][] | null>(
     null
@@ -131,6 +132,9 @@ export function Inbox() {
     fetch("/api/settings/ai-cleaning")
       .then((res) => res.json())
       .then((data) => setAiCleaningEnabled(Boolean(data.enabled)));
+    fetch("/api/settings/auto-reply")
+      .then((res) => res.json())
+      .then((data) => setAutoReplyEnabled(Boolean(data.enabled)));
   }, [loadGroups]);
 
   useEffect(() => {
@@ -627,6 +631,37 @@ export function Inbox() {
     toast(next ? "ИИ-описания включены" : "ИИ-описания выключены", "info");
   }
 
+  // Тогл автоответов бота в рабочие группы. Единственная настройка,
+  // которая заставляет бота писать от имени школы туда, где сидят
+  // коллеги, — поэтому подтверждаем включение явно, а выключение делаем
+  // без вопросов (выключить всегда должно быть легко).
+  async function handleToggleAutoReply() {
+    const next = !autoReplyEnabled;
+    if (
+      next &&
+      !window.confirm(
+        "Бот начнёт сам отвечать в рабочих группах: подтверждать приём обращений и сообщать о смене статуса. Включить?"
+      )
+    ) {
+      return;
+    }
+    setAutoReplyEnabled(next);
+    const res = await fetch("/api/settings/auto-reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok) {
+      setAutoReplyEnabled(!next);
+      toast("Не удалось переключить автоответы", "error");
+      return;
+    }
+    toast(
+      next ? "Автоответы включены" : "Автоответы выключены",
+      next ? "success" : "info"
+    );
+  }
+
   // Фильтр по тексту на доске: за активный день набирается несколько
   // десятков карточек в трёх колонках, и найти "тот тикет про ДТ" глазами
   // дольше, чем набрать пару букв.
@@ -753,6 +788,28 @@ export function Inbox() {
               />
             </span>
             ✨ ИИ-описания
+          </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoReplyEnabled ?? false}
+            onClick={handleToggleAutoReply}
+            disabled={autoReplyEnabled === null}
+            title="Бот сам отвечает в рабочих группах: подтверждает приём обращения и сообщает о смене статуса"
+            className="flex items-center gap-1.5 rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 disabled:opacity-50"
+          >
+            <span
+              className={`relative h-4 w-7 shrink-0 rounded-full transition ${
+                autoReplyEnabled ? "bg-emerald-600" : "bg-slate-300"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition ${
+                  autoReplyEnabled ? "left-3.5" : "left-0.5"
+                }`}
+              />
+            </span>
+            🤖 Автоответы
           </button>
           {tab === "messages" && (
             <span className="text-xs text-slate-400">
@@ -1040,6 +1097,8 @@ export function Inbox() {
               onMerge={(issue) => setMergingIssueId(issue.id)}
               onEscalate={(issue) => setEscalatingIssueId(issue.id)}
               onDetach={handleDetach}
+              onBotRepliesChanged={() => loadIssues(date)}
+              onBotReplyError={(message) => toast(message, "error")}
               size="large"
               highlightId={highlightId}
             />

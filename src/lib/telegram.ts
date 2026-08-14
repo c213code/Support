@@ -109,6 +109,13 @@ export function isOwnAgentMessage(fromId: number | undefined): boolean {
   return ownAgentTelegramIds().has(fromId);
 }
 
+// Те же id списком — для проверки "не ответил ли живой человек раньше
+// бота" (см. agentAlreadyReplied в lib/botReply.ts), где нужен фильтр по
+// TelegramMessage.fromId, а он BigInt.
+export function ownAgentTelegramIdList(): bigint[] {
+  return Array.from(ownAgentTelegramIds(), (id) => BigInt(id));
+}
+
 export function extractText(message: TelegramMessagePayload): string | null {
   if (message.text) return message.text;
   if (message.caption) return message.caption;
@@ -223,7 +230,13 @@ export async function sendTelegramMessage(
   // "HTML" — когда в text есть разметка (компактная кликабельная ссылка
   // вместо голого URL — см. escapeHtml выше). Вызывающий код сам отвечает
   // за экранирование пользовательского текста этим хелпером.
-  parseMode?: "HTML"
+  parseMode?: "HTML",
+  // Ответить реплаем на конкретное сообщение. Для автоответов в рабочие
+  // группы это обязательно: там за минуту проходит несколько обращений, и
+  // ответ без привязки непонятно к чему относится.
+  // allow_sending_without_reply: исходное сообщение могли удалить, пока мы
+  // отвечали — тогда лучше отправить без привязки, чем не отправить вовсе.
+  replyToMessageId?: number
 ): Promise<{ message_id: number } | null> {
   const data = (await callBotApi("sendMessage", {
     chat_id: chatId,
@@ -231,6 +244,8 @@ export async function sendTelegramMessage(
     reply_markup: replyMarkup ? { inline_keyboard: replyMarkup } : undefined,
     message_thread_id: threadId,
     parse_mode: parseMode,
+    reply_to_message_id: replyToMessageId,
+    allow_sending_without_reply: replyToMessageId != null ? true : undefined,
   })) as { result?: { message_id?: number } } | null;
 
   return typeof data?.result?.message_id === "number"
@@ -238,24 +253,46 @@ export async function sendTelegramMessage(
     : null;
 }
 
+// Удаляет сообщение бота. Telegram разрешает это только в течение 48 часов
+// после отправки — позже вернёт ошибку, и вызывающий код должен честно
+// сказать об этом человеку, а не молчать (см. src/lib/botReply.ts).
+// Возвращает true, только если Telegram подтвердил удаление.
+export async function deleteTelegramMessage(
+  chatId: string | number,
+  messageId: number
+): Promise<boolean> {
+  const data = (await callBotApi("deleteMessage", {
+    chat_id: chatId,
+    message_id: messageId,
+  })) as { ok?: boolean; result?: boolean } | null;
+
+  return data?.result === true;
+}
+
 // Переписывает текст и клавиатуру уже отправленного сообщения на месте —
 // для кнопки "🔁 Обновить список" (см. dailyReview.ts): без этого пришлось
 // бы слать новое сообщение каждый раз и плодить те же бабблы, от которых
 // уже один раз ушли (см. коммит про консолидацию кнопок статуса).
+// Возвращает true, если Telegram подтвердил правку — нужно для правки
+// автоответов в группе (см. src/lib/botReply.ts): там, в отличие от
+// карточек разбора, человеку важно знать, applied ли изменение, потому что
+// после 48 часов Telegram править уже не даёт.
 export async function editMessageText(
   chatId: string | number,
   messageId: number,
   text: string,
   replyMarkup?: InlineKeyboard | null,
   parseMode?: "HTML"
-): Promise<void> {
-  await callBotApi("editMessageText", {
+): Promise<boolean> {
+  const data = (await callBotApi("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text,
     reply_markup: replyMarkup ? { inline_keyboard: replyMarkup } : undefined,
     parse_mode: parseMode,
-  });
+  })) as { result?: unknown } | null;
+
+  return data?.result != null;
 }
 
 // Снимает инлайн-клавиатуру с уже отправленного сообщения — после того,

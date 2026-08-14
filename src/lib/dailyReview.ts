@@ -145,7 +145,14 @@ type TicketCard = { text: string; keyboard: InlineKeyboard };
 // в заголовке — позиция в очереди этого прохода, не id и не место на
 // доске.
 function buildTicketCard(
-  issue: { id: string; groupName: string; description: string; status: IssueStatus; telegramLink: string | null },
+  issue: {
+    id: string;
+    groupName: string;
+    description: string;
+    status: IssueStatus;
+    telegramLink: string | null;
+    botReplies?: string[];
+  },
   position: number,
   total: number
 ): TicketCard {
@@ -153,7 +160,14 @@ function buildTicketCard(
   const link = issue.telegramLink
     ? `\n<a href="${escapeHtml(issue.telegramLink)}">🔗 Открыть в Telegram</a>`
     : "";
-  const text = `Тикет ${position}/${total}\n\n${meta.emoji} ${escapeHtml(issue.groupName)}\n${escapeHtml(issue.description)}${link}`;
+  // Что бот уже сказал в группе по этому тикету — чтобы вечером не
+  // написать второй раз то же самое (это и была бы двойная работа, только
+  // теперь уже в чате у коллег).
+  const said =
+    issue.botReplies && issue.botReplies.length > 0
+      ? `\n\n<i>🤖 бот уже ответил: ${escapeHtml(issue.botReplies.join(" · "))}</i>`
+      : "";
+  const text = `Тикет ${position}/${total}\n\n${meta.emoji} ${escapeHtml(issue.groupName)}\n${escapeHtml(issue.description)}${link}${said}`;
 
   const actionRow: InlineKeyboard[number] = [];
   if (issue.status !== "IN_PROGRESS") {
@@ -221,7 +235,11 @@ export async function startReviewSession(
   if (reviewable.length === 0) return;
 
   const chatId = String(recipientId);
-  const card = buildTicketCard(reviewable[0], 1, reviewable.length);
+  const card = buildTicketCard(
+    { ...reviewable[0], botReplies: await botRepliesFor(reviewable[0].id) },
+    1,
+    reviewable.length
+  );
   const sent = await sendTelegramMessage(recipientId, card.text, card.keyboard, undefined, "HTML");
   if (!sent) return;
 
@@ -240,6 +258,17 @@ export async function startReviewSession(
       ticketIds: reviewable.map((i) => i.id),
     },
   });
+}
+
+// Тексты, которые бот уже отправил в рабочую группу по этому тикету —
+// показываются на карточке разбора, чтобы не продублировать сказанное.
+async function botRepliesFor(issueId: string): Promise<string[]> {
+  const replies = await prisma.botReply.findMany({
+    where: { issueId, deleted: false },
+    orderBy: { sentAt: "asc" },
+    select: { text: true },
+  });
+  return replies.map((r) => r.text);
 }
 
 // Двигает активную сессию разбора к следующему тикету — после того, как
@@ -280,7 +309,11 @@ export async function advanceReviewSession(chatId: string): Promise<void> {
     return;
   }
 
-  const card = buildTicketCard(issue, idx + 1, session.ticketIds.length);
+  const card = buildTicketCard(
+    { ...issue, botReplies: await botRepliesFor(issue.id) },
+    idx + 1,
+    session.ticketIds.length
+  );
   await editMessageText(chatId, session.messageId, card.text, card.keyboard, "HTML");
   await prisma.reviewSession.update({ where: { chatId }, data: { currentIndex: idx } });
 }
@@ -316,7 +349,11 @@ export async function goBackReviewSession(chatId: string): Promise<void> {
 
   if (!issue) return;
 
-  const card = buildTicketCard(issue, idx + 1, session.ticketIds.length);
+  const card = buildTicketCard(
+    { ...issue, botReplies: await botRepliesFor(issue.id) },
+    idx + 1,
+    session.ticketIds.length
+  );
   await editMessageText(chatId, session.messageId, card.text, card.keyboard, "HTML");
   await prisma.reviewSession.update({ where: { chatId }, data: { currentIndex: idx } });
 }

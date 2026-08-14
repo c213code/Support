@@ -229,3 +229,51 @@ export async function findDuplicateGroups(
     return null;
   }
 }
+
+const RESOLVED_WORD_TIMEOUT_MS = 5000;
+
+const RESOLVED_WORD_SYSTEM_PROMPT = `Ты определяешь, каким словом ответить в рабочий чат, когда задача закрыта.
+
+Ответь строго одним словом:
+FIXED — если чинили поломку, ошибку, сбой (не открывалось, не грузилось, вылетала ошибка, не отображалось).
+CHANGED — если по просьбе меняли данные или настройки (поменять почту, номер, роль, тариф, добавить курс, продлить доступ, перевести аккаунт).
+
+Только FIXED или CHANGED, без объяснений.`;
+
+// Выбирает, каким словом бот отчитается в группе о закрытой задаче:
+// "Жөңделді" (починили) или "Өзгертілді" (поменяли по просьбе). В реальной
+// переписке агенты используют оба, и разница видна из сути обращения.
+//
+// При недоступности модели возвращает "FIXED" — это более общий вариант, и
+// он никогда не звучит неправдой: не блокировать же отправку ответа из-за
+// того, что кончилась квота.
+export async function pickResolvedWord(
+  description: string,
+  note: string | null
+): Promise<"FIXED" | "CHANGED"> {
+  if (groqApiKeys().length === 0) return "FIXED";
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 5,
+        messages: [
+          { role: "system", content: RESOLVED_WORD_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: note ? `Обращение: ${description}\nЧто сделали: ${note}` : description,
+          },
+        ],
+      },
+      RESOLVED_WORD_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const text = data?.choices?.[0]?.message?.content;
+    if (typeof text !== "string") return "FIXED";
+    return text.toUpperCase().includes("CHANGED") ? "CHANGED" : "FIXED";
+  } catch {
+    return "FIXED";
+  }
+}

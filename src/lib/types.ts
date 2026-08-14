@@ -1,6 +1,20 @@
 export type { IssueStatus } from "@/lib/status";
 import type { IssueStatus } from "@/lib/status";
 
+// Ответ, который бот отправил в рабочую группу по тикету (см.
+// src/lib/botReply.ts). Приезжает вместе со списком тикетов, чтобы на
+// карточке было видно, что уже сказано коллегам.
+export type BotReplyDTO = {
+  id: string;
+  issueId: string;
+  chatId: string;
+  messageId: number;
+  kind: string;
+  text: string;
+  deleted: boolean;
+  sentAt: string;
+};
+
 export type IssueDTO = {
   id: string;
   reportDate: string;
@@ -18,6 +32,7 @@ export type IssueDTO = {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  botReplies?: BotReplyDTO[];
 };
 
 export type GroupPresetDTO = {

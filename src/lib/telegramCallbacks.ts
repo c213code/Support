@@ -34,3 +34,13 @@ export const BACK_TICKET_PREFIX = "back_ticket:";
 export const START_DEDUPE_PREFIX = "start_dedupe:";
 export const DEDUPE_MERGE_PREFIX = "dedupe_merge";
 export const DEDUPE_SKIP_PREFIX = "dedupe_skip";
+
+// "Сообщить в чат, что решено" — единственный автоответ, который
+// утверждает факт, поэтому уходит только по явному нажатию (см.
+// src/lib/autoReply.ts). Предлагается после сохранения заметки о решении и
+// только если решение пришло из разбора: если агент сам написал в группе
+// "жөңделді", там уже всё сказано.
+export const NOTIFY_RESOLVED_PREFIX = "notify_resolved:";
+// Подтверждение "да, это решено" на догадку бота по реплике агента в
+// группе (см. detectAgentIntent) — ведёт в тот же запрос заметки.
+export const CONFIRM_RESOLVED_PREFIX = "confirm_resolved:";

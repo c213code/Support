@@ -20,3 +20,22 @@ export async function setAiCleaningEnabled(enabled: boolean): Promise<void> {
     create: { id: SETTINGS_ID, aiCleaningEnabled: enabled },
   });
 }
+
+// Автоответы бота в рабочие группы. Выключены по умолчанию: это
+// единственная фича, которая пишет от имени школы туда, где сидят коллеги,
+// поэтому включать её должен человек, а не выкатка.
+export async function isAutoReplyEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { autoReplyEnabled: true },
+  });
+  return row?.autoReplyEnabled ?? false;
+}
+
+export async function setAutoReplyEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { autoReplyEnabled: enabled },
+    create: { id: SETTINGS_ID, autoReplyEnabled: enabled },
+  });
+}
