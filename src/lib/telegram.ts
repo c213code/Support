@@ -200,12 +200,17 @@ export async function setMessageReaction(
 export async function sendTelegramMessage(
   chatId: string | number,
   text: string,
-  replyMarkup?: InlineKeyboard
+  replyMarkup?: InlineKeyboard,
+  // Для групп с включёнными "Темами" (форум-топики) — id темы, куда
+  // должно уйти сообщение, а не просто в общий чат. Без него сообщение
+  // уходит в General/основной поток группы.
+  threadId?: number
 ): Promise<{ message_id: number } | null> {
   const data = (await callBotApi("sendMessage", {
     chat_id: chatId,
     text,
     reply_markup: replyMarkup ? { inline_keyboard: replyMarkup } : undefined,
+    message_thread_id: threadId,
   })) as { result?: { message_id?: number } } | null;
 
   return typeof data?.result?.message_id === "number"

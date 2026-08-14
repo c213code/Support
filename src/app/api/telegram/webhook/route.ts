@@ -96,7 +96,12 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       return;
     }
 
-    await sendTelegramMessage(targetChatId, text);
+    // Тема (форум-топик) внутри группы — опционально: если чат без "Тем"
+    // или репорт должен идти в общий поток, переменную просто не задают.
+    const targetThreadId = process.env.REPORT_TARGET_THREAD_ID
+      ? Number(process.env.REPORT_TARGET_THREAD_ID)
+      : undefined;
+    await sendTelegramMessage(targetChatId, text, undefined, targetThreadId);
     // Отмечаем дату отправленной — без этого утренний cron
     // (/api/cron/morning-report-check) не отличит "уже отправили вечером"
     // от "забыли" и продублировал бы репорт в чат с боссами. upsert, не
