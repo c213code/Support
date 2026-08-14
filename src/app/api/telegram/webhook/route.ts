@@ -9,7 +9,7 @@ import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
 import { reactToStatusChange } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { generateReportText } from "@/lib/report";
-import { advanceReviewSession } from "@/lib/dailyReview";
+import { advanceReviewSession, startReviewSession } from "@/lib/dailyReview";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -19,6 +19,7 @@ import {
   ISSUE_PENDING_PREFIX,
   SKIP_TICKET_PREFIX,
   REPORT_SEND_PREFIX,
+  START_REVIEW_PREFIX,
 } from "@/lib/telegramCallbacks";
 import {
   AUTO_ISSUE_CREATOR,
@@ -245,6 +246,29 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
     await answerCallbackQuery(query.id);
     if (query.message) {
       await advanceReviewSession(String(query.message.chat.id));
+    }
+    return;
+  }
+
+  // Запуск разбора тикетов по одному — отдельная кнопка под сводкой, не
+  // автоматика: сначала виден весь репорт, разбор начинается явно.
+  if (data.startsWith(START_REVIEW_PREFIX)) {
+    const reportDate = data.slice(START_REVIEW_PREFIX.length);
+    await answerCallbackQuery(query.id);
+    if (query.message) {
+      await startReviewSession(query.message.chat.id, reportDate);
+      // Снимаем только эту кнопку — "Отправить в группу" в том же
+      // сообщении должна остаться рабочей.
+      const remainingRows = (
+        query.message.reply_markup?.inline_keyboard ?? []
+      ).filter(
+        (row) => !row.some((btn) => btn.callback_data.startsWith(START_REVIEW_PREFIX))
+      );
+      await editMessageReplyMarkup(
+        query.message.chat.id,
+        query.message.message_id,
+        remainingRows.length > 0 ? remainingRows : null
+      );
     }
     return;
   }

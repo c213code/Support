@@ -17,9 +17,14 @@ import {
   ISSUE_PENDING_PREFIX,
   SKIP_TICKET_PREFIX,
   REPORT_SEND_PREFIX,
+  START_REVIEW_PREFIX,
 } from "@/lib/telegramCallbacks";
 
 const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "ESCALATED"]);
+// Разбор по одному — только то, что реально ждёт первого действия
+// сегодня. ESCALATED уже передан другой команде (следить за этим — не
+// ежедневная задача дежурного, а RESOLVED и так не в очереди.
+const REVIEWABLE_STATUSES = new Set<IssueStatus>(["SENT", "PENDING", "IN_PROGRESS"]);
 // Лимит длины сообщения в Telegram — 4096 символов.
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 const TRUNCATION_NOTE = "…\n\n(обрезано, полный текст — на сайте)";
@@ -85,9 +90,19 @@ export async function sendDailyReviewMessage(
   const summaryKeyboard: InlineKeyboard = [
     [{ text: "📤 Отправить в группу", callback_data: `${REPORT_SEND_PREFIX}${reportDate}` }],
   ];
+  const reviewableCount = issues.filter((i) => REVIEWABLE_STATUSES.has(i.status)).length;
+  if (reviewableCount > 0) {
+    // Разбор запускается по кнопке, не сам — сначала видно сводку целиком
+    // (сколько чего и в каком статусе), и уже дежурный решает, начинать
+    // ли прямо сейчас идти по тикетам одному за другим.
+    summaryKeyboard.push([
+      {
+        text: `🔍 Начать разбор тикетов (${reviewableCount})`,
+        callback_data: `${START_REVIEW_PREFIX}${reportDate}`,
+      },
+    ]);
+  }
   await sendTelegramMessage(recipientId, preview, summaryKeyboard);
-
-  await startReviewSession(recipientId, reportDate);
 
   return { sent: true, recipientId };
 }
@@ -147,24 +162,26 @@ function buildTicketCard(
   return { text, keyboard };
 }
 
-// Открывает разбор дня: очередь id нерешённых тикетов фиксируется сразу
-// (не пересчитывается по ходу, кроме пропуска уже решённых где-то ещё —
-// см. advanceReviewSession), первая карточка уходит отдельным сообщением,
-// его id и запоминаем в ReviewSession, чтобы дальше редактировать на
-// месте, а не слать новое на каждый шаг.
-async function startReviewSession(
+// Открывает разбор дня по кнопке "🔍 Начать разбор тикетов" — очередь id
+// фиксируется сразу (не пересчитывается по ходу, кроме пропуска тикетов,
+// выпавших из области разбора — см. advanceReviewSession), первая карточка
+// уходит отдельным сообщением, его id и запоминаем в ReviewSession, чтобы
+// дальше редактировать на месте, а не слать новое на каждый шаг. Область
+// разбора — только SENT/PENDING/IN_PROGRESS (см. REVIEWABLE_STATUSES):
+// ESCALATED уже не на дежурном, каждый день пересматривать не нужно.
+export async function startReviewSession(
   recipientId: number,
   reportDate: string
 ): Promise<void> {
-  const unresolved = await prisma.issue.findMany({
-    where: { reportDate, status: { not: "RESOLVED" } },
+  const reviewable = await prisma.issue.findMany({
+    where: { reportDate, status: { in: Array.from(REVIEWABLE_STATUSES) } },
     orderBy: { position: "asc" },
     select: { id: true, groupName: true, description: true, status: true, telegramLink: true },
   });
-  if (unresolved.length === 0) return;
+  if (reviewable.length === 0) return;
 
   const chatId = String(recipientId);
-  const card = buildTicketCard(unresolved[0], 1, unresolved.length);
+  const card = buildTicketCard(reviewable[0], 1, reviewable.length);
   const sent = await sendTelegramMessage(recipientId, card.text, card.keyboard, undefined, "HTML");
   if (!sent) return;
 
@@ -173,14 +190,14 @@ async function startReviewSession(
     update: {
       reportDate,
       messageId: sent.message_id,
-      ticketIds: unresolved.map((i) => i.id),
+      ticketIds: reviewable.map((i) => i.id),
       currentIndex: 0,
     },
     create: {
       chatId,
       reportDate,
       messageId: sent.message_id,
-      ticketIds: unresolved.map((i) => i.id),
+      ticketIds: reviewable.map((i) => i.id),
     },
   });
 }
@@ -210,7 +227,7 @@ export async function advanceReviewSession(chatId: string): Promise<void> {
       where: { id: session.ticketIds[idx] },
       select: { id: true, groupName: true, description: true, status: true, telegramLink: true },
     });
-    if (candidate && candidate.status !== "RESOLVED") {
+    if (candidate && REVIEWABLE_STATUSES.has(candidate.status)) {
       issue = candidate;
       break;
     }

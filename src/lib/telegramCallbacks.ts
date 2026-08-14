@@ -11,6 +11,10 @@ export const ISSUE_ESCALATE_PREFIX = "issue_escalate:";
 // многословный префикс.
 export const ISSUE_ESCALATE_TEAM_PREFIX = "esc_team:";
 export const ISSUE_NOTE_PREFIX = "issue_note:";
+// Запускает разбор дня по одному тикету — не сама сводка (см.
+// startReviewSession в dailyReview.ts), а отдельная кнопка под ней: чтобы
+// сначала увидеть репорт целиком, и уже решить, начинать ли разбор сейчас.
+export const START_REVIEW_PREFIX = "start_review:";
 // "✅ Решено" / "⏳ Пендинг" на карточке разбора не меняют статус сразу —
 // сначала спрашивают "как решили"/"что сейчас" тем же механизмом реплая,
 // что и ISSUE_NOTE_PREFIX (PendingNotePrompt.targetStatus), и только по
