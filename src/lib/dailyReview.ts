@@ -142,6 +142,17 @@ export async function sendDailyReviewMessage(
 
 type TicketCard = { text: string; keyboard: InlineKeyboard };
 
+// Поля тикета, которых хватает для карточки разбора — держим одним типом,
+// чтобы select'ы в трёх местах не разъезжались с тем, что читает
+// buildTicketCard.
+type ReviewCardIssue = {
+  id: string;
+  groupName: string;
+  description: string;
+  status: IssueStatus;
+  telegramLink: string | null;
+};
+
 // Карточка одного тикета — текст + до 4 кнопок действий (пропускаются,
 // если уже неактуальны для текущего статуса) плюс "⏭ Пропустить". Номер
 // в заголовке — позиция в очереди этого прохода, не id и не место на
@@ -308,86 +319,64 @@ async function botRepliesFor(issueId: string): Promise<string[]> {
 // решён (например, на сайте) — пропускает его тоже, а не показывает
 // неактуальную карточку.
 export async function advanceReviewSession(chatId: string): Promise<void> {
+  await moveReviewSession(chatId, 1);
+}
+
+// Возвращает карточку к предыдущему тикету очереди — та же логика, что и
+// вперёд, только шаг -1: пропускает тикеты, выпавшие из
+// REVIEWABLE_STATUSES по дороге (например, уже решённые где-то ещё), и
+// молча ничего не делает, если возвращаться некуда (уже на первом).
+export async function goBackReviewSession(chatId: string): Promise<void> {
+  await moveReviewSession(chatId, -1);
+}
+
+// Общий шаг разбора в обе стороны. Раньше это были две почти одинаковые
+// функции, каждая из которых тянула тикеты из очереди по одному в цикле —
+// на длинной очереди с уже решёнными тикетами это давало десяток
+// последовательных запросов на одно нажатие кнопки. Теперь оставшийся
+// кусок очереди забирается разом, а нужный элемент ищется уже в памяти.
+async function moveReviewSession(chatId: string, step: 1 | -1): Promise<void> {
   const session = await prisma.reviewSession.findUnique({ where: { chatId } });
   if (!session) return;
 
-  let idx = session.currentIndex + 1;
-  let issue: {
-    id: string;
-    groupName: string;
-    description: string;
-    status: IssueStatus;
-    telegramLink: string | null;
-  } | null = null;
+  // Кандидаты в направлении движения, в порядке просмотра.
+  const order =
+    step === 1
+      ? session.ticketIds.slice(session.currentIndex + 1)
+      : session.ticketIds.slice(0, session.currentIndex).reverse();
 
-  while (idx < session.ticketIds.length) {
-    const candidate = await prisma.issue.findUnique({
-      where: { id: session.ticketIds[idx] },
+  let issue: ReviewCardIssue | null = null;
+  let idx = session.currentIndex;
+
+  if (order.length > 0) {
+    const found = await prisma.issue.findMany({
+      where: { id: { in: order }, status: { in: Array.from(REVIEWABLE_STATUSES) } },
       select: { id: true, groupName: true, description: true, status: true, telegramLink: true },
     });
-    if (candidate && REVIEWABLE_STATUSES.has(candidate.status)) {
-      issue = candidate;
-      break;
+    const byId = new Map(found.map((i) => [i.id, i]));
+    // Первый по порядку просмотра, а не первый из выдачи базы: порядок
+    // очереди задан на старте разбора и его надо сохранить.
+    const nextId = order.find((id) => byId.has(id));
+    if (nextId) {
+      issue = byId.get(nextId)!;
+      idx = session.ticketIds.indexOf(nextId);
     }
-    idx++;
   }
 
   if (!issue) {
+    // Назад идти некуда — просто остаёмся на текущей карточке.
+    if (step === -1) return;
     await editMessageText(chatId, session.messageId, "✅ Все тикеты дня разобраны!", null);
     await prisma.reviewSession.delete({ where: { chatId } });
     return;
   }
 
+  const [botReplies, suggestion] = await Promise.all([
+    botRepliesFor(issue.id),
+    bestSolution(issue),
+  ]);
   const card = buildTicketCard(
-    {
-      ...issue,
-      botReplies: await botRepliesFor(issue.id),
-      suggestedNote: (await bestSolution(issue))?.note ?? null,
-    },
-    idx + 1,
-    session.ticketIds.length
-  );
-  await editMessageText(chatId, session.messageId, card.text, card.keyboard, "HTML");
-  await prisma.reviewSession.update({ where: { chatId }, data: { currentIndex: idx } });
-}
-
-// Возвращает карточку к предыдущему тикету очереди — та же логика, что и
-// advanceReviewSession, только назад: пропускает тикеты, выпавшие из
-// REVIEWABLE_STATUSES по дороге (например, уже решённые где-то ещё), и
-// молча ничего не делает, если возвращаться некуда (уже на первом).
-export async function goBackReviewSession(chatId: string): Promise<void> {
-  const session = await prisma.reviewSession.findUnique({ where: { chatId } });
-  if (!session) return;
-
-  let idx = session.currentIndex - 1;
-  let issue: {
-    id: string;
-    groupName: string;
-    description: string;
-    status: IssueStatus;
-    telegramLink: string | null;
-  } | null = null;
-
-  while (idx >= 0) {
-    const candidate = await prisma.issue.findUnique({
-      where: { id: session.ticketIds[idx] },
-      select: { id: true, groupName: true, description: true, status: true, telegramLink: true },
-    });
-    if (candidate && REVIEWABLE_STATUSES.has(candidate.status)) {
-      issue = candidate;
-      break;
-    }
-    idx--;
-  }
-
-  if (!issue) return;
-
-  const card = buildTicketCard(
-    {
-      ...issue,
-      botReplies: await botRepliesFor(issue.id),
-      suggestedNote: (await bestSolution(issue))?.note ?? null,
-    },
+    { ...issue, botReplies, suggestedNote: suggestion?.note ?? null },
     idx + 1,
     session.ticketIds.length
   );

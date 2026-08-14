@@ -71,6 +71,12 @@ model AppSetting {
   // школы в чат, где сидят коллеги, — включать её должен человек, а не
   // деплой.
   autoReplyEnabled  Boolean  @default(false)
+  // Отдельный рубильник для обратного направления: бот читает реплики
+  // агента в группе и сам двигает статусы (см. src/lib/agentIntent.ts).
+  // Отдельный от autoReplyEnabled намеренно — это разные риски: там бот
+  // пишет коллегам, тут молча меняет то, что уйдёт в репорт боссам, и
+  // выключать одно, не трогая другое, надо уметь.
+  chatIntentEnabled Boolean  @default(false)
   updatedAt         DateTime @updatedAt
 }
 
@@ -204,4 +210,8 @@ model Issue {
   updatedAt    DateTime    @updatedAt
 
   @@index([reportDate])
+  // Библиотека решений (src/lib/solutionLibrary.ts) на каждой карточке
+  // разбора ищет закрытые тикеты за последний месяц — без этого индекса
+  // это скан всей таблицы, и он растёт вместе с историей.
+  @@index([status, reportDate])
 }

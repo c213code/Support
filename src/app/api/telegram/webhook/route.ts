@@ -31,7 +31,12 @@ import {
   hasBotReplied,
   agentAlreadyReplied,
 } from "@/lib/botReply";
-import { isAutoReplyEnabled, setAutoReplyEnabled } from "@/lib/settings";
+import {
+  isAutoReplyEnabled,
+  setAutoReplyEnabled,
+  isChatIntentEnabled,
+  setChatIntentEnabled,
+} from "@/lib/settings";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -635,6 +640,8 @@ async function applyAgentIntent(
   chatId: string,
   ownText: string
 ): Promise<void> {
+  if (!(await isChatIntentEnabled())) return;
+
   const intent = detectAgentIntent(ownText);
   if (!intent) return;
 
@@ -893,7 +900,8 @@ const HELP_TEXT = [
   "/send [дата] — отправить репорт в рабочую группу (если уже отправляли за эту дату — просто скажет, когда)",
   "/dedupe [дата] — найти и разобрать похожие тикеты (ИИ-подсказка, объединение по одному)",
   "/review [дата] — начать разбор тикетов по одному",
-  "/autoreply [on|off] — автоответы бота в рабочих группах; без аргумента покажет, включены ли",
+  "/autoreply [on|off] — автоответы бота в рабочих группах; без аргумента покажет состояние",
+  "/readchat [on|off] — бот читает твои реплики в группе и сам ставит статусы",
   "/broadcast <текст> — разослать объявление во все рабочие группы (спросит подтверждение)",
   "",
   "Без даты — за сегодня. Дата — в формате YYYY-MM-DD.",
@@ -1019,10 +1027,18 @@ async function handleBotCommand(chatId: number, fromId: number, text: string): P
     case "/autoreply": {
       const arg = (dateArg ?? "").toLowerCase();
       if (arg !== "on" && arg !== "off") {
-        const enabled = await isAutoReplyEnabled();
+        const [reply, intent] = await Promise.all([
+          isAutoReplyEnabled(),
+          isChatIntentEnabled(),
+        ]);
         await sendTelegramMessage(
           chatId,
-          `${enabled ? "🟢 Автоответы включены" : "⚪️ Автоответы выключены"}\n\n${AUTOREPLY_HELP}`
+          [
+            reply ? "🟢 Автоответы включены" : "⚪️ Автоответы выключены",
+            intent ? "🟢 Чтение реплик включено" : "⚪️ Чтение реплик выключено",
+            "",
+            AUTOREPLY_HELP,
+          ].join("\n")
         );
         return;
       }
@@ -1032,6 +1048,40 @@ async function handleBotCommand(chatId: number, fromId: number, text: string): P
         arg === "on"
           ? "🟢 Автоответы включены — бот начнёт отвечать в рабочих группах."
           : "⚪️ Автоответы выключены — бот больше ничего не пишет в группы."
+      );
+      return;
+    }
+
+    // Отдельно от /autoreply намеренно: там бот пишет коллегам, тут молча
+    // меняет статусы, которые уйдут в репорт боссам. Риски разные, и
+    // выключать одно, не трогая другое, надо уметь.
+    case "/readchat": {
+      const arg = (dateArg ?? "").toLowerCase();
+      if (arg !== "on" && arg !== "off") {
+        const enabled = await isChatIntentEnabled();
+        await sendTelegramMessage(
+          chatId,
+          [
+            enabled ? "🟢 Чтение реплик включено" : "⚪️ Чтение реплик выключено",
+            "",
+            "Когда включено, бот читает твои ответы в рабочих группах и сам ставит статусы:",
+            "• «жақсы, тексеріп береміз» → В работе",
+            "• «әріптестеріме жібердім» → Передано",
+            "• «жөңделді» → спросит в личке и попросит заметку для репорта",
+            "",
+            "В группу при этом ничего не пишет — ты там уже всё сказал.",
+            "",
+            "Включить: /readchat on · Выключить: /readchat off",
+          ].join("\n")
+        );
+        return;
+      }
+      await setChatIntentEnabled(arg === "on");
+      await sendTelegramMessage(
+        chatId,
+        arg === "on"
+          ? "🟢 Чтение реплик включено — статусы будут проставляться по твоим ответам в группах."
+          : "⚪️ Чтение реплик выключено — статусы меняются только вручную."
       );
       return;
     }

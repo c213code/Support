@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GroupPresetDTO, IssueDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import { BotSettingsMenu } from "@/components/BotSettingsMenu";
 import { ResolveDialog } from "@/components/ResolveDialog";
 import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
 import { AttachToIssuePicker } from "@/components/AttachToIssuePicker";
@@ -84,6 +85,7 @@ export function Inbox() {
     null
   );
   const [autoReplyEnabled, setAutoReplyEnabled] = useState<boolean | null>(null);
+  const [chatIntentEnabled, setChatIntentEnabled] = useState<boolean | null>(null);
   const [boardQuery, setBoardQuery] = useState("");
   const [duplicateGroups, setDuplicateGroups] = useState<IssueDTO[][] | null>(
     null
@@ -135,6 +137,9 @@ export function Inbox() {
     fetch("/api/settings/auto-reply")
       .then((res) => res.json())
       .then((data) => setAutoReplyEnabled(Boolean(data.enabled)));
+    fetch("/api/settings/chat-intent")
+      .then((res) => res.json())
+      .then((data) => setChatIntentEnabled(Boolean(data.enabled)));
   }, [loadGroups]);
 
   useEffect(() => {
@@ -662,6 +667,28 @@ export function Inbox() {
     );
   }
 
+  // Чтение реплик агента в группе → автоматическая смена статуса.
+  // Отдельно от автоответов: тут бот ничего не пишет коллегам, но молча
+  // меняет то, что уйдёт в репорт, — выключать это надо уметь отдельно.
+  async function handleToggleChatIntent() {
+    const next = !chatIntentEnabled;
+    setChatIntentEnabled(next);
+    const res = await fetch("/api/settings/chat-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok) {
+      setChatIntentEnabled(!next);
+      toast("Не удалось переключить чтение реплик", "error");
+      return;
+    }
+    toast(
+      next ? "Статусы будут ставиться по твоим ответам" : "Чтение реплик выключено",
+      "info"
+    );
+  }
+
   // Фильтр по тексту на доске: за активный день набирается несколько
   // десятков карточек в трёх колонках, и найти "тот тикет про ДТ" глазами
   // дольше, чем набрать пару букв.
@@ -767,50 +794,34 @@ export function Inbox() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-slate-900">Входящие</h1>
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={aiCleaningEnabled ?? false}
-            onClick={handleToggleAiCleaning}
-            disabled={aiCleaningEnabled === null}
-            title="Описания новых авто-тикетов пишет ИИ (Groq) вместо обычной чистки регулярками"
-            className="flex items-center gap-1.5 rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 disabled:opacity-50"
-          >
-            <span
-              className={`relative h-4 w-7 shrink-0 rounded-full transition ${
-                aiCleaningEnabled ? "bg-brand-600" : "bg-slate-300"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition ${
-                  aiCleaningEnabled ? "left-3.5" : "left-0.5"
-                }`}
-              />
-            </span>
-            ✨ ИИ-описания
-          </button>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={autoReplyEnabled ?? false}
-            onClick={handleToggleAutoReply}
-            disabled={autoReplyEnabled === null}
-            title="Бот сам отвечает в рабочих группах: подтверждает приём обращения и сообщает о смене статуса"
-            className="flex items-center gap-1.5 rounded-full border border-slate-300 px-2 py-1 text-xs font-medium text-slate-500 disabled:opacity-50"
-          >
-            <span
-              className={`relative h-4 w-7 shrink-0 rounded-full transition ${
-                autoReplyEnabled ? "bg-emerald-600" : "bg-slate-300"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition ${
-                  autoReplyEnabled ? "left-3.5" : "left-0.5"
-                }`}
-              />
-            </span>
-            🤖 Автоответы
-          </button>
+          <BotSettingsMenu
+            toggles={[
+              {
+                key: "ai",
+                label: "✨ ИИ-описания",
+                hint: "Описания авто-тикетов пишет ИИ вместо чистки регулярками",
+                enabled: aiCleaningEnabled,
+                onToggle: handleToggleAiCleaning,
+                color: "bg-brand-600",
+              },
+              {
+                key: "autoreply",
+                label: "🤖 Автоответы в группах",
+                hint: "Бот подтверждает приём обращения и сообщает о смене статуса",
+                enabled: autoReplyEnabled,
+                onToggle: handleToggleAutoReply,
+                color: "bg-emerald-600",
+              },
+              {
+                key: "chatintent",
+                label: "👂 Читать мои ответы",
+                hint: "Статус ставится сам по твоей реплике в группе",
+                enabled: chatIntentEnabled,
+                onToggle: handleToggleChatIntent,
+                color: "bg-sky-600",
+              },
+            ]}
+          />
           {tab === "messages" && (
             <span className="text-xs text-slate-400">
               Обновляется каждые {POLL_INTERVAL_MS / 1000} сек.

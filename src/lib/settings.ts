@@ -39,3 +39,22 @@ export async function setAutoReplyEnabled(enabled: boolean): Promise<void> {
     create: { id: SETTINGS_ID, autoReplyEnabled: enabled },
   });
 }
+
+// Обратное направление: реплика агента в группе сама двигает статус
+// тикета. Рубильник отдельный от автоответов — риски разные: там бот
+// пишет коллегам, тут молча меняет то, что уйдёт в репорт боссам.
+export async function isChatIntentEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { chatIntentEnabled: true },
+  });
+  return row?.chatIntentEnabled ?? false;
+}
+
+export async function setChatIntentEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { chatIntentEnabled: enabled },
+    create: { id: SETTINGS_ID, chatIntentEnabled: enabled },
+  });
+}
