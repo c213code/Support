@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { dayRangeUtc } from "@/lib/date";
 import { STATUS_META } from "@/lib/status";
 import { agentTelegramEntries } from "@/lib/agentTelegram";
-import { sendTelegramMessage, type InlineKeyboard } from "@/lib/telegram";
+import { sendTelegramMessage, escapeHtml, type InlineKeyboard } from "@/lib/telegram";
 import { generateReportText } from "@/lib/report";
 
 const UNRESOLVED_TICKET_CAP = 15;
@@ -87,13 +87,28 @@ export async function sendDailyReviewMessage(
   if (capped.length > 0) {
     const listLines = capped.map((issue, idx) => {
       const meta = STATUS_META[issue.status];
-      return `${idx + 1}. ${meta.emoji} ${issue.groupName}: ${issue.description}`;
+      // Компактная кликабельная ссылка (🔗) вместо голого URL — тот на
+      // отдельной длинной строке тратил бы половину списка на "буквы",
+      // parse_mode "HTML" ниже требует экранировать пользовательский текст
+      // (описание/группа), сама ссылка — доверенное значение из БД.
+      const link = issue.telegramLink
+        ? ` <a href="${escapeHtml(issue.telegramLink)}">🔗</a>`
+        : "";
+      return `${idx + 1}. ${meta.emoji} ${escapeHtml(issue.groupName)}: ${escapeHtml(issue.description)}${link}`;
     });
     let listText = listLines.join("\n");
     if (listText.length > TELEGRAM_MESSAGE_LIMIT) {
-      listText =
-        listText.slice(0, TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTE.length) +
-        TRUNCATION_NOTE;
+      // Режем по целым строкам, не по символам — обрубить HTML-тег ссылки
+      // (parse_mode "HTML" ниже) посередине означало бы, что Telegram
+      // отклонит сообщение целиком из-за незакрытого тега.
+      const kept: string[] = [];
+      let length = TRUNCATION_NOTE.length;
+      for (const line of listLines) {
+        if (length + line.length + 1 > TELEGRAM_MESSAGE_LIMIT) break;
+        kept.push(line);
+        length += line.length + 1;
+      }
+      listText = `${kept.join("\n")}\n${TRUNCATION_NOTE}`;
     }
 
     const statusKeyboard: InlineKeyboard = capped.map((issue, idx) => {
@@ -111,7 +126,13 @@ export async function sendDailyReviewMessage(
       return row;
     });
 
-    await sendTelegramMessage(recipientId, listText, statusKeyboard);
+    await sendTelegramMessage(
+      recipientId,
+      listText,
+      statusKeyboard,
+      undefined,
+      "HTML"
+    );
 
     if (unresolved.length > UNRESOLVED_TICKET_CAP) {
       await sendTelegramMessage(

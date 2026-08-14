@@ -146,6 +146,17 @@ export function extractReplyContextLine(
   return `↩️ ${author ?? "Жауап"}: ${truncated}`;
 }
 
+// Для текста, вставляемого в сообщение с parse_mode "HTML" (см.
+// sendTelegramMessage) — без экранирования "<"/">"/"&" в описании тикета
+// (реальный текст от пользователя, может содержать что угодно) Telegram
+// вернёт ошибку парсинга разметки и сообщение не уйдёт вообще.
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 const BOT_API_TIMEOUT_MS = 5000;
 
 // Общий вызов Telegram Bot API — для реакций, отправки сообщений с
@@ -208,13 +219,18 @@ export async function sendTelegramMessage(
   // Для групп с включёнными "Темами" (форум-топики) — id темы, куда
   // должно уйти сообщение, а не просто в общий чат. Без него сообщение
   // уходит в General/основной поток группы.
-  threadId?: number
+  threadId?: number,
+  // "HTML" — когда в text есть разметка (ссылка компактной кликабельной
+  // ссылкой вместо голого URL, см. buildTelegramLink ниже). Вызывающий код
+  // сам отвечает за экранирование пользовательского текста — escapeHtml.
+  parseMode?: "HTML"
 ): Promise<{ message_id: number } | null> {
   const data = (await callBotApi("sendMessage", {
     chat_id: chatId,
     text,
     reply_markup: replyMarkup ? { inline_keyboard: replyMarkup } : undefined,
     message_thread_id: threadId,
+    parse_mode: parseMode,
   })) as { result?: { message_id?: number } } | null;
 
   return typeof data?.result?.message_id === "number"
