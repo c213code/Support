@@ -220,9 +220,9 @@ export async function sendTelegramMessage(
   // должно уйти сообщение, а не просто в общий чат. Без него сообщение
   // уходит в General/основной поток группы.
   threadId?: number,
-  // "HTML" — когда в text есть разметка (ссылка компактной кликабельной
-  // ссылкой вместо голого URL, см. buildTelegramLink ниже). Вызывающий код
-  // сам отвечает за экранирование пользовательского текста — escapeHtml.
+  // "HTML" — когда в text есть разметка (компактная кликабельная ссылка
+  // вместо голого URL — см. escapeHtml выше). Вызывающий код сам отвечает
+  // за экранирование пользовательского текста этим хелпером.
   parseMode?: "HTML"
 ): Promise<{ message_id: number } | null> {
   const data = (await callBotApi("sendMessage", {
@@ -236,6 +236,26 @@ export async function sendTelegramMessage(
   return typeof data?.result?.message_id === "number"
     ? { message_id: data.result.message_id }
     : null;
+}
+
+// Переписывает текст и клавиатуру уже отправленного сообщения на месте —
+// для кнопки "🔁 Обновить список" (см. dailyReview.ts): без этого пришлось
+// бы слать новое сообщение каждый раз и плодить те же бабблы, от которых
+// уже один раз ушли (см. коммит про консолидацию кнопок статуса).
+export async function editMessageText(
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  replyMarkup?: InlineKeyboard | null,
+  parseMode?: "HTML"
+): Promise<void> {
+  await callBotApi("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    reply_markup: replyMarkup ? { inline_keyboard: replyMarkup } : undefined,
+    parse_mode: parseMode,
+  });
 }
 
 // Снимает инлайн-клавиатуру с уже отправленного сообщения — после того,

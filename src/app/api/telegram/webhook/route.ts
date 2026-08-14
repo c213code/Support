@@ -5,14 +5,25 @@ import { todayDateString } from "@/lib/date";
 import { isNoiseOnly } from "@/lib/textClean";
 import { buildDescription } from "@/lib/ticketDescription";
 import { isIssueStatus, STATUS_META } from "@/lib/status";
+import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
 import { reactToStatusChange } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { generateReportText } from "@/lib/report";
+import { buildUnresolvedListMessage } from "@/lib/dailyReview";
+import {
+  ISSUE_STATUS_PREFIX,
+  ISSUE_ESCALATE_PREFIX,
+  ISSUE_ESCALATE_TEAM_PREFIX,
+  ISSUE_NOTE_PREFIX,
+  REFRESH_LIST_PREFIX,
+  REPORT_SEND_PREFIX,
+} from "@/lib/telegramCallbacks";
 import {
   AUTO_ISSUE_CREATOR,
   answerCallbackQuery,
   buildMessageLink,
   editMessageReplyMarkup,
+  editMessageText,
   extractAuthorName,
   extractReplyContextLine,
   extractText,
@@ -22,9 +33,6 @@ import {
   type TelegramMessagePayload,
   type TelegramUpdate,
 } from "@/lib/telegram";
-
-const REPORT_SEND_PREFIX = "report_send:";
-const ISSUE_STATUS_PREFIX = "issue_status:";
 
 // Нажатия на инлайн-кнопки под вечерней сводкой (см.
 // /api/cron/evening-report) и под карточками отдельных тикетов — дают
@@ -87,6 +95,142 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
         remainingRows.length > 0 ? remainingRows : null
       );
     }
+    return;
+  }
+
+  // Первый шаг передачи команде — статус ESCALATED без выбранной команды
+  // не имеет смысла (см. escalatedTeam на Issue), поэтому кнопка не меняет
+  // статус сама, а спрашивает команду отдельным сообщением с кнопками.
+  if (data.startsWith(ISSUE_ESCALATE_PREFIX)) {
+    const issueId = data.slice(ISSUE_ESCALATE_PREFIX.length);
+    const existing = await prisma.issue.findUnique({
+      where: { id: issueId },
+      select: { id: true },
+    });
+    if (!existing) {
+      await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
+      return;
+    }
+    await answerCallbackQuery(query.id);
+    if (query.message) {
+      const teamKeyboard = [
+        ESCALATION_TEAMS.slice(0, 2),
+        ESCALATION_TEAMS.slice(2, 4),
+      ].map((row) =>
+        row.map((team) => ({
+          text: team,
+          callback_data: `${ISSUE_ESCALATE_TEAM_PREFIX}${issueId}:${team}`,
+        }))
+      );
+      await sendTelegramMessage(query.message.chat.id, "Кому передать?", teamKeyboard);
+    }
+    return;
+  }
+
+  if (data.startsWith(ISSUE_ESCALATE_TEAM_PREFIX)) {
+    const [issueId, team] = data.slice(ISSUE_ESCALATE_TEAM_PREFIX.length).split(":");
+    if (!issueId || !isEscalationTeam(team)) {
+      await answerCallbackQuery(query.id, "Неизвестная команда");
+      return;
+    }
+
+    const existing = await prisma.issue.findUnique({
+      where: { id: issueId },
+      select: { status: true, telegramLink: true, createdBy: true },
+    });
+    if (!existing) {
+      await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
+      return;
+    }
+
+    const actorName = telegramIdToAgent(query.from.id);
+    await prisma.issue.update({
+      where: { id: issueId },
+      data: {
+        status: "ESCALATED",
+        escalatedTeam: team,
+        ...(actorName && existing.createdBy === AUTO_ISSUE_CREATOR
+          ? { createdBy: actorName }
+          : {}),
+      },
+    });
+    await reactToStatusChange(existing.status, "ESCALATED", existing.telegramLink);
+    await answerCallbackQuery(query.id, `Передано: ${team} ⚠️`);
+    // Это сообщение — только клавиатура выбора команды, целиком её убрать
+    // безопасно (в отличие от сводного списка тикетов, где ISSUE_STATUS_
+    // PREFIX выше снимает только одну строку). Сам список тикетов при этом
+    // не обновляется автоматически — за этим "🔁 Обновить список".
+    if (query.message) {
+      await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
+    }
+    return;
+  }
+
+  // Заметку через кнопку не набрать — просим ответить (Reply) текстом на
+  // отдельное сообщение и запоминаем связь message_id → issueId
+  // (PendingNotePrompt), чтобы в основном обработчике POST отличить такой
+  // ответ от обычного сообщения агента.
+  if (data.startsWith(ISSUE_NOTE_PREFIX)) {
+    const issueId = data.slice(ISSUE_NOTE_PREFIX.length);
+    const existing = await prisma.issue.findUnique({
+      where: { id: issueId },
+      select: { description: true },
+    });
+    if (!existing) {
+      await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
+      return;
+    }
+    await answerCallbackQuery(query.id);
+    if (query.message) {
+      const prompt = await sendTelegramMessage(
+        query.message.chat.id,
+        `✍️ Ответь на ЭТО сообщение текстом — он станет заметкой для тикета:\n${existing.description}`
+      );
+      if (prompt) {
+        await prisma.pendingNotePrompt.upsert({
+          where: {
+            chatId_messageId: {
+              chatId: String(query.message.chat.id),
+              messageId: prompt.message_id,
+            },
+          },
+          update: { issueId },
+          create: {
+            chatId: String(query.message.chat.id),
+            messageId: prompt.message_id,
+            issueId,
+          },
+        });
+      }
+    }
+    return;
+  }
+
+  // Список тикетов мог устареть с момента отправки (другой агент поменял
+  // статус, или это уже не первый клик по этому сообщению) — пересобираем
+  // текст и клавиатуру заново и переписываем то же сообщение на месте
+  // (см. buildUnresolvedListMessage в lib/dailyReview.ts), а не шлём новое
+  // поверх старого.
+  if (data.startsWith(REFRESH_LIST_PREFIX)) {
+    const reportDate = data.slice(REFRESH_LIST_PREFIX.length);
+    const rebuilt = await buildUnresolvedListMessage(reportDate);
+    if (!query.message) {
+      await answerCallbackQuery(query.id);
+      return;
+    }
+    if (!rebuilt) {
+      await answerCallbackQuery(query.id, "Нерешённых тикетов не осталось 🎉", true);
+      await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
+      return;
+    }
+    await editMessageText(
+      query.message.chat.id,
+      query.message.message_id,
+      rebuilt.text,
+      rebuilt.keyboard,
+      "HTML"
+    );
+    await answerCallbackQuery(query.id, "Обновлено");
     return;
   }
 
@@ -291,6 +435,42 @@ export async function POST(request: NextRequest) {
   const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
 
   const chatId = String(message.chat.id);
+
+  // Ответ (Reply) на prompt-сообщение "📝 Заметка" (см. ISSUE_NOTE_PREFIX
+  // выше) — раньше проверки isOwnAgentMessage ниже, потому что сам агент
+  // и есть автор такого ответа, а та проверка иначе тихо архивирует
+  // сообщение как обычное и до этой ветки просто не дойдёт.
+  const repliedToId = message.reply_to_message?.message_id;
+  if (repliedToId != null) {
+    const pending = await prisma.pendingNotePrompt.findUnique({
+      where: { chatId_messageId: { chatId, messageId: repliedToId } },
+    });
+    if (pending) {
+      const issue = await prisma.issue.findUnique({
+        where: { id: pending.issueId },
+        select: { createdBy: true },
+      });
+      if (issue) {
+        const actorName =
+          message.from?.id != null ? telegramIdToAgent(message.from.id) : null;
+        await prisma.issue.update({
+          where: { id: pending.issueId },
+          data: {
+            note: text.trim(),
+            ...(actorName && issue.createdBy === AUTO_ISSUE_CREATOR
+              ? { createdBy: actorName }
+              : {}),
+          },
+        });
+        await sendTelegramMessage(chatId, "✅ Заметка сохранена");
+      }
+      await prisma.pendingNotePrompt
+        .delete({ where: { id: pending.id } })
+        .catch(() => {});
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   const preset = await prisma.groupPreset.findUnique({ where: { chatId } });
 
   if (isOwnAgentMessage(message.from?.id)) {

@@ -4,6 +4,13 @@ import { STATUS_META } from "@/lib/status";
 import { agentTelegramEntries } from "@/lib/agentTelegram";
 import { sendTelegramMessage, escapeHtml, type InlineKeyboard } from "@/lib/telegram";
 import { generateReportText } from "@/lib/report";
+import {
+  ISSUE_STATUS_PREFIX,
+  ISSUE_ESCALATE_PREFIX,
+  ISSUE_NOTE_PREFIX,
+  REFRESH_LIST_PREFIX,
+  REPORT_SEND_PREFIX,
+} from "@/lib/telegramCallbacks";
 
 const UNRESOLVED_TICKET_CAP = 15;
 const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "ESCALATED"]);
@@ -70,79 +77,108 @@ export async function sendDailyReviewMessage(
   }
 
   const summaryKeyboard: InlineKeyboard = [
-    [{ text: "📤 Отправить в группу", callback_data: `report_send:${reportDate}` }],
+    [{ text: "📤 Отправить в группу", callback_data: `${REPORT_SEND_PREFIX}${reportDate}` }],
   ];
   await sendTelegramMessage(recipientId, preview, summaryKeyboard);
 
-  // Быстрые кнопки статуса под нерешёнными тикетами — чтобы закрыть
-  // очевидное можно было сразу тут, не открывая сайт. Раньше — по
-  // отдельному сообщению на тикет, но на насыщенный день это superflow из
-  // 15 одинаковых бабблов, в которых легко потеряться. Вместо этого —
-  // ОДНО сообщение с пронумерованным списком и клавиатурой, где строка
-  // клавиатуры = номер тикета в списке; ISSUE_STATUS_PREFIX в вебхуке при
-  // нажатии снимает только эту одну строку, остальные остаются рабочими.
-  // Капаем список, а не шлём все: и сообщение, и клавиатура не бесконечны.
-  const unresolved = issues.filter((i) => i.status !== "RESOLVED");
-  const capped = unresolved.slice(0, UNRESOLVED_TICKET_CAP);
-  if (capped.length > 0) {
-    const listLines = capped.map((issue, idx) => {
-      const meta = STATUS_META[issue.status];
-      // Компактная кликабельная ссылка (🔗) вместо голого URL — тот на
-      // отдельной длинной строке тратил бы половину списка на "буквы",
-      // parse_mode "HTML" ниже требует экранировать пользовательский текст
-      // (описание/группа), сама ссылка — доверенное значение из БД.
-      const link = issue.telegramLink
-        ? ` <a href="${escapeHtml(issue.telegramLink)}">🔗</a>`
-        : "";
-      return `${idx + 1}. ${meta.emoji} ${escapeHtml(issue.groupName)}: ${escapeHtml(issue.description)}${link}`;
-    });
-    let listText = listLines.join("\n");
-    if (listText.length > TELEGRAM_MESSAGE_LIMIT) {
-      // Режем по целым строкам, не по символам — обрубить HTML-тег ссылки
-      // (parse_mode "HTML" ниже) посередине означало бы, что Telegram
-      // отклонит сообщение целиком из-за незакрытого тега.
-      const kept: string[] = [];
-      let length = TRUNCATION_NOTE.length;
-      for (const line of listLines) {
-        if (length + line.length + 1 > TELEGRAM_MESSAGE_LIMIT) break;
-        kept.push(line);
-        length += line.length + 1;
-      }
-      listText = `${kept.join("\n")}\n${TRUNCATION_NOTE}`;
-    }
-
-    const statusKeyboard: InlineKeyboard = capped.map((issue, idx) => {
-      const row: InlineKeyboard[number] = [];
-      if (issue.status !== "IN_PROGRESS") {
-        row.push({
-          text: `${idx + 1} 🔄`,
-          callback_data: `issue_status:${issue.id}:IN_PROGRESS`,
-        });
-      }
-      row.push({
-        text: `${idx + 1} ✅`,
-        callback_data: `issue_status:${issue.id}:RESOLVED`,
-      });
-      return row;
-    });
-
+  const listMessage = await buildUnresolvedListMessage(reportDate);
+  if (listMessage) {
     await sendTelegramMessage(
       recipientId,
-      listText,
-      statusKeyboard,
+      listMessage.text,
+      listMessage.keyboard,
       undefined,
       "HTML"
     );
-
-    if (unresolved.length > UNRESOLVED_TICKET_CAP) {
-      await sendTelegramMessage(
-        recipientId,
-        `… и ещё ${unresolved.length - UNRESOLVED_TICKET_CAP} тикет(ов) без быстрых кнопок — остальное на сайте.`
-      );
-    }
   }
 
   return { sent: true, recipientId };
+}
+
+export type UnresolvedListMessage = { text: string; keyboard: InlineKeyboard };
+
+// Пронумерованный список нерешённых тикетов дня + клавиатура под ним, по
+// строке кнопок на тикет (номер строки = номер в списке). Раньше — по
+// отдельному сообщению на тикет, но на насыщенный день это стена из 15
+// одинаковых бабблов, в которых легко потеряться. Вынесено в отдельную
+// функцию — её же дёргает кнопка "🔁 Обновить список" (REFRESH_LIST_PREFIX
+// в вебхуке), чтобы пересобрать актуальную версию через editMessageText, а
+// не слать новое сообщение поверх старого. Капаем список, а не показываем
+// все: и сообщение, и клавиатура не бесконечны.
+export async function buildUnresolvedListMessage(
+  reportDate: string
+): Promise<UnresolvedListMessage | null> {
+  const unresolved = await prisma.issue.findMany({
+    where: { reportDate, status: { not: "RESOLVED" } },
+    orderBy: { position: "asc" },
+  });
+  if (unresolved.length === 0) return null;
+
+  const capped = unresolved.slice(0, UNRESOLVED_TICKET_CAP);
+  const listLines = capped.map((issue, idx) => {
+    const meta = STATUS_META[issue.status];
+    // Компактная кликабельная ссылка (🔗) вместо голого URL — тот на
+    // отдельной длинной строке тратил бы половину списка на "буквы",
+    // parse_mode "HTML" ниже требует экранировать пользовательский текст
+    // (описание/группа), сама ссылка — доверенное значение из БД.
+    const link = issue.telegramLink
+      ? ` <a href="${escapeHtml(issue.telegramLink)}">🔗</a>`
+      : "";
+    return `${idx + 1}. ${meta.emoji} ${escapeHtml(issue.groupName)}: ${escapeHtml(issue.description)}${link}`;
+  });
+  if (unresolved.length > UNRESOLVED_TICKET_CAP) {
+    listLines.push(
+      `\n… и ещё ${unresolved.length - UNRESOLVED_TICKET_CAP} тикет(ов) без быстрых кнопок — остальное на сайте.`
+    );
+  }
+
+  let listText = listLines.join("\n");
+  if (listText.length > TELEGRAM_MESSAGE_LIMIT) {
+    // Режем по целым строкам, не по символам — обрубить HTML-тег ссылки
+    // посередине означало бы, что Telegram отклонит сообщение целиком
+    // из-за незакрытого тега.
+    const kept: string[] = [];
+    let length = TRUNCATION_NOTE.length;
+    for (const line of listLines) {
+      if (length + line.length + 1 > TELEGRAM_MESSAGE_LIMIT) break;
+      kept.push(line);
+      length += line.length + 1;
+    }
+    listText = `${kept.join("\n")}\n${TRUNCATION_NOTE}`;
+  }
+
+  const statusKeyboard: InlineKeyboard = capped.map((issue, idx) => {
+    const row: InlineKeyboard[number] = [];
+    if (issue.status !== "IN_PROGRESS") {
+      row.push({
+        text: `${idx + 1} 🔄`,
+        callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:IN_PROGRESS`,
+      });
+    }
+    if (issue.status !== "ESCALATED") {
+      row.push({
+        text: `${idx + 1} ⚠️`,
+        callback_data: `${ISSUE_ESCALATE_PREFIX}${issue.id}`,
+      });
+    }
+    row.push({
+      text: `${idx + 1} 📝`,
+      callback_data: `${ISSUE_NOTE_PREFIX}${issue.id}`,
+    });
+    row.push({
+      text: `${idx + 1} ✅`,
+      callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:RESOLVED`,
+    });
+    return row;
+  });
+  // Отдельной строкой — не смешана с рядами тикетов, поэтому снятие одной
+  // строки тикета (см. ISSUE_STATUS_PREFIX/ISSUE_ESCALATE_PREFIX в
+  // вебхуке — они фильтруют по id конкретного тикета) её не заденет.
+  statusKeyboard.push([
+    { text: "🔁 Обновить список", callback_data: `${REFRESH_LIST_PREFIX}${reportDate}` },
+  ]);
+
+  return { text: listText, keyboard: statusKeyboard };
 }
 
 // "Кто дежурил в этот день" в системе нигде явно не записано, поэтому

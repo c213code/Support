@@ -78,6 +78,22 @@ model ReportSendLog {
   sentAt     DateTime @default(now())
 }
 
+// Ожидание текстового ответа на конкретный тикет из Telegram — когда
+// нажали "📝 Заметка" под тикетом в сводке, бот шлёт отдельное сообщение
+// с просьбой ответить (Reply) на него текстом заметки; эта строка
+// связывает то prompt-сообщение с тикетом, чтобы отличить такой ответ от
+// обычного сообщения агента (см. ISSUE_NOTE_PREFIX в вебхуке). Одноразовая
+// — удаляется сразу после того, как ответ пришёл и заметка сохранена.
+model PendingNotePrompt {
+  id        String   @id @default(cuid())
+  chatId    String
+  messageId Int
+  issueId   String
+  createdAt DateTime @default(now())
+
+  @@unique([chatId, messageId])
+}
+
 model Issue {
   id           String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)
