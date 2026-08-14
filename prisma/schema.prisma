@@ -116,6 +116,20 @@ model ReviewSession {
   createdAt    DateTime @default(now())
 }
 
+// Разбор найденных ИИ похожих тикетов дня по одной группе за раз — та же
+// "одно сообщение, редактируем на месте" механика, что и у ReviewSession,
+// только элемент очереди — группа id, а не один тикет, поэтому group
+// хранится как JSON-строка (Prisma String[] не умеет массив массивов).
+// См. src/lib/dedupeReview.ts.
+model DuplicateReviewSession {
+  chatId       String   @id
+  reportDate   String
+  messageId    Int
+  groupsJson   String
+  currentIndex Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
 model Issue {
   id           String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)

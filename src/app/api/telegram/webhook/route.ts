@@ -8,8 +8,10 @@ import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
 import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
 import { reactToStatusChange } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
+import { SHARED_AGENT } from "@/lib/agents";
 import { generateReportText } from "@/lib/report";
-import { advanceReviewSession, startReviewSession } from "@/lib/dailyReview";
+import { advanceReviewSession, startReviewSession, goBackReviewSession } from "@/lib/dailyReview";
+import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -18,8 +20,12 @@ import {
   ISSUE_RESOLVE_PREFIX,
   ISSUE_PENDING_PREFIX,
   SKIP_TICKET_PREFIX,
+  BACK_TICKET_PREFIX,
   REPORT_SEND_PREFIX,
   START_REVIEW_PREFIX,
+  START_DEDUPE_PREFIX,
+  DEDUPE_MERGE_PREFIX,
+  DEDUPE_SKIP_PREFIX,
 } from "@/lib/telegramCallbacks";
 import {
   AUTO_ISSUE_CREATOR,
@@ -250,6 +256,16 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
     return;
   }
 
+  // Вернуться к предыдущему тикету очереди — промахнулись мимо кнопки или
+  // пропустили не тот. Статус текущего тикета не трогаем.
+  if (data.startsWith(BACK_TICKET_PREFIX)) {
+    await answerCallbackQuery(query.id);
+    if (query.message) {
+      await goBackReviewSession(String(query.message.chat.id));
+    }
+    return;
+  }
+
   // Запуск разбора тикетов по одному — отдельная кнопка под сводкой, не
   // автоматика: сначала виден весь репорт, разбор начинается явно.
   if (data.startsWith(START_REVIEW_PREFIX)) {
@@ -268,6 +284,42 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
         query.message.chat.id,
         query.message.message_id,
         remainingRows.length > 0 ? remainingRows : null
+      );
+    }
+    return;
+  }
+
+  // Запуск разбора похожих (дублей) тикетов — тот же принцип, что и
+  // START_REVIEW_PREFIX: отдельная явная кнопка под сводкой.
+  if (data.startsWith(START_DEDUPE_PREFIX)) {
+    const reportDate = data.slice(START_DEDUPE_PREFIX.length);
+    await answerCallbackQuery(query.id);
+    if (query.message) {
+      await startDedupeReview(query.message.chat.id, reportDate);
+      // Снимаем только эту кнопку — остальные (Отправить/Начать разбор) в
+      // том же сообщении должны остаться рабочими.
+      const remainingRows = (
+        query.message.reply_markup?.inline_keyboard ?? []
+      ).filter(
+        (row) => !row.some((btn) => btn.callback_data.startsWith(START_DEDUPE_PREFIX))
+      );
+      await editMessageReplyMarkup(
+        query.message.chat.id,
+        query.message.message_id,
+        remainingRows.length > 0 ? remainingRows : null
+      );
+    }
+    return;
+  }
+
+  if (data === DEDUPE_MERGE_PREFIX || data === DEDUPE_SKIP_PREFIX) {
+    await answerCallbackQuery(query.id);
+    if (query.message) {
+      const actorName = telegramIdToAgent(query.from.id) ?? SHARED_AGENT;
+      await advanceDedupeReview(
+        String(query.message.chat.id),
+        data === DEDUPE_MERGE_PREFIX,
+        actorName
       );
     }
     return;

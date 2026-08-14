@@ -16,8 +16,10 @@ import {
   ISSUE_RESOLVE_PREFIX,
   ISSUE_PENDING_PREFIX,
   SKIP_TICKET_PREFIX,
+  BACK_TICKET_PREFIX,
   REPORT_SEND_PREFIX,
   START_REVIEW_PREFIX,
+  START_DEDUPE_PREFIX,
 } from "@/lib/telegramCallbacks";
 
 const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "ESCALATED"]);
@@ -102,6 +104,17 @@ export async function sendDailyReviewMessage(
       },
     ]);
   }
+  // Похожие/дублирующиеся тикеты имеет смысл предлагать искать, только
+  // если ИИ вообще настроен (иначе кнопка вела бы в тупик) и тикетов
+  // хватает хотя бы на пару.
+  if (process.env.GROQ_API_KEY && issues.length >= 2) {
+    summaryKeyboard.push([
+      {
+        text: "🔗 Найти похожие тикеты",
+        callback_data: `${START_DEDUPE_PREFIX}${reportDate}`,
+      },
+    ]);
+  }
   await sendTelegramMessage(recipientId, preview, summaryKeyboard);
 
   return { sent: true, recipientId };
@@ -154,9 +167,18 @@ function buildTicketCard(
     // в тексте, который уйдёт боссам.
     { text: "✅ Решено", callback_data: `${ISSUE_RESOLVE_PREFIX}${issue.id}` },
   ];
-  const skipRow: InlineKeyboard[number] = [
-    { text: "⏭ Пропустить", callback_data: `${SKIP_TICKET_PREFIX}${issue.id}` },
-  ];
+  const skipRow: InlineKeyboard[number] = [];
+  // "Назад" бессмысленна на первом тикете очереди — некуда возвращаться.
+  if (position > 1) {
+    skipRow.push({
+      text: "⬅️ Назад",
+      callback_data: `${BACK_TICKET_PREFIX}${issue.id}`,
+    });
+  }
+  skipRow.push({
+    text: "⏭ Пропустить",
+    callback_data: `${SKIP_TICKET_PREFIX}${issue.id}`,
+  });
 
   const keyboard = actionRow.length > 0 ? [actionRow, secondRow, skipRow] : [secondRow, skipRow];
   return { text, keyboard };
@@ -239,6 +261,42 @@ export async function advanceReviewSession(chatId: string): Promise<void> {
     await prisma.reviewSession.delete({ where: { chatId } });
     return;
   }
+
+  const card = buildTicketCard(issue, idx + 1, session.ticketIds.length);
+  await editMessageText(chatId, session.messageId, card.text, card.keyboard, "HTML");
+  await prisma.reviewSession.update({ where: { chatId }, data: { currentIndex: idx } });
+}
+
+// Возвращает карточку к предыдущему тикету очереди — та же логика, что и
+// advanceReviewSession, только назад: пропускает тикеты, выпавшие из
+// REVIEWABLE_STATUSES по дороге (например, уже решённые где-то ещё), и
+// молча ничего не делает, если возвращаться некуда (уже на первом).
+export async function goBackReviewSession(chatId: string): Promise<void> {
+  const session = await prisma.reviewSession.findUnique({ where: { chatId } });
+  if (!session) return;
+
+  let idx = session.currentIndex - 1;
+  let issue: {
+    id: string;
+    groupName: string;
+    description: string;
+    status: IssueStatus;
+    telegramLink: string | null;
+  } | null = null;
+
+  while (idx >= 0) {
+    const candidate = await prisma.issue.findUnique({
+      where: { id: session.ticketIds[idx] },
+      select: { id: true, groupName: true, description: true, status: true, telegramLink: true },
+    });
+    if (candidate && REVIEWABLE_STATUSES.has(candidate.status)) {
+      issue = candidate;
+      break;
+    }
+    idx--;
+  }
+
+  if (!issue) return;
 
   const card = buildTicketCard(issue, idx + 1, session.ticketIds.length);
   await editMessageText(chatId, session.messageId, card.text, card.keyboard, "HTML");

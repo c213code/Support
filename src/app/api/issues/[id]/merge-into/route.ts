@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
-import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
-import { issueLinks } from "@/lib/report";
+import { mergeIssueInto } from "@/lib/mergeIssue";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -33,42 +31,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
-  const [source, target] = await Promise.all([
-    prisma.issue.findUnique({ where: { id } }),
-    prisma.issue.findUnique({ where: { id: body.targetId } }),
-  ]);
-
-  if (!source || !target) {
+  const updated = await mergeIssueInto(id, body.targetId, identity.name);
+  if (!updated) {
     return NextResponse.json({ error: "issue not found" }, { status: 404 });
   }
-
-  // Ссылки обоих тикетов без дублей; порядок сохраняем — сначала то, что
-  // уже было в целевом.
-  const mergedLinks = Array.from(
-    new Set([...issueLinks(target), ...issueLinks(source)])
-  ).filter((link) => link !== target.telegramLink);
-
-  const updated = await prisma.$transaction(async (tx) => {
-    const nextTarget = await tx.issue.update({
-      where: { id: target.id },
-      data: {
-        extraLinks: mergedLinks,
-        createdBy:
-          target.createdBy === AUTO_ISSUE_CREATOR ? identity.name : undefined,
-      },
-    });
-
-    // Сообщения, которые вели на схлопнутый тикет, должны вести на
-    // целевой — иначе во "Входящих" останутся кнопки в никуда.
-    await tx.telegramMessage.updateMany({
-      where: { usedForIssueId: source.id },
-      data: { usedForIssueId: target.id },
-    });
-
-    await tx.issue.delete({ where: { id: source.id } });
-
-    return nextTarget;
-  });
 
   return NextResponse.json({ issue: updated });
 }

@@ -24,3 +24,13 @@ export const ISSUE_PENDING_PREFIX = "issue_pending:";
 // Пропустить тикет в разборе по одному (см. advanceReviewSession в
 // dailyReview.ts) — не трогает статус, просто идёт к следующему.
 export const SKIP_TICKET_PREFIX = "skip_ticket:";
+// Вернуться к предыдущему тикету в разборе (см. goBackReviewSession) —
+// для случаев "промахнулись мимо кнопки" или "пропустили не тот".
+export const BACK_TICKET_PREFIX = "back_ticket:";
+
+// Разбор похожих (дублей) тикетов дня, найденных ИИ — та же
+// один-за-одним механика, что и у разбора тикетов, только группами (см.
+// dedupeReview.ts). Отдельная кнопка под сводкой, аналогично START_REVIEW_PREFIX.
+export const START_DEDUPE_PREFIX = "start_dedupe:";
+export const DEDUPE_MERGE_PREFIX = "dedupe_merge";
+export const DEDUPE_SKIP_PREFIX = "dedupe_skip";
