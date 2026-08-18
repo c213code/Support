@@ -277,6 +277,46 @@ export function KanbanBoard({
                         )}
                       </span>
                     ))}
+                    {/* Почта/телефон/вложение — то, что чистка описания
+                        выкидывает, потому что в репорт боссам это не нужно.
+                        Агенту же без почты нечего искать в админке, а строка
+                        "мәселе суретте тұр" без самой картинки не значит
+                        ничего. Показываем прямо тут, чтобы не ходить в
+                        Telegram за каждым тикетом. */}
+                    {(issue.hints?.emails.length ||
+                      issue.hints?.phones.length ||
+                      issue.hints?.hasAttachment) && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        {issue.hints.emails.map((email) => (
+                          <button
+                            key={email}
+                            onClick={() => navigator.clipboard?.writeText(email)}
+                            title="Скопировать почту"
+                            className="max-w-full truncate rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 transition hover:bg-slate-200"
+                          >
+                            ✉️ {email}
+                          </button>
+                        ))}
+                        {issue.hints.phones.map((phone) => (
+                          <button
+                            key={phone}
+                            onClick={() => navigator.clipboard?.writeText(phone)}
+                            title="Скопировать номер"
+                            className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600 transition hover:bg-slate-200"
+                          >
+                            📞 {phone}
+                          </button>
+                        ))}
+                        {issue.hints.hasAttachment && (
+                          <span
+                            title="В обращении есть фото или файл — суть может быть только там"
+                            className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700"
+                          >
+                            📎 вложение
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {onBotRepliesChanged && onBotReplyError && (
                       <BotReplies
                         issueId={issue.id}

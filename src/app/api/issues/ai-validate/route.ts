@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { rewriteTicketDescriptionWithAI, isAiSkip } from "@/lib/ai";
 import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
+import { isCosmeticRewrite } from "@/lib/similarity";
 
 // Разовая ручная перепроверка тикетов "Отправлено", заведённых ботом (см.
 // AUTO_ISSUE_CREATOR) без участия агента, регуляркой (ИИ был выключен,
@@ -61,7 +62,12 @@ export async function POST(request: NextRequest) {
       (r) =>
         r.aiResult !== null &&
         !isAiSkip(r.aiResult) &&
-        r.aiResult.trim() !== r.issue.description.trim()
+        r.aiResult.trim() !== r.issue.description.trim() &&
+        // Правки вида "Оқушы құпия сөзі керек" → "Оқушының құпия сөзі
+        // керек" — это причёсанная грамматика, а не уточнённый смысл.
+        // Предлагать их значит просить агента принять решение там, где
+        // решать нечего.
+        !isCosmeticRewrite(r.issue.description, r.aiResult)
     )
     .map((r) => ({ issue: r.issue, suggested: r.aiResult as string }));
 

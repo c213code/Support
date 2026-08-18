@@ -97,6 +97,17 @@ const CREDENTIAL_LABEL_LINE = new RegExp(
 // завязан на \w, а \w по умолчанию не считает кириллицу "буквой", так что
 // граница перед "логин"/"пароль" просто не находится. Вместо этого — явная
 // проверка через \p{L}/\p{N} (Unicode-буква/цифра) по обе стороны.
+// Голое значение логина/пароля отдельной строкой, без слова "пароль"
+// рядом: так их и присылают следом за почтой ("inabat@gmail.com\nInabat1977").
+// CREDENTIAL_PAIR такое не ловит — там нужна метка, — и пароль утекал в
+// описание тикета, а оттуда в репорт боссам.
+//
+// Признак намеренно узкий: строка целиком из одного токена без пробелов,
+// в котором есть и буквы, и цифры (Inabat1977, Ernur_09, Qwerty2024).
+// Обычное описание — это фраза с пробелами, а голый код ошибки ("404")
+// цифро-буквенным не будет.
+const BARE_CREDENTIAL_LINE = /^(?=[^\s]*\p{L})(?=[^\s]*\d)[\p{L}\p{N}._-]{6,32}$/u;
+
 const CREDENTIAL_PAIR = new RegExp(
   `[^\\s,]+\\s+(?:${CREDENTIAL_LABEL_WORDS})(?![\\p{L}\\p{N}])` +
     `|(?<![\\p{L}\\p{N}])(?:${CREDENTIAL_LABEL_WORDS})\\s*[:\\-]?\\s*[^\\s,]+`,
@@ -146,6 +157,10 @@ function stripNoise(raw: string): string {
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
+    if (BARE_CREDENTIAL_LINE.test(trimmed)) {
+      keep[i] = false;
+      continue;
+    }
     if (CREDENTIAL_LABEL_LINE.test(trimmed)) {
       // "логин" одним словом на своей строке — значение почти всегда на
       // следующей строке ("логин\nBalausa10").

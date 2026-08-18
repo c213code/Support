@@ -33,6 +33,9 @@ export type IssueDTO = {
   createdAt: string;
   updatedAt: string;
   botReplies?: BotReplyDTO[];
+  // Почта/телефон/вложение из исходных сообщений — только для карточки,
+  // в текст репорта не попадают (см. src/lib/ticketHints.ts).
+  hints?: { emails: string[]; phones: string[]; hasAttachment: boolean };
 };
 
 export type GroupPresetDTO = {

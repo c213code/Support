@@ -10,6 +10,7 @@ import {
 } from "@/lib/telegram";
 import { generateReportText } from "@/lib/report";
 import { bestSolution } from "@/lib/solutionLibrary";
+import { extractTicketHints } from "@/lib/ticketHints";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -166,6 +167,9 @@ function buildTicketCard(
     status: IssueStatus;
     telegramLink: string | null;
     botReplies?: string[];
+    // Почта/телефон/вложение из исходного сообщения — без них по тикету
+    // вроде "Логин пароль жұмыс істемейді" в админке искать нечего.
+    hints?: { emails: string[]; phones: string[]; hasAttachment: boolean };
     // Заметка похожего уже решённого тикета — если такая нашлась, на
     // карточке появляется кнопка "решить так же" (см. solutionLibrary.ts).
     suggestedNote?: string | null;
@@ -184,7 +188,14 @@ function buildTicketCard(
     issue.botReplies && issue.botReplies.length > 0
       ? `\n\n<i>🤖 бот уже ответил: ${escapeHtml(issue.botReplies.join(" · "))}</i>`
       : "";
-  const text = `Тикет ${position}/${total}\n\n${meta.emoji} ${escapeHtml(issue.groupName)}\n${escapeHtml(issue.description)}${link}${said}`;
+  // Зацепки для поиска ученика: чистка описания их выкидывает (в репорт
+  // они не нужны), но именно с них начинается работа по тикету.
+  const hintParts: string[] = [];
+  if (issue.hints?.emails.length) hintParts.push(`✉️ <code>${escapeHtml(issue.hints.emails.join(", "))}</code>`);
+  if (issue.hints?.phones.length) hintParts.push(`📞 <code>${escapeHtml(issue.hints.phones.join(", "))}</code>`);
+  if (issue.hints?.hasAttachment) hintParts.push("📎 есть вложение — суть может быть в нём");
+  const hints = hintParts.length > 0 ? `\n\n${hintParts.join("\n")}` : "";
+  const text = `Тикет ${position}/${total}\n\n${meta.emoji} ${escapeHtml(issue.groupName)}\n${escapeHtml(issue.description)}${hints}${link}${said}`;
 
   const actionRow: InlineKeyboard[number] = [];
   if (issue.status !== "IN_PROGRESS") {
@@ -285,6 +296,7 @@ export async function startReviewSession(
       ...reviewable[0],
       botReplies: await botRepliesFor(reviewable[0].id),
       suggestedNote: (await bestSolution(reviewable[0]))?.note ?? null,
+      hints: await hintsFor(reviewable[0]),
     },
     1,
     reviewable.length
@@ -311,6 +323,19 @@ export async function startReviewSession(
 
 // Тексты, которые бот уже отправил в рабочую группу по этому тикету —
 // показываются на карточке разбора, чтобы не продублировать сказанное.
+// Зацепки (почта/телефон/вложение) из сырых сообщений тикета — см.
+// ticketHints.ts. Отдельным запросом, потому что на карточке разбора их
+// нужно ровно столько же, сколько ответов бота.
+async function hintsFor(issue: { telegramLink: string | null }) {
+  const links = issue.telegramLink ? [issue.telegramLink] : [];
+  if (links.length === 0) return undefined;
+  const sources = await prisma.telegramMessage.findMany({
+    where: { messageLink: { in: links } },
+    select: { text: true },
+  });
+  return extractTicketHints(sources.map((s) => s.text));
+}
+
 async function botRepliesFor(issueId: string): Promise<string[]> {
   const replies = await prisma.botReply.findMany({
     where: { issueId, deleted: false },
@@ -380,12 +405,13 @@ async function moveReviewSession(chatId: string, step: 1 | -1): Promise<void> {
     return;
   }
 
-  const [botReplies, suggestion] = await Promise.all([
+  const [botReplies, suggestion, hints] = await Promise.all([
     botRepliesFor(issue.id),
     bestSolution(issue),
+    hintsFor(issue),
   ]);
   const card = buildTicketCard(
-    { ...issue, botReplies, suggestedNote: suggestion?.note ?? null },
+    { ...issue, botReplies, suggestedNote: suggestion?.note ?? null, hints },
     idx + 1,
     session.ticketIds.length
   );

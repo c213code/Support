@@ -5,6 +5,7 @@ import { getCurrentIdentity } from "@/lib/auth";
 import { isIssueStatus } from "@/lib/status";
 import { isEscalationTeam } from "@/lib/escalation";
 import { cleanTicketDescription } from "@/lib/textClean";
+import { extractTicketHints } from "@/lib/ticketHints";
 
 export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
@@ -32,10 +33,30 @@ export async function GET(request: NextRequest) {
     byIssue.set(reply.issueId, list);
   }
 
+  // Почта/телефон ученика и факт вложения — то, что чистка описания
+  // намеренно выкидывает (в репорт боссам это не нужно), но без чего
+  // агенту не за что зацепиться, чтобы начать работу. Тянем сырые тексты
+  // всех привязанных к тикету сообщений одним запросом.
+  const allLinks = issues.flatMap((i) => [i.telegramLink, ...i.extraLinks]).filter(
+    (l): l is string => l != null
+  );
+  const sources = allLinks.length
+    ? await prisma.telegramMessage.findMany({
+        where: { messageLink: { in: allLinks } },
+        select: { messageLink: true, text: true },
+      })
+    : [];
+  const textByLink = new Map(sources.map((s) => [s.messageLink, s.text]));
+
   return NextResponse.json({
     issues: issues.map((issue) => ({
       ...issue,
       botReplies: byIssue.get(issue.id) ?? [],
+      hints: extractTicketHints(
+        [issue.telegramLink, ...issue.extraLinks].map((l) =>
+          l ? (textByLink.get(l) ?? null) : null
+        )
+      ),
     })),
   });
 }
