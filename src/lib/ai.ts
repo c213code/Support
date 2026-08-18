@@ -11,7 +11,20 @@
 // сообщения.
 import { buildAiContext } from "@/lib/projectContext";
 
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+// llama-3.3-70b-versatile, на которой это писалось, Groq с аккаунта убрал —
+// все ИИ-функции разом начали отвечать "недоступно". Из того, что осталось,
+// проверены на наших же тикетах: gpt-oss-120b держит казахский и смысл
+// обращения точно, gpt-oss-20b смысл искажает, qwen3.6-27b не отдаёт
+// валидный JSON вовсе.
+//
+// ВАЖНО: gpt-oss в режиме response_format json_object требует, чтобы слово
+// "json" встречалось в самих сообщениях, иначе Groq отклоняет запрос
+// целиком. Все промпты ниже это условие соблюдают — при правке следи, чтобы
+// упоминание JSON из них не пропало.
+//
+// Модель переопределяется переменной GROQ_MODEL: когда Groq в следующий раз
+// поменяет список, чинится без деплоя.
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 // Groq free tier: 100k токенов/день, лимит висит на аккаунте целиком (не на
 // ключе) — второй ключ того же аккаунта квоту не обходит, нужен ключ с
@@ -147,7 +160,9 @@ export async function rewriteTicketDescriptionWithAI(
       {
         model: GROQ_MODEL,
         temperature: 0.15,
-        max_tokens: 150,
+        // Щедро: gpt-oss сначала «думает», и на 150 токенах ответ
+        // обрезался на полуслове (см. комментарий у GROQ_MODEL).
+        max_tokens: 500,
         messages: [
           { role: "system", content: SYSTEM_PROMPT + (await buildAiContext()) },
           ...FEW_SHOT_TURNS.flatMap(({ user, assistant }) => [
@@ -202,7 +217,7 @@ export async function findDuplicateGroups(
       {
         model: GROQ_MODEL,
         temperature: 0,
-        max_tokens: 1000,
+        max_tokens: 2500,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: DUPLICATE_SYSTEM_PROMPT + (await buildAiContext()) },
@@ -260,7 +275,12 @@ export async function pickResolvedWord(
       {
         model: GROQ_MODEL,
         temperature: 0,
-        max_tokens: 5,
+        // Было 5 — на reasoning-модели все пять токенов уходили в
+        // размышления, ответ приходил пустым, и функция молча всегда
+        // возвращала FIXED. Выбор из двух слов рассуждений не требует,
+        // поэтому reasoning_effort низкий.
+        max_tokens: 200,
+        reasoning_effort: "low",
         messages: [
           { role: "system", content: RESOLVED_WORD_SYSTEM_PROMPT + (await buildAiContext()) },
           {
@@ -321,7 +341,7 @@ export async function extractGlossaryTerms(
       {
         model: GROQ_MODEL,
         temperature: 0,
-        max_tokens: 1500,
+        max_tokens: 4000,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: GLOSSARY_SYSTEM_PROMPT },
