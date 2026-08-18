@@ -43,6 +43,37 @@ export async function POST(request: NextRequest, { params }: Params) {
     issue.telegramLink === message.messageLink ||
     issue.extraLinks.includes(message.messageLink);
 
+  // Сообщение уже приклеено к ДРУГОМУ тикету — без этой проверки повторное
+  // "Прикрепить" молча перецепляет usedForIssueId сюда, а старый тикет
+  // продолжает показывать ту же ссылку как свою: на доске появляются два
+  // тикета с одинаковой ссылкой на сообщение, один из которых теперь врёт.
+  // Сначала нужно отвязать сообщение от прежнего тикета (кнопка "✕" на
+  // карточке) — это осознанное действие, а не побочный эффект клика по
+  // другому тикету.
+  if (
+    !alreadyLinked &&
+    message.usedForIssueId &&
+    message.usedForIssueId !== id
+  ) {
+    return NextResponse.json(
+      { error: "message is already attached to another issue" },
+      { status: 409 }
+    );
+  }
+
+  // Пикер ранжирует тикеты по похожести текста без учёта группы (см.
+  // AttachToIssuePicker) — сообщение из чата "IT & Product" может оказаться
+  // визуально похоже на старый тикет из "Әдістеме & IT" и попасть наверх
+  // списка. Группа известна только когда чат уже привязан к пресету
+  // (message.groupName) — для ещё неразобранных сообщений её нет, и туда
+  // можно приклеивать куда угодно, как и раньше.
+  if (message.groupName && message.groupName !== issue.groupName) {
+    return NextResponse.json(
+      { error: "message belongs to a different group" },
+      { status: 400 }
+    );
+  }
+
   const updated = await prisma.$transaction(async (tx) => {
     const nextIssue = await tx.issue.update({
       where: { id },

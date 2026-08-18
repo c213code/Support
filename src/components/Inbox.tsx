@@ -290,11 +290,25 @@ export function Inbox() {
     message: TelegramMessageDTO,
     issue: IssueDTO
   ) {
-    await fetch(`/api/issues/${issue.id}/attach-message`, {
+    const res = await fetch(`/api/issues/${issue.id}/attach-message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messageId: message.id }),
     });
+    if (!res.ok) {
+      // Сервер отказал — сообщение уже приклеено к другому тикету, или
+      // (пикер это уже фильтрует, но сервер перепроверяет) тикет из
+      // другой группы. Список внизу не трогаем, чтобы можно было выбрать
+      // другой тикет сразу же.
+      const data = await res.json().catch(() => null);
+      toast(
+        data?.error === "message is already attached to another issue"
+          ? "Сообщение уже приклеено к другому тикету — сначала отвяжите его там"
+          : "Не удалось приклеить — тикет из другой группы",
+        "error"
+      );
+      return;
+    }
     setAttachingFromId(null);
     await Promise.all([loadMessages(date), loadIssues(date)]);
   }
@@ -1514,7 +1528,18 @@ export function Inbox() {
               ) : attachingFromId === message.id ? (
                 <AttachToIssuePicker
                   messageText={message.text ?? ""}
-                  issues={issues}
+                  // Пикер ранжирует тикеты по похожести текста — без
+                  // фильтра по группе тикет из чужой группы с похожим
+                  // заголовком мог всплыть первым и уйти в "похоже". Группа
+                  // сообщения известна, только если его чат уже привязан к
+                  // пресету (см. groupName на TelegramMessage) — для ещё
+                  // неразобранных сообщений её нет, и выбор остаётся
+                  // прежним, по всем тикетам дня.
+                  issues={
+                    message.groupName
+                      ? issues.filter((i) => i.groupName === message.groupName)
+                      : issues
+                  }
                   onCancel={() => setAttachingFromId(null)}
                   onPick={(issue) => handleAttachToIssue(message, issue)}
                 />
