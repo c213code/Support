@@ -58,3 +58,22 @@ export async function setChatIntentEnabled(enabled: boolean): Promise<void> {
     create: { id: SETTINGS_ID, chatIntentEnabled: enabled },
   });
 }
+
+// ИИ-уточнение решения "просить ли почту/ссылку" в автоответе — сужает
+// ложные срабатывания regex-проверки (см. aiAskEnabled в schema.prisma),
+// не отменяет её.
+export async function isAiAskEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { aiAskEnabled: true },
+  });
+  return row?.aiAskEnabled ?? false;
+}
+
+export async function setAiAskEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { aiAskEnabled: enabled },
+    create: { id: SETTINGS_ID, aiAskEnabled: enabled },
+  });
+}

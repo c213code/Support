@@ -71,10 +71,20 @@ const ACK: Record<ReplyLanguage, string> = {
 // Подтверждение приёма: приветствие + "посмотрим" и, если в обращении не
 // было ни почты, ни ссылки, ни номера, — сразу просьба их прислать. Одним
 // сообщением, а не двумя: два подряд от бота читаются как спам.
-export function buildAckText(incomingText: string, now: Date = new Date()): string {
+//
+// needsAskOverride позволяет вызывающему коду (см. sendAcknowledgement в
+// вебхуке) подменить regex-решение результатом ИИ-проверки
+// (shouldAskForIdentifier в lib/ai.ts, тогл aiAskEnabled) — сам этот модуль
+// остаётся без ИИ и внешних вызовов, как и задумано.
+export function buildAckText(
+  incomingText: string,
+  now: Date = new Date(),
+  needsAskOverride?: boolean
+): string {
   const language = pickLanguage(incomingText);
   const base = `${greeting(language, now)}, ${ACK[language]}`;
-  return hasIdentifier(incomingText) ? base : `${base}. ${ASK_FOR_DATA[language]}`;
+  const needsAsk = needsAskOverride ?? !hasIdentifier(incomingText);
+  return needsAsk ? `${base}. ${ASK_FOR_DATA[language]}` : base;
 }
 
 // Ответы на смену статуса. RESOLVED тут нет намеренно: слово "Жөңделді" или

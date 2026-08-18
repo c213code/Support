@@ -19,11 +19,12 @@ import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import { detectAgentIntent } from "@/lib/agentIntent";
 import { bestSolution } from "@/lib/solutionLibrary";
-import { pickResolvedWord } from "@/lib/ai";
+import { pickResolvedWord, shouldAskForIdentifier } from "@/lib/ai";
 import {
   buildAckText,
   buildResolvedText,
   buildStatusReplyText,
+  hasIdentifier,
   pickLanguage,
 } from "@/lib/autoReply";
 import {
@@ -38,6 +39,7 @@ import {
   setAutoReplyEnabled,
   isChatIntentEnabled,
   setChatIntentEnabled,
+  isAiAskEnabled,
 } from "@/lib/settings";
 import {
   ISSUE_STATUS_PREFIX,
@@ -659,6 +661,19 @@ async function createAutoIssue(
 // Два предохранителя от дубля: один ACK на тикет (сообщения одного автора
 // склеиваются, а вебхук может доставиться повторно) и молчание, если по
 // этому обращению уже успел ответить живой человек.
+// regex (hasIdentifier) уже решил "просить" — ИИ, если включён тоглом,
+// может это решение сузить (см. shouldAskForIdentifier в lib/ai.ts): общий
+// вопрос без привязки к ученику ("во сколько работает платформа") не
+// становится решаемым от присланной почты, и просить её не по делу.
+// null/выключенный тогл/сбой модели — остаёмся на исходном "просить".
+async function decideNeedsAsk(incomingText: string): Promise<boolean> {
+  if (hasIdentifier(incomingText)) return false;
+  if (!(await isAiAskEnabled())) return true;
+
+  const aiDecision = await shouldAskForIdentifier(incomingText);
+  return aiDecision ?? true;
+}
+
 async function sendAcknowledgement(
   issueId: string,
   chatId: string,
@@ -668,12 +683,14 @@ async function sendAcknowledgement(
   if (await hasBotReplied(issueId, "ACK")) return;
   if (await agentAlreadyReplied(chatId, messageId, ownAgentTelegramIdList())) return;
 
+  const needsAsk = await decideNeedsAsk(incomingText);
+
   await sendBotReply({
     issueId,
     chatId,
     replyToMessageId: messageId,
     kind: "ACK",
-    text: buildAckText(incomingText),
+    text: buildAckText(incomingText, new Date(), needsAsk),
   });
 }
 

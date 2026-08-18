@@ -87,6 +87,7 @@ export function Inbox() {
   );
   const [autoReplyEnabled, setAutoReplyEnabled] = useState<boolean | null>(null);
   const [chatIntentEnabled, setChatIntentEnabled] = useState<boolean | null>(null);
+  const [aiAskEnabled, setAiAskEnabled] = useState<boolean | null>(null);
   const [boardQuery, setBoardQuery] = useState("");
   const [duplicateGroups, setDuplicateGroups] = useState<IssueDTO[][] | null>(
     null
@@ -142,6 +143,9 @@ export function Inbox() {
     fetch("/api/settings/chat-intent")
       .then((res) => res.json())
       .then((data) => setChatIntentEnabled(Boolean(data.enabled)));
+    fetch("/api/settings/ai-ask")
+      .then((res) => res.json())
+      .then((data) => setAiAskEnabled(Boolean(data.enabled)));
   }, [loadGroups]);
 
   useEffect(() => {
@@ -691,6 +695,28 @@ export function Inbox() {
     );
   }
 
+  // ИИ-уточнение "просить ли почту/ссылку" в автоответе — работает только
+  // поверх уже включённых автоответов, сужает лишние просьбы на общих
+  // вопросах без ученика (см. shouldAskForIdentifier в lib/ai.ts).
+  async function handleToggleAiAsk() {
+    const next = !aiAskEnabled;
+    setAiAskEnabled(next);
+    const res = await fetch("/api/settings/ai-ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok) {
+      setAiAskEnabled(!next);
+      toast("Не удалось переключить ИИ-запрос данных", "error");
+      return;
+    }
+    toast(
+      next ? "ИИ будет уточнять запрос почты/ссылки" : "ИИ-уточнение выключено",
+      "info"
+    );
+  }
+
   // Фильтр по тексту на доске: за активный день набирается несколько
   // десятков карточек в трёх колонках, и найти "тот тикет про ДТ" глазами
   // дольше, чем набрать пару букв.
@@ -837,6 +863,14 @@ export function Inbox() {
                 enabled: chatIntentEnabled,
                 onToggle: handleToggleChatIntent,
                 color: "bg-sky-600",
+              },
+              {
+                key: "aiask",
+                label: "🎯 ИИ уточняет запрос данных",
+                hint: "Не просить почту/ссылку на общих вопросах без ученика (работает поверх автоответов)",
+                enabled: aiAskEnabled,
+                onToggle: handleToggleAiAsk,
+                color: "bg-amber-600",
               },
             ]}
           />
