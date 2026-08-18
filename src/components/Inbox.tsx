@@ -731,14 +731,44 @@ export function Inbox() {
     );
   }, [issues, boardQuery]);
 
-  // Подсветить тикет, выбранный в ⌘K: открываем его форму и заодно
-  // помечаем на доске, чтобы после закрытия было видно, где он лежит.
+  // Подсветить тикет, выбранный в ⌘K или найденный по ссылке: переключаем
+  // дату на ту, где он реально лежит (доска показывает один день, а тикет
+  // может быть из прошлого), открываем его форму и заодно помечаем на
+  // доске, чтобы после закрытия было видно, где он лежит.
   function focusIssue(issue: IssueDTO) {
+    setDate(issue.reportDate);
     setTab("board");
     setHighlightId(issue.id);
     setEditingIssueId(issue.id);
     setTimeout(() => setHighlightId(null), 2500);
   }
+
+  // Вставили ссылку на Telegram-сообщение в поиск по доске — ищем тикет,
+  // с которого она завелась, глобально по всем датам (не только текущей),
+  // потому что искать вручную "в каком дне это было" и есть та боль, ради
+  // которой поиск по ссылке вообще нужен.
+  useEffect(() => {
+    const q = boardQuery.trim();
+    if (!/^https?:\/\//i.test(q)) return;
+
+    const timeout = setTimeout(async () => {
+      const res = await fetch(`/api/issues/find-by-link?link=${encodeURIComponent(q)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.issue) {
+        focusIssue(data.issue as IssueDTO);
+        setBoardQuery("");
+        toast("Тикет найден", "success");
+      } else {
+        toast("Тикет с такой ссылкой не найден", "error");
+      }
+    }, 400);
+
+    return () => clearTimeout(timeout);
+    // focusIssue и toast пересоздаются каждый рендер, но не влияют на то,
+    // когда эффект должен сработать — отслеживаем только сам ввод.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardQuery]);
 
   useHotkeys({
     ArrowLeft: () => setDate((d) => shiftDateString(d, -1)),
@@ -968,8 +998,9 @@ export function Inbox() {
                       e.currentTarget.blur();
                     }
                   }}
-                  placeholder="Фильтр…"
-                  aria-label="Фильтр тикетов по тексту"
+                  placeholder="Фильтр или ссылка на сообщение…"
+                  aria-label="Фильтр тикетов по тексту или ссылке на Telegram-сообщение"
+                  title="Можно вставить ссылку на сообщение в Telegram — найдёт тикет в любом дне"
                   className="w-32 rounded-lg border border-slate-200 bg-white py-1 pl-8 pr-2 text-xs outline-none transition focus:w-48 focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                 />
               </div>
