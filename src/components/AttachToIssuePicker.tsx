@@ -6,6 +6,7 @@ import { STATUS_META } from "@/lib/status";
 import { groupColor } from "@/lib/groups";
 import { similarity, SIMILARITY_HINT_THRESHOLD } from "@/lib/similarity";
 import { issueLinks } from "@/lib/report";
+import { extractTicketHints } from "@/lib/ticketHints";
 
 // Выбор тикета, к которому приклеить это сообщение. Тикеты отсортированы
 // по похожести на текст сообщения, а не по времени: когда один и тот же
@@ -32,6 +33,17 @@ export function AttachToIssuePicker({
 }) {
   const [query, setQuery] = useState("");
   const [pendingId, setPendingId] = useState<string | null>(null);
+
+  // Похожесть текста ловит "тот же тип проблемы", а не "тот же ученик" —
+  // куратор, ведущий нескольких учеников, часто присылает про второго
+  // ученика точно такими же словами ("+тағы бір оқушы"). Если у обоих
+  // — у сообщения и у кандидата — известна почта и они разные, это,
+  // вероятнее всего, ДРУГОЙ случай с той же типовой проблемой, а не
+  // повтор — предупреждаем явно, а не просто показываем "похоже".
+  const messageEmails = useMemo(
+    () => extractTicketHints([messageText]).emails,
+    [messageText]
+  );
 
   const ranked = useMemo(() => {
     const scored = issues.map((issue) => ({
@@ -99,6 +111,11 @@ export function AttachToIssuePicker({
             const meta = STATUS_META[issue.status];
             const looksSimilar = score >= SIMILARITY_HINT_THRESHOLD;
             const attachedCount = issueLinks(issue).length;
+            const issueEmails = issue.hints?.emails ?? [];
+            const differentStudent =
+              messageEmails.length > 0 &&
+              issueEmails.length > 0 &&
+              !messageEmails.some((email) => issueEmails.includes(email));
             return (
               <li key={issue.id}>
                 <button
@@ -129,6 +146,14 @@ export function AttachToIssuePicker({
                     {looksSimilar && (
                       <span className="rounded-full bg-accent-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                         похоже
+                      </span>
+                    )}
+                    {differentStudent && (
+                      <span
+                        title={`Почта в сообщении: ${messageEmails.join(", ")} — у тикета: ${issueEmails.join(", ")}`}
+                        className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                      >
+                        ⚠️ другая почта
                       </span>
                     )}
                   </span>
