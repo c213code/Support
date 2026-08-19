@@ -629,7 +629,8 @@ async function createAutoIssue(
   groupEmoji: string | null,
   own: string,
   contextual: string,
-  telegramLink: string
+  telegramLink: string,
+  repliesToOwnAgent = false
 ) {
   const reportDate = todayDateString();
   const [last, cleaned] = await Promise.all([
@@ -637,7 +638,7 @@ async function createAutoIssue(
       where: { reportDate, groupName },
       orderBy: { position: "desc" },
     }),
-    buildDescription(own, contextual),
+    buildDescription(own, contextual, repliesToOwnAgent),
   ]);
   if (cleaned === null) return null;
   return prisma.issue.create({
@@ -1198,6 +1199,10 @@ export async function POST(request: NextRequest) {
   // ленте "Входящих", и в исходнике для кнопки "ИИ написал не то?" — не
   // только на момент построения описания.
   const replyContext = extractReplyContextLine(message);
+  // Отвечают не клиенту, а одному из наших агентов — эти цепочки чаще
+  // внутреннее уточнение, чем пересказ жалобы, и buildDescription (см.
+  // lib/ticketDescription.ts) относится к ним осторожнее.
+  const repliesToOwnAgent = isOwnAgentMessage(message.reply_to_message?.from?.id);
   const contextualText = replyContext ? `${replyContext}\n${text}` : text;
 
   const authorName = extractAuthorName(message.from);
@@ -1371,7 +1376,7 @@ export async function POST(request: NextRequest) {
     // подтягиваем в него дописанный текст, иначе на доске останется
     // только обрывок исходного запроса.
     if (recent.usedForIssueId) {
-      const merged = await buildDescription(mergedOwn, mergedContextual);
+      const merged = await buildDescription(mergedOwn, mergedContextual, repliesToOwnAgent);
       // null тут означает "склеенный текст выглядит мусором" — описание не
       // трогаем, тикет уже заведён и затирать его нечем.
       if (merged !== null) {
@@ -1391,7 +1396,8 @@ export async function POST(request: NextRequest) {
         preset.emoji,
         mergedOwn,
         mergedContextual,
-        recent.messageLink
+        recent.messageLink,
+        repliesToOwnAgent
       );
       if (issue) {
         await prisma.telegramMessage.update({
@@ -1435,7 +1441,8 @@ export async function POST(request: NextRequest) {
       preset.emoji,
       text,
       contextualText,
-      messageLink
+      messageLink,
+      repliesToOwnAgent
     );
     // issue === null — в сообщении не было запроса; оставляем его во
     // "Входящих" без тикета (см. buildDescription).
