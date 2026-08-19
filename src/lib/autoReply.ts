@@ -63,28 +63,48 @@ const ASK_FOR_DATA: Record<ReplyLanguage, string> = {
   ru: "Чтобы проверить — пришлите, пожалуйста, почту ученика или ссылку.",
 };
 
+// Обращение про конкретное задание/тест по программе (тапсырма, ДТ, ПФ), а
+// не про личный кабинет целиком: почта одна тут не поможет найти, какое
+// именно задание смотреть — нужна ещё либо ссылка, либо "ай апта" (месяц +
+// неделя, напр. "1 ай 3 апта") — так у агентов внутри принято обозначать
+// секции программы, когда прямой ссылки на задание нет.
+const ASK_FOR_ASSIGNMENT: Record<ReplyLanguage, string> = {
+  kk: "Тексеру үшін оқушының почтасын және сілтемені не ай-аптаны жібере аласыз ба?",
+  ru: "Чтобы проверить — пришлите, пожалуйста, почту ученика и ссылку или ай-апту.",
+};
+
 const ACK: Record<ReplyLanguage, string> = {
   kk: "жақсы, қарап береміз",
   ru: "хорошо, посмотрим",
 };
 
+export type AckAskKind = "none" | "contact" | "assignment";
+
 // Подтверждение приёма: приветствие + "посмотрим" и, если в обращении не
 // было ни почты, ни ссылки, ни номера, — сразу просьба их прислать. Одним
 // сообщением, а не двумя: два подряд от бота читаются как спам.
 //
-// needsAskOverride позволяет вызывающему коду (см. sendAcknowledgement в
-// вебхуке) подменить regex-решение результатом ИИ-проверки
-// (shouldAskForIdentifier в lib/ai.ts, тогл aiAskEnabled) — сам этот модуль
-// остаётся без ИИ и внешних вызовов, как и задумано.
+// askKindOverride позволяет вызывающему коду (см. sendAcknowledgement в
+// вебхуке) подменить regex-решение результатом ИИ-классификации
+// (classifyAckAsk в lib/ai.ts, тогл aiAskEnabled) — сам этот модуль
+// остаётся без ИИ и внешних вызовов, как и задумано. Без переопределения
+// решение бинарное, как и раньше: не найден идентификатор — "contact",
+// найден — "none"; "assignment" может выбрать только ИИ, regex не умеет
+// понять, что обращение именно про задание по программе.
 export function buildAckText(
   incomingText: string,
   now: Date = new Date(),
-  needsAskOverride?: boolean
+  askKindOverride?: AckAskKind
 ): string {
   const language = pickLanguage(incomingText);
   const base = `${greeting(language, now)}, ${ACK[language]}`;
-  const needsAsk = needsAskOverride ?? !hasIdentifier(incomingText);
-  return needsAsk ? `${base}. ${ASK_FOR_DATA[language]}` : base;
+  const askKind: AckAskKind =
+    askKindOverride ?? (hasIdentifier(incomingText) ? "none" : "contact");
+
+  if (askKind === "none") return base;
+  const ask =
+    askKind === "assignment" ? ASK_FOR_ASSIGNMENT[language] : ASK_FOR_DATA[language];
+  return `${base}. ${ask}`;
 }
 
 // Ответы на смену статуса. RESOLVED тут нет намеренно: слово "Жөңделді" или

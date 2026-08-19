@@ -19,13 +19,14 @@ import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import { detectAgentIntent } from "@/lib/agentIntent";
 import { bestSolution } from "@/lib/solutionLibrary";
-import { pickResolvedWord, shouldAskForIdentifier } from "@/lib/ai";
+import { pickResolvedWord, classifyAckAsk } from "@/lib/ai";
 import {
   buildAckText,
   buildResolvedText,
   buildStatusReplyText,
   hasIdentifier,
   pickLanguage,
+  type AckAskKind,
 } from "@/lib/autoReply";
 import {
   sendBotReply,
@@ -661,17 +662,20 @@ async function createAutoIssue(
 // Два предохранителя от дубля: один ACK на тикет (сообщения одного автора
 // склеиваются, а вебхук может доставиться повторно) и молчание, если по
 // этому обращению уже успел ответить живой человек.
-// regex (hasIdentifier) уже решил "просить" — ИИ, если включён тоглом,
-// может это решение сузить (см. shouldAskForIdentifier в lib/ai.ts): общий
-// вопрос без привязки к ученику ("во сколько работает платформа") не
-// становится решаемым от присланной почты, и просить её не по делу.
-// null/выключенный тогл/сбой модели — остаёмся на исходном "просить".
-async function decideNeedsAsk(incomingText: string): Promise<boolean> {
-  if (hasIdentifier(incomingText)) return false;
-  if (!(await isAiAskEnabled())) return true;
+// regex (hasIdentifier) уже решил "просить почту/ссылку" или "не просить" —
+// ИИ, если включён тоглом, может это уточнить (см. classifyAckAsk в
+// lib/ai.ts): общий вопрос без привязки к ученику ("во сколько работает
+// платформа") не становится решаемым от присланной почты, а обращение про
+// конкретное задание по программе ("тапсырма фото не показывает") просит
+// не только почту, но и ай-апту — иначе агент знает, у кого проблема, но не
+// знает, какое задание смотреть. null/выключенный тогл/сбой модели —
+// остаёмся на исходном "просить почту/ссылку".
+async function decideAskKind(incomingText: string): Promise<AckAskKind> {
+  if (hasIdentifier(incomingText)) return "none";
+  if (!(await isAiAskEnabled())) return "contact";
 
-  const aiDecision = await shouldAskForIdentifier(incomingText);
-  return aiDecision ?? true;
+  const aiDecision = await classifyAckAsk(incomingText);
+  return aiDecision ?? "contact";
 }
 
 async function sendAcknowledgement(
@@ -683,14 +687,14 @@ async function sendAcknowledgement(
   if (await hasBotReplied(issueId, "ACK")) return;
   if (await agentAlreadyReplied(chatId, messageId, ownAgentTelegramIdList())) return;
 
-  const needsAsk = await decideNeedsAsk(incomingText);
+  const askKind = await decideAskKind(incomingText);
 
   await sendBotReply({
     issueId,
     chatId,
     replyToMessageId: messageId,
     kind: "ACK",
-    text: buildAckText(incomingText, new Date(), needsAsk),
+    text: buildAckText(incomingText, new Date(), askKind),
   });
 }
 
