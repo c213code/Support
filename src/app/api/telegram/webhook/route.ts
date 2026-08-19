@@ -19,7 +19,7 @@ import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import { detectAgentIntent } from "@/lib/agentIntent";
 import { bestSolution } from "@/lib/solutionLibrary";
-import { pickResolvedWord, classifyAckAsk } from "@/lib/ai";
+import { pickResolvedWord, classifyAckAsk, isSameRequestFollowUp } from "@/lib/ai";
 import {
   buildAckText,
   buildResolvedText,
@@ -41,6 +41,7 @@ import {
   isChatIntentEnabled,
   setChatIntentEnabled,
   isAiAskEnabled,
+  isAiCleaningEnabled,
 } from "@/lib/settings";
 import {
   ISSUE_STATUS_PREFIX,
@@ -867,6 +868,46 @@ async function attachReplyToBotMessage(
   return true;
 }
 
+// Ищет активный (не решённый, за сегодня) тикет, который уже завёлся по
+// более раннему сообщению этого же Telegram-автора в этом же чате — узкий,
+// дешёвый DB-lookup-кандидат для isSameRequestFollowUp (см. lib/ai.ts),
+// сам по себе ничего не решает про смысл сообщений.
+async function findSameAuthorActiveIssue(
+  chatId: string,
+  fromId: bigint | null
+): Promise<{
+  id: string;
+  description: string;
+  telegramLink: string | null;
+  extraLinks: string[];
+} | null> {
+  if (!fromId) return null;
+
+  const lastUsed = await prisma.telegramMessage.findFirst({
+    where: { chatId, fromId, usedForIssueId: { not: null } },
+    orderBy: { receivedAt: "desc" },
+    select: { usedForIssueId: true },
+  });
+  if (!lastUsed?.usedForIssueId) return null;
+
+  const issue = await prisma.issue.findUnique({
+    where: { id: lastUsed.usedForIssueId },
+    select: {
+      id: true,
+      description: true,
+      status: true,
+      reportDate: true,
+      telegramLink: true,
+      extraLinks: true,
+    },
+  });
+  if (!issue || issue.status === "RESOLVED" || issue.reportDate !== todayDateString()) {
+    return null;
+  }
+
+  return issue;
+}
+
 // Реплай на уже заведённое сообщение — частый паттерн "напоминание":
 // человек отвечает на своё же старое сообщение (или снова пишет по уже
 // "решённому" тикету), на которое так и не ответили. Обычная
@@ -1431,6 +1472,36 @@ export async function POST(request: NextRequest) {
       messageLink,
     },
   });
+
+  // Тот же человек уже писал сегодня в этот чат и по этому есть активный
+  // (не решённый) тикет — это сообщение может быть тем же запросом,
+  // присланным без Telegram Reply (типичный случай: попросили почту,
+  // человек прислал её отдельным новым сообщением через 10+ минут — в окно
+  // склейки MERGE_WINDOW_MS выше это уже не попадает). Слова могут не
+  // пересекаться вообще, поэтому не similarity.ts, а ИИ (см.
+  // isSameRequestFollowUp в lib/ai.ts). Без этой проверки нарочно не
+  // фильтруем мусор регуляркой: голая почта в ответ на просьбу бота — для
+  // isNoiseOnly и есть мусор (см. комментарий у attachReplyToBotMessage),
+  // а именно её чаще всего и присылают вторым сообщением.
+  if (preset && !savedMessage.usedForIssueId && (await isAiCleaningEnabled())) {
+    const activeIssue = await findSameAuthorActiveIssue(chatId, fromId);
+    if (activeIssue && (await isSameRequestFollowUp(activeIssue.description, text))) {
+      const alreadyLinked =
+        messageLink === activeIssue.telegramLink ||
+        activeIssue.extraLinks.includes(messageLink);
+      await prisma.$transaction([
+        prisma.telegramMessage.update({
+          where: { id: savedMessage.id },
+          data: { usedForIssueId: activeIssue.id, archived: true, viewed: true },
+        }),
+        prisma.issue.update({
+          where: { id: activeIssue.id },
+          data: { extraLinks: alreadyLinked ? undefined : { push: messageLink } },
+        }),
+      ]);
+      return NextResponse.json({ ok: true });
+    }
+  }
 
   // Группа уже известна (чат раньше привязали вручную) — заводим тикет
   // сразу, без ручного "Создать тикет". upsert идемпотентен на повторных

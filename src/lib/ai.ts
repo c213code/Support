@@ -393,6 +393,64 @@ export async function classifyAckAsk(text: string): Promise<AckAskKind | null> {
   }
 }
 
+const FOLLOWUP_TIMEOUT_MS = 5000;
+
+// Один и тот же человек часто пишет запрос двумя сообщениями с разрывом
+// больше 5 минут (см. MERGE_WINDOW_MS в вебхуке) — сначала описывает
+// проблему, потом отдельным сообщением присылает то, что попросил бот
+// (почту, скрин), не используя Telegram Reply. Слова при этом могут не
+// пересекаться вообще ("логин парольмен кіре алмай отыр" /
+// "email/password ауыстыру сұранысы") — обычное сравнение по словам
+// (similarity.ts) такое не ловит, нужен смысл. Вызывается только когда уже
+// нашли кандидата: активный (не решённый) тикет за сегодня от того же
+// Telegram-автора в том же чате (см. findSameAuthorActiveIssue в вебхуке) —
+// это узкое, редкое совпадение само по себе, ИИ здесь только подтверждает,
+// что это тот же запрос, а не вторая, отдельная проблема того же человека.
+const FOLLOWUP_SYSTEM_PROMPT = `Ты помогаешь боту поддержки понять: новое сообщение — это продолжение уже открытого тикета того же человека, или отдельная новая проблема.
+
+Тебе даны текст уже открытого тикета и новое сообщение от того же автора в том же чате поддержки. Ответь true, если это тот же самый запрос: уточнение, дополнительные данные (почта, пароль, скриншот), которые попросили прислать, продолжение той же истории — даже если слова совсем другие. Ответь false, если это другая, не связанная с первой проблема.
+
+Пример true: тикет "Оқушы логин парольмен кіре алмай отыр" (ученик не может войти с логином и паролем), новое сообщение "Аккаунтқа басқа email/password ауыстыру сұранысы" с почтой и скриншотом — это тот же случай другими словами: не смог зайти со старыми данными → просит их поменять.
+
+Ответь строго JSON без пояснений: {"followUp": true} или {"followUp": false}.`;
+
+// null при недоступности модели/ключа — вызывающий код тогда заводит новый
+// тикет как обычно, а не гадает.
+export async function isSameRequestFollowUp(
+  existingTicket: string,
+  newMessage: string
+): Promise<boolean | null> {
+  if (groqApiKeys().length === 0 || !newMessage.trim()) return null;
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 200,
+        reasoning_effort: "low",
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: FOLLOWUP_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: `Тикет: ${existingTicket}\nНовое сообщение: ${newMessage}`,
+          },
+        ],
+      },
+      FOLLOWUP_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") return null;
+
+    const parsed = JSON.parse(content);
+    return typeof parsed?.followUp === "boolean" ? parsed.followUp : null;
+  } catch {
+    return null;
+  }
+}
+
 const GLOSSARY_TIMEOUT_MS = 20000;
 // Сколько тикетов показываем модели за раз. Больше — точнее словарь, но
 // длиннее промпт; на бесплатной квоте Groq это ощутимо.
