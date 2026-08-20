@@ -1424,9 +1424,11 @@ export async function POST(request: NextRequest) {
         receivedAt: new Date(),
       },
     });
+
     // Если по первому сообщению серии уже успел завестись авто-тикет —
     // подтягиваем в него дописанный текст, иначе на доске останется
     // только обрывок исходного запроса.
+    let linkedIssueId: string | null = null;
     if (recent.usedForIssueId) {
       const merged = await buildDescription(mergedOwn, mergedContextual, skipAutoCreate);
       // null тут означает "склеенный текст выглядит мусором" — описание не
@@ -1437,6 +1439,7 @@ export async function POST(request: NextRequest) {
           data: { description: merged },
         });
       }
+      linkedIssueId = recent.usedForIssueId;
     } else if (preset) {
       // Тикета ещё нет: либо первое сообщение серии было голым
       // приветствием ("Қайырлы күн" → проблема следующим сообщением) —
@@ -1460,8 +1463,37 @@ export async function POST(request: NextRequest) {
         // в нём чаще всего и оказывается сама проблема (первое сплошь и
         // рядом — просто "Қайырлы күн").
         await sendAcknowledgement(issue.id, chatId, message.message_id, mergedOwn);
+        linkedIssueId = issue.id;
       }
     }
+
+    // У ЭТОГО message_id раньше не заводилось собственной строки — только
+    // recent, keyed по messageId ПЕРВОГО сообщения серии, обновлялся текстом.
+    // Из-за этого, если позже кто-то отвечал Telegram-реплаем именно на это
+    // (не первое) сообщение серии, attachFollowUpToTicket не находил его в
+    // базе вообще и заводил отдельный, оторванный тикет вместо того, чтобы
+    // приклеить реплай к уже существующему. Теперь у каждого message_id
+    // серии есть своя строка, указывающая на тот же тикет.
+    const messageLink = buildMessageLink(message.chat.id, message.message_id);
+    await prisma.telegramMessage.upsert({
+      where: { chatId_messageId: { chatId, messageId: message.message_id } },
+      update: {},
+      create: {
+        chatId,
+        messageId: message.message_id,
+        chatTitle: message.chat.title ?? null,
+        groupName: preset?.name ?? null,
+        groupEmoji: preset?.emoji ?? null,
+        fromId,
+        authorName,
+        text: contextualText,
+        messageLink,
+        ...(linkedIssueId
+          ? { usedForIssueId: linkedIssueId, archived: true, viewed: true }
+          : {}),
+      },
+    });
+
     return NextResponse.json({ ok: true });
   }
 
