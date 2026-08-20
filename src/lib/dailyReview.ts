@@ -326,13 +326,22 @@ export async function startReviewSession(
 // Зацепки (почта/телефон/вложение) из сырых сообщений тикета — см.
 // ticketHints.ts. Отдельным запросом, потому что на карточке разбора их
 // нужно ровно столько же, сколько ответов бота.
-async function hintsFor(issue: { telegramLink: string | null }) {
-  const links = issue.telegramLink ? [issue.telegramLink] : [];
-  if (links.length === 0) return undefined;
+// Ищем и по привязке к тикету, и по исходной ссылке: уточнения (присланная
+// почта, дописанные подробности) привязываются через usedForIssueId, но
+// ссылку на карточку намеренно не добавляют (см. ATTACH_LINK_POLICY в
+// вебхуке) — по одной ссылке они бы не нашлись, и в разборе не было бы
+// видно почты, которую сам же бот и попросил.
+async function hintsFor(issue: { id: string; telegramLink: string | null }) {
   const sources = await prisma.telegramMessage.findMany({
-    where: { messageLink: { in: links } },
+    where: {
+      OR: [
+        { usedForIssueId: issue.id },
+        ...(issue.telegramLink ? [{ messageLink: issue.telegramLink }] : []),
+      ],
+    },
     select: { text: true },
   });
+  if (sources.length === 0) return undefined;
   return extractTicketHints(sources.map((s) => s.text));
 }
 

@@ -806,6 +806,30 @@ async function applyAgentIntent(
   );
 }
 
+// ATTACH_LINK_POLICY — чем "привязка сообщения к тикету" отличается от
+// "ещё одной ссылки на карточке", и почему автоматика делает только первое.
+//
+// Список ссылок на карточке (`Issue.extraLinks`, "Ещё обращение №2") задуман
+// как список РАЗНЫХ обращений по одной и той же проблеме: Али написал про
+// пароль, потом Айжан написала про пароль — дежурному нужен один тикет с
+// двумя ссылками, а не два тикета. Это решение всегда принимает человек
+// (кнопки "Прикрепить"/"Объединить", см. api/issues/[id]/attach-message и
+// lib/mergeIssue.ts) — только он знает, что это два разных ученика с общей
+// причиной.
+//
+// Автоматические пути ниже ловят прямо противоположное: тот же человек по
+// тому же случаю досылает уточнения — отвечает на вопрос бота, дописывает
+// подробности, реплаит сам себе. Раньше каждое такое сообщение добавляло
+// ссылку, и карточка одного обращения обрастала списком "Ещё обращение
+// №2..№6", в котором ни одна ссылка не вела к формулировке проблемы.
+//
+// Поэтому автоматика ставит только `usedForIssueId` (сообщение разобрано и
+// принадлежит тикету), но НЕ трогает extraLinks. Ничего при этом не
+// теряется: почта/телефон/вложение из уточнений собираются именно по
+// `usedForIssueId` (см. hints в api/issues и lib/dailyReview), так что
+// присланная почта по-прежнему видна на карточке — просто без лишней
+// ссылки рядом с ней.
+
 // Ответ на сообщение самого бота — почти всегда это присланная по его же
 // просьбе почта/ссылка ("Тексеру үшін оқушының почтасын жібере аласыз
 // ба?"). Такой ответ обязан приклеиться к тому тикету, по которому бот
@@ -832,38 +856,35 @@ async function attachReplyToBotMessage(
 
   const issue = await prisma.issue.findUnique({
     where: { id: botReply.issueId },
-    select: { id: true, groupName: true, groupEmoji: true, telegramLink: true, extraLinks: true },
+    select: { id: true, groupName: true, groupEmoji: true },
   });
   if (!issue) return false;
 
   const messageLink = buildMessageLink(message.chat.id, message.message_id);
-  const alreadyLinked =
-    messageLink === issue.telegramLink || issue.extraLinks.includes(messageLink);
 
-  await prisma.$transaction([
-    prisma.telegramMessage.upsert({
-      where: { chatId_messageId: { chatId, messageId: message.message_id } },
-      update: { usedForIssueId: issue.id, archived: true, viewed: true },
-      create: {
-        chatId,
-        messageId: message.message_id,
-        chatTitle: message.chat.title ?? null,
-        groupName: issue.groupName,
-        groupEmoji: issue.groupEmoji,
-        fromId: message.from?.id != null ? BigInt(message.from.id) : null,
-        authorName: extractAuthorName(message.from),
-        text: contextualText,
-        messageLink,
-        usedForIssueId: issue.id,
-        archived: true,
-        viewed: true,
-      },
-    }),
-    prisma.issue.update({
-      where: { id: issue.id },
-      data: { extraLinks: alreadyLinked ? undefined : { push: messageLink } },
-    }),
-  ]);
+  // Ссылку в extraLinks НЕ добавляем: это уточнение по тому же случаю (мы
+  // сами попросили почту), а не отдельное обращение — см. комментарий у
+  // ATTACH_LINK_POLICY выше. Привязка (usedForIssueId) остаётся: по ней
+  // считаются зацепки на карточке, поэтому присланная почта всё равно
+  // окажется у агента перед глазами.
+  await prisma.telegramMessage.upsert({
+    where: { chatId_messageId: { chatId, messageId: message.message_id } },
+    update: { usedForIssueId: issue.id, archived: true, viewed: true },
+    create: {
+      chatId,
+      messageId: message.message_id,
+      chatTitle: message.chat.title ?? null,
+      groupName: issue.groupName,
+      groupEmoji: issue.groupEmoji,
+      fromId: message.from?.id != null ? BigInt(message.from.id) : null,
+      authorName: extractAuthorName(message.from),
+      text: contextualText,
+      messageLink,
+      usedForIssueId: issue.id,
+      archived: true,
+      viewed: true,
+    },
+  });
 
   return true;
 }
@@ -875,12 +896,7 @@ async function attachReplyToBotMessage(
 async function findSameAuthorActiveIssue(
   chatId: string,
   fromId: bigint | null
-): Promise<{
-  id: string;
-  description: string;
-  telegramLink: string | null;
-  extraLinks: string[];
-} | null> {
+): Promise<{ id: string; description: string } | null> {
   if (!fromId) return null;
 
   const lastUsed = await prisma.telegramMessage.findFirst({
@@ -897,8 +913,6 @@ async function findSameAuthorActiveIssue(
       description: true,
       status: true,
       reportDate: true,
-      telegramLink: true,
-      extraLinks: true,
     },
   });
   if (!issue || issue.status === "RESOLVED" || issue.reportDate !== todayDateString()) {
@@ -941,12 +955,13 @@ async function attachFollowUpToTicket(
   if (!issue) return false;
 
   const messageLink = buildMessageLink(message.chat.id, message.message_id);
-  const alreadyLinked =
-    messageLink === issue.telegramLink || issue.extraLinks.includes(messageLink);
   const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
   const authorName = extractAuthorName(message.from);
   const wasResolved = issue.status === "RESOLVED";
 
+  // Ссылку в extraLinks НЕ добавляем — это тот же случай, а не отдельное
+  // обращение (см. ATTACH_LINK_POLICY выше). Статус, если тикет считался
+  // решённым, всё равно меняем: человек написал снова, значит рано закрыли.
   await prisma.$transaction([
     prisma.telegramMessage.upsert({
       where: { chatId_messageId: { chatId, messageId: message.message_id } },
@@ -969,7 +984,6 @@ async function attachFollowUpToTicket(
     prisma.issue.update({
       where: { id: issue.id },
       data: {
-        extraLinks: alreadyLinked ? undefined : { push: messageLink },
         ...(wasResolved
           ? {
               status: "SENT" as const,
@@ -1529,19 +1543,12 @@ export async function POST(request: NextRequest) {
   if (preset && !savedMessage.usedForIssueId && (await isAiCleaningEnabled())) {
     const activeIssue = await findSameAuthorActiveIssue(chatId, fromId);
     if (activeIssue && (await isSameRequestFollowUp(activeIssue.description, text))) {
-      const alreadyLinked =
-        messageLink === activeIssue.telegramLink ||
-        activeIssue.extraLinks.includes(messageLink);
-      await prisma.$transaction([
-        prisma.telegramMessage.update({
-          where: { id: savedMessage.id },
-          data: { usedForIssueId: activeIssue.id, archived: true, viewed: true },
-        }),
-        prisma.issue.update({
-          where: { id: activeIssue.id },
-          data: { extraLinks: alreadyLinked ? undefined : { push: messageLink } },
-        }),
-      ]);
+      // Только привязка, без ссылки в extraLinks — это тот же случай, а не
+      // отдельное обращение (см. ATTACH_LINK_POLICY выше).
+      await prisma.telegramMessage.update({
+        where: { id: savedMessage.id },
+        data: { usedForIssueId: activeIssue.id, archived: true, viewed: true },
+      });
       return NextResponse.json({ ok: true });
     }
   }

@@ -37,26 +37,50 @@ export async function GET(request: NextRequest) {
   // намеренно выкидывает (в репорт боссам это не нужно), но без чего
   // агенту не за что зацепиться, чтобы начать работу. Тянем сырые тексты
   // всех привязанных к тикету сообщений одним запросом.
+  //
+  // Ищем по usedForIssueId, а не по списку ссылок: уточнения (присланная
+  // почта, дописанные подробности) привязываются к тикету, но ссылку на
+  // карточку намеренно не добавляют — она там значит "ещё одно отдельное
+  // обращение по той же проблеме" (см. ATTACH_LINK_POLICY в вебхуке). По
+  // ссылкам такие сообщения не нашлись бы, и присланная почта пропала бы с
+  // карточки. telegramLink добавлен к запросу отдельно: у тикета, заведённого
+  // руками по вставленной ссылке, привязанного сообщения может не быть.
+  const issueIds = issues.map((i) => i.id);
   const allLinks = issues.flatMap((i) => [i.telegramLink, ...i.extraLinks]).filter(
     (l): l is string => l != null
   );
-  const sources = allLinks.length
-    ? await prisma.telegramMessage.findMany({
-        where: { messageLink: { in: allLinks } },
-        select: { messageLink: true, text: true },
-      })
-    : [];
+  const sources = await prisma.telegramMessage.findMany({
+    where: {
+      OR: [
+        { usedForIssueId: { in: issueIds } },
+        ...(allLinks.length ? [{ messageLink: { in: allLinks } }] : []),
+      ],
+    },
+    select: { messageLink: true, text: true, usedForIssueId: true },
+  });
+
   const textByLink = new Map(sources.map((s) => [s.messageLink, s.text]));
+  const textsByIssue = new Map<string, Array<string | null>>();
+  for (const source of sources) {
+    if (!source.usedForIssueId) continue;
+    const list = textsByIssue.get(source.usedForIssueId) ?? [];
+    list.push(source.text);
+    textsByIssue.set(source.usedForIssueId, list);
+  }
 
   return NextResponse.json({
     issues: issues.map((issue) => ({
       ...issue,
       botReplies: byIssue.get(issue.id) ?? [],
-      hints: extractTicketHints(
-        [issue.telegramLink, ...issue.extraLinks].map((l) =>
+      // Одно и то же сообщение может попасть в оба списка (привязано и
+      // указано ссылкой) — extractTicketHints складывает почты/телефоны в
+      // Set, поэтому дубликаты безвредны.
+      hints: extractTicketHints([
+        ...(textsByIssue.get(issue.id) ?? []),
+        ...[issue.telegramLink, ...issue.extraLinks].map((l) =>
           l ? (textByLink.get(l) ?? null) : null
-        )
-      ),
+        ),
+      ]),
     })),
   });
 }
