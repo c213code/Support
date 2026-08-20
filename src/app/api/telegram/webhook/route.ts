@@ -631,7 +631,7 @@ async function createAutoIssue(
   own: string,
   contextual: string,
   telegramLink: string,
-  repliesToOwnAgent = false
+  skipAutoCreate = false
 ) {
   const reportDate = todayDateString();
   const [last, cleaned] = await Promise.all([
@@ -639,7 +639,7 @@ async function createAutoIssue(
       where: { reportDate, groupName },
       orderBy: { position: "desc" },
     }),
-    buildDescription(own, contextual, repliesToOwnAgent),
+    buildDescription(own, contextual, skipAutoCreate),
   ]);
   if (cleaned === null) return null;
   return prisma.issue.create({
@@ -1244,6 +1244,17 @@ export async function POST(request: NextRequest) {
   // внутреннее уточнение, чем пересказ жалобы, и buildDescription (см.
   // lib/ticketDescription.ts) относится к ним осторожнее.
   const repliesToOwnAgent = isOwnAgentMessage(message.reply_to_message?.from?.id);
+  // Ответ на своё же более раннее сообщение — человек продолжает свою же
+  // мысль ("а что если..."/"хотя, если подумать..."), а не заводит новое
+  // обращение. Если то сообщение уже стало тикетом, attachFollowUpToTicket
+  // ниже сам приклеит реплай к нему; если нет (например, было корректно
+  // пропущено как рабочая переписка коллег) — эта реплика тоже не должна
+  // тихо завести отдельный новый тикет по тем же причинам.
+  const isSelfReply =
+    message.reply_to_message?.from?.id != null &&
+    message.from?.id != null &&
+    message.reply_to_message.from.id === message.from.id;
+  const skipAutoCreate = repliesToOwnAgent || isSelfReply;
   const contextualText = replyContext ? `${replyContext}\n${text}` : text;
 
   const authorName = extractAuthorName(message.from);
@@ -1417,7 +1428,7 @@ export async function POST(request: NextRequest) {
     // подтягиваем в него дописанный текст, иначе на доске останется
     // только обрывок исходного запроса.
     if (recent.usedForIssueId) {
-      const merged = await buildDescription(mergedOwn, mergedContextual, repliesToOwnAgent);
+      const merged = await buildDescription(mergedOwn, mergedContextual, skipAutoCreate);
       // null тут означает "склеенный текст выглядит мусором" — описание не
       // трогаем, тикет уже заведён и затирать его нечем.
       if (merged !== null) {
@@ -1438,7 +1449,7 @@ export async function POST(request: NextRequest) {
         mergedOwn,
         mergedContextual,
         recent.messageLink,
-        repliesToOwnAgent
+        skipAutoCreate
       );
       if (issue) {
         await prisma.telegramMessage.update({
@@ -1513,7 +1524,7 @@ export async function POST(request: NextRequest) {
       text,
       contextualText,
       messageLink,
-      repliesToOwnAgent
+      skipAutoCreate
     );
     // issue === null — в сообщении не было запроса; оставляем его во
     // "Входящих" без тикета (см. buildDescription).
