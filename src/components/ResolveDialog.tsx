@@ -36,6 +36,20 @@ export function ResolveDialog({
   const [note, setNote] = useState(defaultNote);
   const [saving, setSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Подсказка из самой переписки: что агент уже написал в чате по этому
+  // тикету, сжатое в строку для репорта (см. api/issues/[id]/suggest-note).
+  // "loading" — пока ждём ответ; null — подсказки не будет (ИИ выключен,
+  // реплик не нашлось, или из них не видно, что задачу довели до конца).
+  const [chatSuggestion, setChatSuggestion] = useState<{
+    text: string;
+    exact: boolean;
+  } | null>(null);
+  const [loadingSuggestion, setLoadingSuggestion] = useState(true);
+  // Правил ли человек текст руками. Подставлять подсказку поверх набранного
+  // нельзя: ответ приходит через пару секунд, и попасть под курсор — значит
+  // затереть то, что человек уже пишет. Ref, а не состояние: читается из
+  // колбэка запроса, где значение из замыкания было бы уже устаревшим.
+  const touchedRef = useRef(false);
   // "Как это решали в прошлый раз" — половина обращений за день это
   // повторяющиеся сценарии с почти дословно совпадающими заметками, и
   // набирать их заново незачем. Только подсказка: подставляется нажатием,
@@ -52,6 +66,31 @@ export function ResolveDialog({
         if (!cancelled) setSuggestions(data.suggestions ?? []);
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [issue.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/issues/${issue.id}/suggest-note`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (typeof data.suggestion === "string" && data.suggestion.trim()) {
+          setChatSuggestion({
+            text: data.suggestion,
+            exact: Boolean(data.exact),
+          });
+          // Подставляем, только если человек ещё ничего не менял: набранное
+          // руками важнее любой подсказки.
+          if (!touchedRef.current) setNote(data.suggestion);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingSuggestion(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -109,6 +148,10 @@ export function ResolveDialog({
                   key={s.issueId}
                   type="button"
                   onClick={() => {
+                    // Выбор прошлого решения — тоже осознанная правка:
+                    // подсказка из чата не должна затереть его, когда
+                    // придёт.
+                    touchedRef.current = true;
                     setNote(s.note);
                     textareaRef.current?.focus();
                   }}
@@ -125,17 +168,59 @@ export function ResolveDialog({
         )}
 
         <div className="space-y-1">
-          <label
-            htmlFor="resolve-note"
-            className="text-xs font-medium text-slate-500"
-          >
-            Заметка попадёт в репорт
-          </label>
+          <div className="flex items-center justify-between gap-2">
+            <label
+              htmlFor="resolve-note"
+              className="text-xs font-medium text-slate-500"
+            >
+              Заметка попадёт в репорт
+            </label>
+            {loadingSuggestion ? (
+              <span className="text-[11px] text-slate-400">
+                ИИ смотрит переписку…
+              </span>
+            ) : chatSuggestion ? (
+              note === chatSuggestion.text ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    touchedRef.current = true;
+                    setNote(defaultNote);
+                    textareaRef.current?.focus();
+                  }}
+                  className="text-[11px] text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
+                >
+                  ✍️ Написать самому
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNote(chatSuggestion.text);
+                    textareaRef.current?.focus();
+                  }}
+                  className="text-[11px] text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
+                >
+                  ↩️ Вернуть подсказку
+                </button>
+              )
+            ) : null}
+          </div>
+          {chatSuggestion && note === chatSuggestion.text && (
+            <p className="text-[11px] text-slate-400">
+              {chatSuggestion.exact
+                ? "🤖 Из твоего ответа в чате — проверь и поправь"
+                : "🤖 Собрано по переписке в чате — проверь, там мог обсуждаться и соседний тикет"}
+            </p>
+          )}
           <textarea
             id="resolve-note"
             ref={textareaRef}
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => {
+              touchedRef.current = true;
+              setNote(e.target.value);
+            }}
             onKeyDown={(e) => {
               // Ctrl/Cmd+Enter — привычный "отправить" для однострочных
               // заметок, чтобы не тянуться мышкой к кнопке.

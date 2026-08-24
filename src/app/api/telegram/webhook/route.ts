@@ -879,6 +879,7 @@ async function attachReplyToBotMessage(
       fromId: message.from?.id != null ? BigInt(message.from.id) : null,
       authorName: extractAuthorName(message.from),
       text: contextualText,
+      replyToMessageId: message.reply_to_message?.message_id ?? null,
       messageLink,
       usedForIssueId: issue.id,
       archived: true,
@@ -975,6 +976,7 @@ async function attachFollowUpToTicket(
         fromId,
         authorName,
         text: contextualText,
+        replyToMessageId: message.reply_to_message?.message_id ?? null,
         messageLink,
         usedForIssueId: issue.id,
         archived: true,
@@ -1378,6 +1380,7 @@ export async function POST(request: NextRequest) {
         fromId,
         authorName,
         text: contextualText,
+        replyToMessageId: message.reply_to_message?.message_id ?? null,
         messageLink,
         archived: true,
         viewed: true,
@@ -1501,6 +1504,7 @@ export async function POST(request: NextRequest) {
         fromId,
         authorName,
         text: contextualText,
+        replyToMessageId: message.reply_to_message?.message_id ?? null,
         messageLink,
         ...(linkedIssueId
           ? { usedForIssueId: linkedIssueId, archived: true, viewed: true }
@@ -1526,6 +1530,7 @@ export async function POST(request: NextRequest) {
       fromId,
       authorName,
       text: contextualText,
+      replyToMessageId: message.reply_to_message?.message_id ?? null,
       messageLink,
     },
   });
