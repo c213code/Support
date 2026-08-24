@@ -35,26 +35,37 @@ export async function GET(_request: NextRequest, { params }: Params) {
   }
 
   if (!(await isAiCleaningEnabled())) {
-    return NextResponse.json({ suggestion: null, exact: false });
+    return NextResponse.json({ suggestion: null, exact: false, reason: "ai-off" });
   }
 
-  const context = await collectResolutionContext(id);
-  if (!context) {
-    return NextResponse.json({ suggestion: null, exact: false });
+  const result = await collectResolutionContext(id);
+  if (!result.ok) {
+    return NextResponse.json({
+      suggestion: null,
+      exact: false,
+      reason: result.reason,
+    });
   }
 
   const summary = await summarizeResolutionNote(
     issue.description,
-    context.agentTexts
+    result.context.agentTexts
   );
-  if (!summary) {
-    return NextResponse.json({ suggestion: null, exact: false });
+  // Реплики нашлись, но решения в них не видно (SKIP) — или модель вовсе не
+  // ответила. Для окна это разные вещи: в первом случае подсказывать нечего,
+  // во втором стоит просто попробовать ещё раз.
+  if (!summary.ok) {
+    return NextResponse.json({
+      suggestion: null,
+      exact: false,
+      reason: summary.reason === "skip" ? "no-outcome" : "ai-error",
+    });
   }
 
   // Имя дописываем кодом, а не моделью: в репорте оно значит "кто закрыл", и
   // выдуманное моделью имя коллеги — худшее, что может попасть в отчёт
   // боссам. Формат тот же, что дежурные пишут руками: "Ерош шешті, ...".
-  const suggestion = `${identity.name} шешті, ${summary}`;
+  const suggestion = `${identity.name} шешті, ${summary.note}`;
 
-  return NextResponse.json({ suggestion, exact: context.exact });
+  return NextResponse.json({ suggestion, exact: result.context.exact });
 }

@@ -30,11 +30,29 @@ export type ResolutionContext = {
   exact: boolean;
 };
 
+// Почему подсказки не будет. Раньше на все случаи возвращался null, и окно
+// "Как решили?" просто показывало "ИИ смотрит переписку…", а потом молча
+// гасило строку — неотличимо от поломки. Причина нужна на экране: три из
+// четырёх случаев чинит сам дежурный (включить тогл, вписать id, ответить
+// в чате), а четвёртый — нормальная работа.
+export type NoContextReason =
+  // Не задан ни OWN_AGENT_TELEGRAM_IDS, ни AGENT_TELEGRAM_IDS — "своих"
+  // сообщений в чате система не отличает вообще.
+  | "no-agent-ids"
+  // К тикету не привязано ни одного сообщения (заведён руками по ссылке).
+  | "no-issue-messages"
+  // В чате нет реплик наших агентов по этому обращению.
+  | "no-agent-messages";
+
+export type ResolutionContextResult =
+  | { ok: true; context: ResolutionContext }
+  | { ok: false; reason: NoContextReason };
+
 export async function collectResolutionContext(
   issueId: string
-): Promise<ResolutionContext | null> {
+): Promise<ResolutionContextResult> {
   const ownAgentIds = ownAgentTelegramIdList();
-  if (ownAgentIds.length === 0) return null;
+  if (ownAgentIds.length === 0) return { ok: false, reason: "no-agent-ids" };
 
   // Сообщения самого обращения: по ним знаем чат и с какого момента
   // смотреть. Привязка — usedForIssueId (см. ATTACH_LINK_POLICY в вебхуке).
@@ -43,7 +61,9 @@ export async function collectResolutionContext(
     select: { chatId: true, messageId: true, receivedAt: true },
     orderBy: { receivedAt: "asc" },
   });
-  if (issueMessages.length === 0) return null;
+  if (issueMessages.length === 0) {
+    return { ok: false, reason: "no-issue-messages" };
+  }
 
   const chatId = issueMessages[0].chatId;
   const since = new Date(
@@ -68,7 +88,9 @@ export async function collectResolutionContext(
   const exactTexts = exactReplies
     .map((m) => m.text?.trim())
     .filter((t): t is string => Boolean(t));
-  if (exactTexts.length > 0) return { agentTexts: exactTexts, exact: true };
+  if (exactTexts.length > 0) {
+    return { ok: true, context: { agentTexts: exactTexts, exact: true } };
+  }
 
   // Реплая нет — берём то, что агенты писали в этом чате после обращения.
   // Это уже догадка: в чате могли параллельно обсуждать соседний тикет.
@@ -79,15 +101,50 @@ export async function collectResolutionContext(
       fromId: { in: ownAgentIds },
       receivedAt: { gte: issueMessages[0].receivedAt, lte: until },
     },
-    select: { text: true },
+    select: { text: true, replyToMessageId: true },
     orderBy: { receivedAt: "asc" },
     take: MAX_AGENT_MESSAGES,
   });
 
+  // Реплика, отвечающая на сообщение ДРУГОГО тикета, к нашему отношения не
+  // имеет — она уже приписана туда точным совпадением выше. В рабочем чате
+  // за час проходит несколько обращений подряд, и без этого фильтра решение
+  // соседнего тикета подставлялось в наш ("Почтасы ауыстырылды" в тикет,
+  // где почту никто не менял) — а заметка уходит в репорт боссам.
+  const repliedIds = Array.from(
+    new Set(
+      nearby
+        .map((m) => m.replyToMessageId)
+        .filter((id): id is number => id != null)
+    )
+  );
+  const foreignMessageIds = new Set(
+    repliedIds.length > 0
+      ? (
+          await prisma.telegramMessage.findMany({
+            where: {
+              chatId,
+              messageId: { in: repliedIds },
+              usedForIssueId: { not: null },
+              NOT: { usedForIssueId: issueId },
+            },
+            select: { messageId: true },
+          })
+        ).map((m) => m.messageId)
+      : []
+  );
+
   const nearbyTexts = nearby
+    .filter(
+      (m) =>
+        m.replyToMessageId == null ||
+        !foreignMessageIds.has(m.replyToMessageId)
+    )
     .map((m) => m.text?.trim())
     .filter((t): t is string => Boolean(t));
-  if (nearbyTexts.length === 0) return null;
+  if (nearbyTexts.length === 0) {
+    return { ok: false, reason: "no-agent-messages" };
+  }
 
-  return { agentTexts: nearbyTexts, exact: false };
+  return { ok: true, context: { agentTexts: nearbyTexts, exact: false } };
 }

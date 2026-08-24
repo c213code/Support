@@ -310,14 +310,22 @@ const RESOLUTION_NOTE_SYSTEM_PROMPT = `Ты — часть тикет-систе
 
 Ответ — только сама фраза, без кавычек и markdown.`;
 
-// Возвращает null, если модель недоступна или сочла, что решения в
-// репликах не видно (SKIP) — тогда окно "Как решили?" просто оставит
-// прежний дефолт, а не подставит выдуманное.
+// "Решения в репликах не видно" и "модель не ответила" — разные вещи, и
+// окно "Как решили?" должно говорить о них по-разному: в первом случае
+// подсказывать действительно нечего, во втором стоит просто попробовать
+// ещё раз. Без этого разделения разовый таймаут Groq выглядел как вывод
+// "по переписке ничего не понятно" — то есть враньё.
+export type ResolutionNoteResult =
+  | { ok: true; note: string }
+  | { ok: false; reason: "skip" | "error" };
+
 export async function summarizeResolutionNote(
   description: string,
   agentTexts: string[]
-): Promise<string | null> {
-  if (groqApiKeys().length === 0 || agentTexts.length === 0) return null;
+): Promise<ResolutionNoteResult> {
+  if (groqApiKeys().length === 0 || agentTexts.length === 0) {
+    return { ok: false, reason: "error" };
+  }
 
   try {
     const data = (await callGroqChat(
@@ -342,10 +350,13 @@ export async function summarizeResolutionNote(
     )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
 
     const text = data?.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || !text.trim()) return null;
-    return isAiSkip(text) ? null : text.trim();
+    if (typeof text !== "string" || !text.trim()) {
+      return { ok: false, reason: "error" };
+    }
+    if (isAiSkip(text)) return { ok: false, reason: "skip" };
+    return { ok: true, note: text.trim() };
   } catch {
-    return null;
+    return { ok: false, reason: "error" };
   }
 }
 

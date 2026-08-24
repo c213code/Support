@@ -1,9 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { IssueDTO } from "@/lib/types";
 import { Modal } from "@/components/Modal";
 import { IconCheck } from "@/components/Icons";
+
+// Почему в поле нет подсказки из переписки (см. suggest-note). Формулировки
+// короткие и по делу: три причины из четырёх дежурный чинит сам, и текст
+// должен подсказывать, что именно сделать, а не просто извиняться.
+const NO_SUGGESTION_TEXT: Record<string, string> = {
+  "ai-off": "подсказка выключена вместе с «✨ ИИ-описания»",
+  "no-agent-ids": "не настроены Telegram-id агентов",
+  "no-issue-messages": "к тикету не привязано сообщение из чата",
+  "no-agent-messages": "в чате нет твоих ответов по этому тикету",
+  "no-outcome": "по переписке не видно, чем закончилось",
+  "ai-error": "не удалось получить подсказку",
+};
 
 // Спрашиваем "что сделали" в момент перевода тикета в "Решено" — заметка
 // уходит прямо в текст репорта, и если её не заполнить сразу, к вечеру уже
@@ -45,6 +57,15 @@ export function ResolveDialog({
     exact: boolean;
   } | null>(null);
   const [loadingSuggestion, setLoadingSuggestion] = useState(true);
+  // Почему подсказки нет. Пустое место на её месте неотличимо от поломки:
+  // строка "ИИ смотрит переписку…" гасла, и было непонятно, то ли ИИ
+  // выключен, то ли в чате нечего было найти, то ли всё сломалось.
+  const [noSuggestionReason, setNoSuggestionReason] = useState<string | null>(
+    null
+  );
+  // Сбой модели (в отличие от "решения не видно") лечится повтором —
+  // показываем кнопку, а не тупиковую надпись.
+  const [canRetrySuggestion, setCanRetrySuggestion] = useState(false);
   // Правил ли человек текст руками. Подставлять подсказку поверх набранного
   // нельзя: ответ приходит через пару секунд, и попасть под курсор — значит
   // затереть то, что человек уже пишет. Ref, а не состояние: читается из
@@ -71,12 +92,16 @@ export function ResolveDialog({
     };
   }, [issue.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/issues/${issue.id}/suggest-note`)
+  // Вынесено из эффекта: этим же грузим подсказку заново по кнопке, когда
+  // модель не ответила с первого раза (разовый таймаут/квота Groq — самая
+  // частая причина "подсказка мелькнула и пропала").
+  // Состояние трогаем только в колбэках запроса: сбросы перед повтором
+  // делает сама кнопка, иначе первый (эффектный) вызов менял бы состояние
+  // синхронно в теле эффекта.
+  const loadSuggestion = useCallback(() => {
+    return fetch(`/api/issues/${issue.id}/suggest-note`)
       .then((res) => res.json())
       .then((data) => {
-        if (cancelled) return;
         if (typeof data.suggestion === "string" && data.suggestion.trim()) {
           setChatSuggestion({
             text: data.suggestion,
@@ -85,16 +110,21 @@ export function ResolveDialog({
           // Подставляем, только если человек ещё ничего не менял: набранное
           // руками важнее любой подсказки.
           if (!touchedRef.current) setNote(data.suggestion);
+          return;
         }
+        setNoSuggestionReason(NO_SUGGESTION_TEXT[data.reason] ?? null);
+        setCanRetrySuggestion(data.reason === "ai-error");
       })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoadingSuggestion(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .catch(() => {
+        setNoSuggestionReason(NO_SUGGESTION_TEXT["ai-error"]);
+        setCanRetrySuggestion(true);
+      })
+      .finally(() => setLoadingSuggestion(false));
   }, [issue.id]);
+
+  useEffect(() => {
+    loadSuggestion();
+  }, [loadSuggestion]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -203,6 +233,28 @@ export function ResolveDialog({
                 >
                   ↩️ Вернуть подсказку
                 </button>
+              )
+            ) : noSuggestionReason ? (
+              canRetrySuggestion ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoadingSuggestion(true);
+                    setNoSuggestionReason(null);
+                    setCanRetrySuggestion(false);
+                    loadSuggestion();
+                  }}
+                  className="text-[11px] text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
+                >
+                  🤖 {noSuggestionReason} — ещё раз
+                </button>
+              ) : (
+                <span
+                  title="Подсказка собирается из твоих ответов в рабочем чате по этому тикету"
+                  className="text-[11px] text-slate-400"
+                >
+                  🤖 {noSuggestionReason}
+                </span>
               )
             ) : null}
           </div>

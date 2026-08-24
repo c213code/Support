@@ -94,12 +94,27 @@ export function extractAuthorName(
 // Telegram user id (OWN_AGENT_TELEGRAM_IDS="123,456" в env) — в отличие от
 // имени/фамилии id никогда не меняется и не зависит от эмодзи/оформления
 // профиля, так что это надёжнее текстового сравнения.
+//
+// Если переменная не задана, берём те же id из AGENT_TELEGRAM_IDS
+// ("Ерош:123,Алпа:456" — см. lib/agentTelegram.ts): это по определению те
+// же самые люди, просто с именами. Без фолбэка забытая OWN_AGENT_TELEGRAM_IDS
+// молча ломает всё, что опирается на "это наш агент": сообщения агентов
+// заводят тикеты как клиентские, а подсказка "как решили" не находит в чате
+// ни одной своей реплики. Причём выглядит это не как ошибка, а как будто
+// фичи просто не работают.
 function ownAgentTelegramIds(): Set<number> {
-  const raw = process.env.OWN_AGENT_TELEGRAM_IDS ?? "";
-  return new Set(
-    raw
+  const explicit = new Set(
+    (process.env.OWN_AGENT_TELEGRAM_IDS ?? "")
       .split(",")
       .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n !== 0)
+  );
+  if (explicit.size > 0) return explicit;
+
+  return new Set(
+    (process.env.AGENT_TELEGRAM_IDS ?? "")
+      .split(",")
+      .map((pair) => Number(pair.split(":")[1]?.trim()))
       .filter((n) => Number.isFinite(n) && n !== 0)
   );
 }
