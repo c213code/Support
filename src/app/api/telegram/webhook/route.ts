@@ -19,7 +19,13 @@ import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import { detectAgentIntent } from "@/lib/agentIntent";
 import { bestSolution } from "@/lib/solutionLibrary";
-import { pickResolvedWord, classifyAckAsk, isSameRequestFollowUp } from "@/lib/ai";
+import {
+  pickResolvedWord,
+  classifyAckAsk,
+  classifySituation,
+  isSameRequestFollowUp,
+} from "@/lib/ai";
+import { buildSituationAck, missingSlotsFor } from "@/lib/situations";
 import {
   buildAckText,
   buildResolvedText,
@@ -132,7 +138,7 @@ async function sendNotePrompt(
 }
 
 // Шлёт в рабочую группу единственный автоответ, утверждающий факт:
-// "Жөңделді"/"Өзгертілді". Слово выбирает ИИ по сути тикета, язык — по
+// "Жөнделді"/"Өзгертілді". Слово выбирает ИИ по сути тикета, язык — по
 // исходному сообщению. Вызывается только по явному нажатию человека.
 async function notifyResolvedInChat(issueId: string): Promise<boolean> {
   const issue = await prisma.issue.findUnique({
@@ -680,6 +686,30 @@ async function decideAskKind(incomingText: string): Promise<AckAskKind> {
   return aiDecision ?? "contact";
 }
 
+// Текст подтверждения приёма. Основной путь — разбор по каталогу ситуаций
+// (см. lib/situations.ts): он выбирает обещание под суть просьбы
+// ("өзгертілгенде кб береміз" на правку, "ашылғанда кб береміз" на доступ)
+// и просит ровно то, чего не хватает, вместо почты по умолчанию.
+//
+// Откат — прежний троичный ACK. Он срабатывает, когда тогл выключен или
+// модель не ответила: без ИИ бот всё равно должен подтвердить приём, просто
+// более общими словами.
+async function buildAckMessage(incomingText: string): Promise<string> {
+  if (await isAiAskEnabled()) {
+    const result = await classifySituation(incomingText);
+    if (result) {
+      const missing = missingSlotsFor(
+        result.situation,
+        result.missing,
+        incomingText
+      );
+      return buildSituationAck(incomingText, result.situation, missing);
+    }
+  }
+
+  return buildAckText(incomingText, new Date(), await decideAskKind(incomingText));
+}
+
 async function sendAcknowledgement(
   issueId: string,
   chatId: string,
@@ -689,14 +719,12 @@ async function sendAcknowledgement(
   if (await hasBotReplied(issueId, "ACK")) return;
   if (await agentAlreadyReplied(chatId, messageId, ownAgentTelegramIdList())) return;
 
-  const askKind = await decideAskKind(incomingText);
-
   await sendBotReply({
     issueId,
     chatId,
     replyToMessageId: messageId,
     kind: "ACK",
-    text: buildAckText(incomingText, new Date(), askKind),
+    text: await buildAckMessage(incomingText),
   });
 }
 
