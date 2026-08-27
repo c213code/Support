@@ -11,6 +11,11 @@ export type ToggleSpec = {
   // Цвет включённого состояния — совпадает с тем, чем эта фича отмечена в
   // остальном интерфейсе, чтобы связь читалась без подписи.
   color: string;
+  // Настройка включена, но не работает, потому что выключена та, поверх
+  // которой она надстроена. Без этой строки список читается как четыре
+  // равноправные фичи, и включённый тумблер, который ничего не делает,
+  // выглядит поломкой.
+  note?: string | null;
 };
 
 // Настройки-переключатели одним меню, а не россыпью тумблеров в шапке.
@@ -87,6 +92,11 @@ export function BotSettingsMenu({ toggles }: { toggles: ToggleSpec[] }) {
                 <span className="block text-[11px] leading-snug text-slate-400">
                   {t.hint}
                 </span>
+                {t.note && (
+                  <span className="mt-0.5 block text-[11px] font-medium leading-snug text-amber-600">
+                    {t.note}
+                  </span>
+                )}
               </span>
             </button>
           ))}
