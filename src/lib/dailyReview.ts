@@ -56,6 +56,12 @@ export type DailyReviewResult =
 // (`generateReportText` — то же, что строится на сайте) — иначе "ревью"
 // было бы вслепую: агент видел бы только количество тикетов, а не то, что
 // реально уйдёт в чат с боссами.
+// Столько тикет должен простоять без движения, чтобы попасть в
+// напоминание. Совпадает с порогом жёлтой пометки "⏳ N ч" на доске
+// (KanbanBoard.tsx) — один и тот же признак не должен считаться по-разному
+// в двух местах.
+const STALL_HOURS = 3;
+
 export async function buildReviewSummary(
   reportDate: string
 ): Promise<{ text: string; keyboard: InlineKeyboard } | null> {
@@ -79,9 +85,21 @@ export async function buildReviewSummary(
   const body =
     reportText ||
     "Пока нечего показать — все тикеты ещё «Отправлено», статус по ним не выставлен.";
+  // Тикеты, которые давно стоят в работе и молчат. Статус двигается по
+  // репликам в чате, а там о начале работы говорят чаще, чем о конце, —
+  // значит часть таких уже сделана, и разбор стоит начинать с них.
+  const stalled = issues.filter(
+    (i) =>
+      (i.status === "IN_PROGRESS" || i.status === "PENDING") &&
+      Date.now() - i.updatedAt.getTime() >= STALL_HOURS * 3_600_000
+  ).length;
+
   const header = [
     `🌙 Репорт — ${reportDate}`,
     `📨 Отправлено: ${sentCount} · 🔄 В работе/Пендинг/Передано: ${activeCount} · ✅ Решено: ${resolvedCount}`,
+    ...(stalled > 0
+      ? [`⏳ Висят в работе больше ${STALL_HOURS} ч: ${stalled} — может, уже сделано?`]
+      : []),
     "",
     "Вот что уйдёт в группу:",
     "",

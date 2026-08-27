@@ -19,12 +19,14 @@ import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import { detectAgentIntent } from "@/lib/agentIntent";
 import { resolveAgentTarget, type AgentTarget } from "@/lib/agentThread";
+import { collectResolutionContext } from "@/lib/resolutionNote";
 import { bestSolution } from "@/lib/solutionLibrary";
 import {
   pickResolvedWord,
   classifyAckAsk,
   classifySituation,
   isSameRequestFollowUp,
+  summarizeResolutionNote,
 } from "@/lib/ai";
 import { buildSituationAck, missingSlotsFor } from "@/lib/situations";
 import {
@@ -67,6 +69,7 @@ import {
   NOTIFY_RESOLVED_PREFIX,
   AGENT_TARGET_PREFIX,
   CONFIRM_RESOLVED_PREFIX,
+  RESOLVE_WITH_DRAFT_PREFIX,
   SOLVE_LIKE_PREFIX,
   BROADCAST_SEND_PREFIX,
   BROADCAST_CANCEL_PREFIX,
@@ -336,6 +339,45 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       "RESOLVED",
       false
     );
+    return;
+  }
+
+  // "Решено, с этой заметкой" — закрытие в одно нажатие. Текст берём из
+  // самого сообщения, а не пересчитываем моделью заново: человек нажимает
+  // кнопку, глядя на конкретную формулировку, и закрыть тикет чем-то
+  // другим — значит подменить то, с чем он согласился (а на повторный
+  // вызов Groq может ещё и ответить иначе или упереться в квоту).
+  if (data.startsWith(RESOLVE_WITH_DRAFT_PREFIX)) {
+    const issueId = data.slice(RESOLVE_WITH_DRAFT_PREFIX.length);
+    const shown = query.message?.text ?? "";
+    const note = shown.split(RESOLVED_NOTE_LABEL)[1]?.trim().replace(/^«|»$/g, "");
+    if (!note) {
+      await answerCallbackQuery(query.id, "Не нашёл заметку — напиши свою", true);
+      return;
+    }
+
+    const issue = await prisma.issue.findUnique({
+      where: { id: issueId },
+      select: { status: true },
+    });
+    if (!issue) {
+      await answerCallbackQuery(query.id, "Тикет не найден", true);
+      return;
+    }
+
+    await prisma.issue.update({
+      where: { id: issueId },
+      data: { status: "RESOLVED", note },
+    });
+    await answerCallbackQuery(query.id, "✅ Решено");
+    // Кнопки убираем: тикет закрыт, второе нажатие уже ничего не значит.
+    if (query.message) {
+      await editMessageText(
+        query.message.chat.id,
+        query.message.message_id,
+        `${shown}\n\n✅ Отмечено решённым`
+      );
+    }
     return;
   }
 
@@ -792,6 +834,39 @@ async function sendAcknowledgement(
 // тикет. Если кандидатов несколько и реплая нет — молчим: ошибиться
 // статусом хуже, чем не проставить его вовсе, потому что статус уходит в
 // репорт боссам.
+// Метка, по которой заметка вытаскивается обратно из текста сообщения при
+// нажатии кнопки. Держать её здесь, а не собирать строку дважды: разъедутся
+// — и тикет закроется не тем текстом, который человек видел.
+const RESOLVED_NOTE_LABEL = "Заметка для репорта:";
+
+// Черновик заметки "как решили" из того, что агент уже написал в чате.
+// Ровно та же связка, что в модалке "Как решили?" на сайте
+// (api/issues/[id]/suggest-note): тот же тогл, тот же сбор контекста, то же
+// правило дописывать имя кодом, а не моделью.
+async function buildResolvedNoteDraft(
+  issueId: string,
+  agentName: string | null
+): Promise<string | null> {
+  if (!(await isAiCleaningEnabled())) return null;
+
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { description: true },
+  });
+  if (!issue) return null;
+
+  const context = await collectResolutionContext(issueId);
+  if (!context.ok) return null;
+
+  const summary = await summarizeResolutionNote(
+    issue.description,
+    context.context.agentTexts
+  );
+  if (!summary.ok) return null;
+
+  return agentName ? `${agentName} шешті, ${summary.note}` : summary.note;
+}
+
 async function applyAgentIntent(
   message: TelegramMessagePayload,
   chatId: string,
@@ -836,22 +911,49 @@ async function applyAgentIntent(
   const actorName =
     message.from?.id != null ? telegramIdToAgent(message.from.id) : null;
 
+
   // "Решено" молча не ставим: оно уходит в репорт боссам, а само
   // "жөңделді" — плохая заметка. Спрашиваем в личке у того, кто написал,
   // и заодно просим нормальный текст.
   if (intent.needsConfirmation) {
     if (message.from?.id == null) return;
+
+    // Заметка из собственных слов агента в чате. Без неё закрытие стоит
+    // двух шагов (нажать "да", потом написать текст реплаем), и тикет
+    // застревает в "В работе" не потому, что работа не сделана, а потому
+    // что её лень оформлять. По выгрузке слово о готовности звучит в чате
+    // лишь в трети разговоров — остальное доделывают молча, и вот эта
+    // разница и оседает на доске.
+    const draft = await buildResolvedNoteDraft(issueId, actorName);
+    const link = issue.telegramLink ?? "";
     await sendTelegramMessage(
       message.from.id,
-      `Похоже, этот тикет решён — отметить?\n\n${issue.telegramLink ?? ""}`.trim(),
-      [
-        [
-          {
-            text: "✅ Да, решено",
-            callback_data: `${CONFIRM_RESOLVED_PREFIX}${issueId}`,
-          },
-        ],
-      ]
+      draft
+        ? `Похоже, этот тикет решён — отметить?\n\n${link}\n\n${RESOLVED_NOTE_LABEL} «${draft}»`.trim()
+        : `Похоже, этот тикет решён — отметить?\n\n${link}`.trim(),
+      draft
+        ? [
+            [
+              {
+                text: "✅ Решено, с этой заметкой",
+                callback_data: `${RESOLVE_WITH_DRAFT_PREFIX}${issueId}`,
+              },
+            ],
+            [
+              {
+                text: "✍️ Написать свою",
+                callback_data: `${CONFIRM_RESOLVED_PREFIX}${issueId}`,
+              },
+            ],
+          ]
+        : [
+            [
+              {
+                text: "✅ Да, решено",
+                callback_data: `${CONFIRM_RESOLVED_PREFIX}${issueId}`,
+              },
+            ],
+          ]
     );
     return;
   }

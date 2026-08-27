@@ -54,6 +54,25 @@ const COLUMNS: Column[] = [
   },
 ];
 
+// С какого возраста тикет в работе стоит пометить. Три часа — не срок
+// выполнения, а срок молчания: по выгрузке рабочих групп агент отвечает на
+// обращение за минуты, так что тикет, который держится в "В работе" полдня,
+// почти всегда уже сделан и просто не переставлен.
+//
+// Это прямое следствие того, что статус ставится по репликам в чате: о
+// начале работы в чате говорят ("қараймыз"), а о завершении — лишь в трети
+// разговоров. Вход в колонку дешевле выхода, и без такой пометки разница
+// копится молча.
+const STALL_HOURS = 3;
+
+function stalledHours(issue: IssueDTO): number | null {
+  if (issue.status !== "IN_PROGRESS" && issue.status !== "PENDING") return null;
+  const hours = Math.floor(
+    (Date.now() - new Date(issue.updatedAt).getTime()) / 3_600_000
+  );
+  return hours >= STALL_HOURS ? hours : null;
+}
+
 export function KanbanBoard({
   issues,
   onStatusChange,
@@ -382,6 +401,14 @@ export function KanbanBoard({
                         >
                           {STATUS_META[issue.status].emoji}{" "}
                           {STATUS_META[issue.status].label}
+                        </span>
+                      )}
+                      {stalledHours(issue) !== null && (
+                        <span
+                          title="Столько тикет висит в этом статусе. Часто это значит, что работа уже сделана, просто статус не переставили."
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                        >
+                          ⏳ {stalledHours(issue)} ч
                         </span>
                       )}
                       <Avatar name={issue.createdBy} size="sm" />

@@ -66,3 +66,7 @@ export const CONFIRM_RESOLVED_PREFIX = "confirm_resolved:";
 // статус нужен здесь же, иначе после нажатия непонятно, что делать, а
 // второй cuid в 64 байта callback_data уже не влезет.
 export const AGENT_TARGET_PREFIX = "at:";
+// "Отметить решённым вместе с заметкой, которая уже показана в сообщении".
+// Сам текст заметки в callback_data не влезает (64 байта), поэтому
+// читается из текста сообщения — см. RESOLVED_NOTE_LINE в вебхуке.
+export const RESOLVE_WITH_DRAFT_PREFIX = "rd:";
