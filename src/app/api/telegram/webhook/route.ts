@@ -18,6 +18,7 @@ import {
 import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import { detectAgentIntent } from "@/lib/agentIntent";
+import { resolveAgentTarget, type AgentTarget } from "@/lib/agentThread";
 import { bestSolution } from "@/lib/solutionLibrary";
 import {
   pickResolvedWord,
@@ -64,6 +65,7 @@ import {
   DEDUPE_MERGE_PREFIX,
   DEDUPE_SKIP_PREFIX,
   NOTIFY_RESOLVED_PREFIX,
+  AGENT_TARGET_PREFIX,
   CONFIRM_RESOLVED_PREFIX,
   SOLVE_LIKE_PREFIX,
   BROADCAST_SEND_PREFIX,
@@ -333,6 +335,59 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       "✅ Что именно сделали? Ответь на ЭТО сообщение — заметка уйдёт в репорт. Тикет:",
       "RESOLVED",
       false
+    );
+    return;
+  }
+
+  // Агент выбрал, к какому тикету относилась его реплика в группе (бот не
+  // смог понять сам — см. resolveAgentTarget). Дальше всё как обычно:
+  // "решено" идёт через запрос заметки, остальные статусы ставятся сразу.
+  if (data.startsWith(AGENT_TARGET_PREFIX)) {
+    const rest = data.slice(AGENT_TARGET_PREFIX.length);
+    const separator = rest.indexOf(":");
+    const status = rest.slice(0, separator);
+    const issueId = rest.slice(separator + 1);
+    if (!isIssueStatus(status)) {
+      await answerCallbackQuery(query.id, "Не понял статус", true);
+      return;
+    }
+
+    // Чиним нить разговора: реплика, из-за которой был задан вопрос,
+    // осталась без тикета, и следующая ("өшірілді" после "Окей, қазір")
+    // снова оказалась бы ни к чему не привязана.
+    if (query.from?.id != null) {
+      const recent = await prisma.telegramMessage.findFirst({
+        where: {
+          fromId: BigInt(query.from.id),
+          agentIssueId: null,
+          receivedAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+        },
+        select: { id: true },
+        orderBy: { receivedAt: "desc" },
+      });
+      if (recent) {
+        await prisma.telegramMessage.update({
+          where: { id: recent.id },
+          data: { agentIssueId: issueId },
+        });
+      }
+    }
+
+    if (status === "RESOLVED") {
+      await sendNotePrompt(
+        query,
+        issueId,
+        "✅ Что именно сделали? Ответь на ЭТО сообщение — заметка уйдёт в репорт. Тикет:",
+        "RESOLVED",
+        false
+      );
+      return;
+    }
+
+    await prisma.issue.update({ where: { id: issueId }, data: { status } });
+    await answerCallbackQuery(
+      query.id,
+      `${STATUS_META[status].emoji} ${STATUS_META[status].label}`
     );
     return;
   }
@@ -740,50 +795,37 @@ async function sendAcknowledgement(
 async function applyAgentIntent(
   message: TelegramMessagePayload,
   chatId: string,
-  ownText: string
+  ownText: string,
+  target: AgentTarget
 ): Promise<void> {
   if (!(await isChatIntentEnabled())) return;
 
   const intent = detectAgentIntent(ownText);
   if (!intent) return;
 
-  let issueId: string | null = null;
-  const repliedId = message.reply_to_message?.message_id;
-  if (repliedId != null) {
-    const replied = await prisma.telegramMessage.findUnique({
-      where: { chatId_messageId: { chatId, messageId: repliedId } },
-      select: { usedForIssueId: true },
-    });
-    issueId = replied?.usedForIssueId ?? null;
-  }
-
-  if (!issueId) {
-    // Тикеты этого чата ищем через сообщения, которые их породили —
-    // связь чат→тикет живёт именно там (у самого Issue есть только ссылка
-    // строкой, по ней фильтровать пришлось бы префиксом).
-    const linked = await prisma.telegramMessage.findMany({
-      where: { chatId, usedForIssueId: { not: null } },
-      select: { usedForIssueId: true },
-      orderBy: { receivedAt: "desc" },
-      take: 30,
-    });
-    const ids = Array.from(
-      new Set(linked.map((m) => m.usedForIssueId).filter((id): id is string => id !== null))
+  // Тикет ищет resolveAgentTarget: стрелка реплая → свой же разговор →
+  // ближайшее обращение выше. Раньше здесь было только первое и правило
+  // "если в чате за день открыт ровно один тикет" — из-за него реплика без
+  // Reply в Сервисе и Сату почти всегда пропадала.
+  if (target.kind === "ambiguous") {
+    // Кандидатов несколько — не гадаем. Ошибка уедет в репорт боссам,
+    // поэтому спрашиваем в личке у того, кто написал: одно нажатие вместо
+    // ручного проставления статуса вечером.
+    if (message.from?.id == null) return;
+    await sendTelegramMessage(
+      message.from.id,
+      `Ты написал «${ownText.trim().slice(0, 60)}» в группе, но не реплаем — к какому тикету это относится?`,
+      target.candidates.map((candidate) => [
+        {
+          text: `${STATUS_META[intent.status].emoji} ${candidate.description.slice(0, 55)}`,
+          callback_data: `${AGENT_TARGET_PREFIX}${intent.status}:${candidate.id}`,
+        },
+      ])
     );
-    if (ids.length === 0) return;
-
-    const open = await prisma.issue.findMany({
-      where: {
-        id: { in: ids },
-        reportDate: todayDateString(),
-        status: { in: ["SENT", "IN_PROGRESS", "PENDING"] },
-      },
-      select: { id: true },
-      take: 2,
-    });
-    if (open.length !== 1) return;
-    issueId = open[0].id;
+    return;
   }
+  if (target.kind !== "found") return;
+  const issueId = target.issueId;
 
   const issue = await prisma.issue.findUnique({
     where: { id: issueId },
@@ -1396,10 +1438,23 @@ export async function POST(request: NextRequest) {
     // archived/viewed сразу true — это не запрос, показывать во
     // "Входящих" нечего.
     const messageLink = buildMessageLink(message.chat.id, message.message_id);
+    // О каком тикете эта реплика. Считаем ДО записи, чтобы следующая
+    // реплика того же агента могла опереться на неё как на "свой
+    // разговор" (см. lib/agentThread.ts): без сохранённой связи цепочка
+    // "Окей, қазір" → "өшірілді" рассыпается на два независимых сообщения.
+    const target = await resolveAgentTarget({
+      chatId,
+      messageId: message.message_id,
+      replyToMessageId: message.reply_to_message?.message_id ?? null,
+      agentTelegramId: fromId,
+      sentAt: new Date(),
+    });
+    const targetIssueId = target.kind === "found" ? target.issueId : null;
     await prisma.telegramMessage.upsert({
       where: { chatId_messageId: { chatId, messageId: message.message_id } },
-      update: {},
+      update: { agentIssueId: targetIssueId },
       create: {
+        agentIssueId: targetIssueId,
         chatId,
         messageId: message.message_id,
         chatTitle: message.chat.title ?? null,
@@ -1417,7 +1472,7 @@ export async function POST(request: NextRequest) {
     // Реплика агента в группе — это и есть сигнал "взял в работу /
     // передал / сделал". Двигаем статус по ней, чтобы вечером не
     // проставлять заново то, что уже сделано днём.
-    await applyAgentIntent(message, chatId, text);
+    await applyAgentIntent(message, chatId, text, target);
     return NextResponse.json({ ok: true });
   }
 

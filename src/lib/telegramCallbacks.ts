@@ -61,3 +61,8 @@ export const BOT_REPLY_DELETE_PREFIX = "br_del:";
 // Подтверждение "да, это решено" на догадку бота по реплике агента в
 // группе (см. detectAgentIntent) — ведёт в тот же запрос заметки.
 export const CONFIRM_RESOLVED_PREFIX = "confirm_resolved:";
+// Выбор тикета, когда агент написал в группе без Reply и кандидатов
+// несколько (см. lib/agentThread.ts). Формат: "at:<STATUS>:<issueId>" —
+// статус нужен здесь же, иначе после нажатия непонятно, что делать, а
+// второй cuid в 64 байта callback_data уже не влезет.
+export const AGENT_TARGET_PREFIX = "at:";
