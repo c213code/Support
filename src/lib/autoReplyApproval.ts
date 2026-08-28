@@ -15,7 +15,11 @@ import {
   type SlotId,
 } from "@/lib/situations";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { AUTO_REPLY_PICK_PREFIX } from "@/lib/telegramCallbacks";
+import {
+  AUTO_REPLY_MERGE_PREFIX,
+  AUTO_REPLY_PICK_PREFIX,
+} from "@/lib/telegramCallbacks";
+import type { RelatedIssue } from "@/lib/relatedIssue";
 
 // Подтверждение автоответа в личке.
 //
@@ -100,6 +104,9 @@ export async function requestAutoReplyApproval(params: {
   targetChatId: string;
   targetMessageId: number;
   variants: string[];
+  // Похожее обращение от другого человека за последние полчаса — тогда в
+  // черновике появляется четвёртая кнопка: ответить всем одним сообщением.
+  related?: RelatedIssue | null;
 }): Promise<boolean> {
   const { issueId, groupName, incomingText, variants } = params;
   if (variants.length === 0) return false;
@@ -110,12 +117,21 @@ export async function requestAutoReplyApproval(params: {
   const numbered = variants
     .map((text, index) => `${index + 1}) ${text}`)
     .join("\n\n");
+  const related = params.related;
+  const relatedLine = related
+    ? [
+        "",
+        `🔗 Похоже на то, что писал(а) ${related.authorName ?? "кто-то"} ${related.minutesAgo} мин назад:`,
+        `«${related.description.slice(0, 140)}»`,
+      ].join("\n")
+    : "";
   const prompt = await sendTelegramMessage(
     recipientId,
     [
       `🤖 Ответить в «${groupName}»?`,
       "",
       `Обращение: ${incomingText.trim().slice(0, 300)}`,
+      relatedLine,
       "",
       numbered,
       "",
@@ -126,6 +142,16 @@ export async function requestAutoReplyApproval(params: {
         text: `✅ ${index + 1}`,
         callback_data: `${AUTO_REPLY_PICK_PREFIX}${index}`,
       })),
+      ...(related
+        ? [
+            [
+              {
+                text: "🔗 Это то же самое — ответить всем разом",
+                callback_data: `${AUTO_REPLY_MERGE_PREFIX}${related.id}`,
+              },
+            ],
+          ]
+        : []),
       [
         {
           text: "🚫 Не отвечать",

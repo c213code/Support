@@ -23,6 +23,8 @@ import {
   buildReplyVariants,
   requestAutoReplyApproval,
 } from "@/lib/autoReplyApproval";
+import { findRelatedRecentIssue } from "@/lib/relatedIssue";
+import { mergeIssueInto } from "@/lib/mergeIssue";
 import { collectResolutionContext } from "@/lib/resolutionNote";
 import { bestSolution } from "@/lib/solutionLibrary";
 import {
@@ -35,6 +37,7 @@ import {
 import { buildSituationAck, missingSlotsFor } from "@/lib/situations";
 import {
   buildAckText,
+  buildSharedAckText,
   buildResolvedText,
   buildStatusReplyText,
   hasIdentifier,
@@ -73,6 +76,7 @@ import {
   DEDUPE_SKIP_PREFIX,
   NOTIFY_RESOLVED_PREFIX,
   AGENT_TARGET_PREFIX,
+  AUTO_REPLY_MERGE_PREFIX,
   AUTO_REPLY_PICK_PREFIX,
   CONFIRM_RESOLVED_PREFIX,
   RESOLVE_WITH_DRAFT_PREFIX,
@@ -328,6 +332,61 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       "✅ Что именно сделали? Ответь на ЭТО сообщение — заметка уйдёт в репорт. Тикет:",
       "RESOLVED",
       false
+    );
+    return;
+  }
+
+  // "Это то же самое" — склеиваем черновик с уже открытым тикетом и
+  // отвечаем всем одним сообщением вместо трёх одинаковых.
+  if (data.startsWith(AUTO_REPLY_MERGE_PREFIX)) {
+    if (!query.message) return;
+    const targetIssueId = data.slice(AUTO_REPLY_MERGE_PREFIX.length);
+    const draft = await prisma.pendingAutoReply.findUnique({
+      where: {
+        chatId_messageId: {
+          chatId: String(query.message.chat.id),
+          messageId: query.message.message_id,
+        },
+      },
+    });
+    if (!draft) {
+      await answerCallbackQuery(query.id, "Черновик уже не актуален", true);
+      return;
+    }
+
+    const actorName = telegramIdToAgent(query.from.id);
+    // Ссылки съезжаются в один тикет, сообщения перецепляются туда же,
+    // лишний тикет исчезает — та же операция, что "объединить" на сайте.
+    const merged = await mergeIssueInto(
+      draft.issueId,
+      targetIssueId,
+      actorName ?? AUTO_ISSUE_CREATOR
+    );
+    // Черновик удаляем после склейки: он ссылается на исчезнувший тикет
+    // (каскадом он бы удалился и сам, но полагаться на это здесь незачем).
+    await prisma.pendingAutoReply
+      .delete({ where: { id: draft.id } })
+      .catch(() => {});
+    if (!merged) {
+      await answerCallbackQuery(query.id, "Не нашёл тикет для объединения", true);
+      return;
+    }
+
+    const text = buildSharedAckText(draft.variants[0] ?? "");
+    await sendBotReply({
+      issueId: merged.id,
+      chatId: draft.targetChatId,
+      // Отвечаем на последнее сообщение: его писали последним, и ответ
+      // увидят все, кто присоединился к жалобе.
+      replyToMessageId: draft.targetMessageId,
+      kind: "ACK",
+      text,
+    });
+    await answerCallbackQuery(query.id, "🔗 Объединено, ответил разом");
+    await editMessageText(
+      query.message.chat.id,
+      query.message.message_id,
+      `${query.message.text ?? ""}\n\n🔗 Объединено с прошлым обращением. Отправлено: ${text}`
     );
     return;
   }
@@ -891,8 +950,13 @@ async function sendAcknowledgement(
   chatId: string,
   messageId: number,
   incomingText: string,
-  groupName: string
+  groupName: string,
+  authorId: bigint | null
 ): Promise<void> {
+  // Главный рубильник проверяем здесь, а не только внутри sendBotReply:
+  // режим подтверждения пишет в личку раньше него, и без этой строки
+  // выключённые автоответы всё равно слали бы черновики.
+  if (!(await isAutoReplyEnabled())) return;
   if (await hasBotReplied(issueId, "ACK")) return;
   if (await agentAlreadyReplied(chatId, messageId, ownAgentTelegramIdList())) return;
 
@@ -901,6 +965,17 @@ async function sendAcknowledgement(
   // Режим подтверждения: в группу сейчас не пишем вовсе — показываем
   // черновик дежурному в личку, и ответ уходит только по его кнопке.
   if (await isAutoReplyConfirmEnabled()) {
+    // Про одну и ту же поломку часто пишут несколько человек подряд. Если
+    // похожее обращение уже есть, предлагаем ответить всем разом — но
+    // только предлагаем: склейка удаляет тикет, а однотипные по форме
+    // заявки разных учеников выглядят похоже, не будучи одним случаем.
+    const related = await findRelatedRecentIssue({
+      chatId,
+      issueId,
+      description: incomingText,
+      authorId,
+    });
+
     await requestAutoReplyApproval({
       issueId,
       groupName,
@@ -908,6 +983,7 @@ async function sendAcknowledgement(
       targetChatId: chatId,
       targetMessageId: messageId,
       variants,
+      related,
     });
     return;
   }
@@ -1783,7 +1859,8 @@ export async function POST(request: NextRequest) {
           chatId,
           message.message_id,
           mergedOwn,
-          issue.groupName
+          issue.groupName,
+          fromId
         );
         linkedIssueId = issue.id;
       }
@@ -1887,7 +1964,8 @@ export async function POST(request: NextRequest) {
         chatId,
         message.message_id,
         text,
-        issue.groupName
+        issue.groupName,
+        fromId
       );
     }
   }

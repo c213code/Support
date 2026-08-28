@@ -75,3 +75,7 @@ export const RESOLVE_WITH_DRAFT_PREFIX = "rd:";
 // сообщение с кнопками (PendingAutoReply ищется по chatId+messageId), так
 // что в callback_data остаётся только выбор.
 export const AUTO_REPLY_PICK_PREFIX = "ar:";
+// "Это то же самое, что уже писали" — склеить черновик с найденным тикетом
+// и ответить всем одним сообщением. В data лежит id тикета-получателя;
+// откуда склеивать, известно из самого сообщения с кнопками.
+export const AUTO_REPLY_MERGE_PREFIX = "arm:";

@@ -63,6 +63,25 @@ function stems(text: string): Set<string> {
   );
 }
 
+// Похожесть по основам слов. Обычная similarity() сравнивает слова
+// целиком, и в казахском это слишком строго для разных людей, пишущих об
+// одной поломке: "квал тесттер шықпайды" и "КВАЛЛ курс жоқ болып тұр,
+// тесттері шықпай тұр" — про одно и то же, а общих слов почти нет.
+// Отсечь окончания достаточно, чтобы такие пары находились.
+export function stemSimilarity(a: string, b: string): number {
+  const stemsA = new Set(
+    [...stems(a)].filter((s) => s.length >= 3 && !STOP_WORDS.has(s))
+  );
+  const stemsB = new Set(
+    [...stems(b)].filter((s) => s.length >= 3 && !STOP_WORDS.has(s))
+  );
+  if (stemsA.size === 0 || stemsB.size === 0) return 0;
+
+  let shared = 0;
+  for (const stem of stemsA) if (stemsB.has(stem)) shared++;
+  return shared / (stemsA.size + stemsB.size - shared);
+}
+
 // Отличается ли переформулировка от исходника только косметикой —
 // окончаниями, регистром, пунктуацией.
 //

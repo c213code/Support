@@ -85,6 +85,23 @@ const ACK: Record<ReplyLanguage, string> = {
   ru: "хорошо, посмотрим и дадим обратную связь",
 };
 
+// Ответ, когда про одну и ту же поломку написали несколько человек. Он
+// адресован всем сразу, поэтому не обещает разобраться с чьим-то
+// конкретным случаем и не просит данных: данные тут ничего не решают —
+// сломано у всех.
+const SHARED_ACK: Record<ReplyLanguage, string> = {
+  kk: "жақсы, бұл мәселе бойынша қарап жатырмыз — шешілгенде осында хабарлаймыз",
+  ru: "хорошо, по этой проблеме уже смотрим — как решится, напишем здесь",
+};
+
+export function buildSharedAckText(
+  incomingText: string,
+  now: Date = new Date()
+): string {
+  const language = pickLanguage(incomingText);
+  return `${greeting(language, now)}, ${SHARED_ACK[language]}`;
+}
+
 export type AckAskKind = "none" | "contact" | "assignment";
 
 // Подтверждение приёма: приветствие + "посмотрим" и, если в обращении не
