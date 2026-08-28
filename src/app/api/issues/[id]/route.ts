@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
-import { isIssueStatus, type IssueStatus } from "@/lib/status";
+import { isIssueStatus } from "@/lib/status";
 import { isEscalationTeam } from "@/lib/escalation";
 import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
-import { reactToStatusChange } from "@/lib/issueStatus";
+import { changeIssueStatus } from "@/lib/issueStatus";
 import { cleanTicketDescription } from "@/lib/textClean";
 
 type Params = { params: Promise<{ id: string }> };
@@ -57,24 +57,23 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     data.createdBy = identity.name;
   }
 
-  const issue = await prisma.issue.update({ where: { id }, data });
-
-  // Смена статуса — реакцией на исходное сообщение в Telegram (👀 взяли в
-  // работу/пендинг/передали, 👍 решили), чтобы было видно прямо в чате.
-  // "Отправлено" реакции не ставит (см. STATUS_META.SENT.reactionEmoji).
-  // Та же функция используется при смене статуса inline-кнопкой в
-  // Telegram (см. handleCallbackQuery в вебхуке) — чтобы оба места не
-  // разъезжались логикой.
-  if (typeof data.status === "string" && existing) {
-    await reactToStatusChange(
-      existing.status,
-      data.status as IssueStatus,
-      existing.telegramLink,
-      "app",
-      id
-    );
+  // Статус здесь не пишем: он идёт через changeIssueStatus вместе с
+  // реакцией в чате и записью в историю. Остальные поля — обычной правкой.
+  const { status: nextStatus, ...fields } = data;
+  if (Object.keys(fields).length > 0) {
+    await prisma.issue.update({ where: { id }, data: fields });
   }
 
+  if (isIssueStatus(nextStatus)) {
+    await changeIssueStatus({
+      issueId: id,
+      status: nextStatus,
+      actor: identity?.name ?? null,
+      source: "app",
+    });
+  }
+
+  const issue = await prisma.issue.findUnique({ where: { id } });
   return NextResponse.json({ issue });
 }
 

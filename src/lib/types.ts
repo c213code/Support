@@ -32,6 +32,9 @@ export type IssueDTO = {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  // Когда статус менялся в последний раз — им меряется "сколько тикет
+  // висит". Не updatedAt: тот сдвигается от любой правки текста.
+  statusChangedAt: string;
   botReplies?: BotReplyDTO[];
   // Почта/телефон/вложение из исходных сообщений — только для карточки,
   // в текст репорта не попадают (см. src/lib/ticketHints.ts).

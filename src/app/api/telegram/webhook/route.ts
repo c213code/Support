@@ -6,7 +6,7 @@ import { isNoiseOnly } from "@/lib/textClean";
 import { buildDescription } from "@/lib/ticketDescription";
 import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
 import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
-import { reactToStatusChange } from "@/lib/issueStatus";
+import { changeIssueStatus } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { SHARED_AGENT } from "@/lib/agents";
 import {
@@ -195,19 +195,14 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
     // числится за ботом, первое же действие живого агента (тут — клик по
     // кнопке) переоформляет автора на него. Кто именно нажал, узнаём по
     // Telegram id из callback_query, а не из тела запроса.
-    const actorName = telegramIdToAgent(query.from.id);
-    await prisma.issue.update({
-      where: { id: issueId },
-      data: {
-        status,
-        ...(actorName && existing.createdBy === AUTO_ISSUE_CREATOR
-          ? { createdBy: actorName }
-          : {}),
-      },
-    });
     // "app": кнопку нажали в разборе, в рабочем чате об этом ещё не
     // знают — значит бот там отвечает (если автоответы включены).
-    await reactToStatusChange(existing.status, status, existing.telegramLink, "app", issueId);
+    await changeIssueStatus({
+      issueId,
+      status,
+      actor: telegramIdToAgent(query.from.id),
+      source: "app",
+    });
     await answerCallbackQuery(
       query.id,
       `Статус: ${STATUS_META[status].emoji} ${STATUS_META[status].label}`
@@ -265,24 +260,13 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       return;
     }
 
-    const actorName = telegramIdToAgent(query.from.id);
-    await prisma.issue.update({
-      where: { id: issueId },
-      data: {
-        status: "ESCALATED",
-        escalatedTeam: team,
-        ...(actorName && existing.createdBy === AUTO_ISSUE_CREATOR
-          ? { createdBy: actorName }
-          : {}),
-      },
+    await changeIssueStatus({
+      issueId,
+      status: "ESCALATED",
+      escalatedTeam: team,
+      actor: telegramIdToAgent(query.from.id),
+      source: "app",
     });
-    await reactToStatusChange(
-      existing.status,
-      "ESCALATED",
-      existing.telegramLink,
-      "app",
-      issueId
-    );
     await answerCallbackQuery(query.id, `Передано: ${team} ⚠️`);
     if (query.message) {
       // Это сообщение — только клавиатура выбора команды, использована,
@@ -365,9 +349,15 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       return;
     }
 
-    await prisma.issue.update({
-      where: { id: issueId },
-      data: { status: "RESOLVED", note },
+    await changeIssueStatus({
+      issueId,
+      status: "RESOLVED",
+      note,
+      actor: query.from?.id != null ? telegramIdToAgent(query.from.id) : null,
+      // "chat": слово о готовности агент уже сказал в группе сам, бот там
+      // повторять не должен — это и есть догадка, из которой выросло всё
+      // это подтверждение.
+      source: "chat",
     });
     await answerCallbackQuery(query.id, "✅ Решено");
     // Кнопки убираем: тикет закрыт, второе нажатие уже ничего не значит.
@@ -426,7 +416,13 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       return;
     }
 
-    await prisma.issue.update({ where: { id: issueId }, data: { status } });
+    await changeIssueStatus({
+      issueId,
+      status,
+      actor: query.from?.id != null ? telegramIdToAgent(query.from.id) : null,
+      // Статус двигает реплика, уже прозвучавшая в группе.
+      source: "chat",
+    });
     await answerCallbackQuery(
       query.id,
       `${STATUS_META[status].emoji} ${STATUS_META[status].label}`
@@ -456,17 +452,13 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
     }
 
     const actorName = telegramIdToAgent(query.from.id);
-    await prisma.issue.update({
-      where: { id: issueId },
-      data: {
-        status: "RESOLVED",
-        note: suggestion.note,
-        ...(actorName && issue.createdBy === AUTO_ISSUE_CREATOR
-          ? { createdBy: actorName }
-          : {}),
-      },
+    await changeIssueStatus({
+      issueId,
+      status: "RESOLVED",
+      note: suggestion.note,
+      actor: actorName,
+      source: "app",
     });
-    await reactToStatusChange(issue.status, "RESOLVED", issue.telegramLink, "app", issueId);
     await answerCallbackQuery(query.id, `✅ Решено: ${suggestion.note}`);
 
     // Как и у обычного "Решено": в рабочем чате об этом ещё не знают,
@@ -958,24 +950,14 @@ async function applyAgentIntent(
     return;
   }
 
-  await prisma.issue.update({
-    where: { id: issueId },
-    data: {
-      status: intent.status,
-      ...(actorName && issue.createdBy === AUTO_ISSUE_CREATOR
-        ? { createdBy: actorName }
-        : {}),
-    },
-  });
   // source: "chat" — в группе агент уже всё сказал сам, повторять за ним
   // не нужно; ставим только реакцию на исходном сообщении.
-  await reactToStatusChange(
-    issue.status,
-    intent.status,
-    issue.telegramLink,
-    "chat",
-    issueId
-  );
+  await changeIssueStatus({
+    issueId,
+    status: intent.status,
+    actor: actorName,
+    source: "chat",
+  });
 }
 
 // ATTACH_LINK_POLICY — чем "привязка сообщения к тикету" отличается от
@@ -1155,29 +1137,34 @@ async function attachFollowUpToTicket(
         viewed: true,
       },
     }),
-    prisma.issue.update({
-      where: { id: issue.id },
-      data: {
-        ...(wasResolved
-          ? {
-              status: "SENT" as const,
-              // Не затираем прежнюю заметку (там могло быть, что именно
-              // делали) — дописываем поверх, чтобы было видно обе части
-              // истории.
-              note: issue.note
-                ? `${issue.note} → жауап берілмеді, қайта хабарласты`
-                : "Жауап берілмеді, қайта хабарласты",
-            }
-          : {}),
-      },
-    }),
   ]);
+
+  // Тикет считался решённым, а человек написал снова — возвращаем в
+  // "Отправлено". Через ту же точку входа, что и остальные смены статуса:
+  // раньше этот путь шёл мимо неё, и в истории такой возврат не оставлял
+  // следа, хотя это самый показательный случай в отчёте — «закрыли, а
+  // проблема осталась».
+  if (wasResolved) {
+    await changeIssueStatus({
+      issueId: issue.id,
+      status: "SENT",
+      // Не затираем прежнюю заметку (там могло быть, что именно делали) —
+      // дописываем поверх, чтобы было видно обе части истории.
+      note: issue.note
+        ? `${issue.note} → жауап берілмеді, қайта хабарласты`
+        : "Жауап берілмеді, қайта хабарласты",
+      actor: null,
+      // "chat": ответ в группу этот путь отправляет сам, ниже, — и не
+      // реплаем на исходное обращение, а на новое сообщение человека.
+      source: "chat",
+    });
+  }
 
   // Написали повторно по тому, что считалось решённым, — человек пишет
   // второй раз именно потому, что ему не ответили, и молчание здесь и есть
-  // сама проблема. Этот путь меняет статус в обход reactToStatusChange,
-  // поэтому ответ отправляем явно, иначе самый ценный случай остался бы
-  // единственным без ответа.
+  // сама проблема. Ответ отправляем здесь явно: reactToStatusChange
+  // отвечает реплаем на исходное обращение, а тут нужно ответить на новое
+  // сообщение — то, которым человек напомнил о себе.
   if (wasResolved) {
     const language = pickLanguage(ownText);
     const text = buildStatusReplyText("SENT", language);
@@ -1475,24 +1462,19 @@ export async function POST(request: NextRequest) {
       if (issue) {
         const actorName =
           message.from?.id != null ? telegramIdToAgent(message.from.id) : null;
-        await prisma.issue.update({
-          where: { id: pending.issueId },
-          data: {
-            note: text.trim(),
-            ...(pending.targetStatus ? { status: pending.targetStatus } : {}),
-            ...(actorName && issue.createdBy === AUTO_ISSUE_CREATOR
-              ? { createdBy: actorName }
-              : {}),
-          },
-        });
         if (pending.targetStatus) {
-          await reactToStatusChange(
-            issue.status,
-            pending.targetStatus,
-            issue.telegramLink,
-            "app",
-            pending.issueId
-          );
+          await changeIssueStatus({
+            issueId: pending.issueId,
+            status: pending.targetStatus,
+            note: text.trim(),
+            actor: actorName,
+            source: "app",
+          });
+        } else {
+          await prisma.issue.update({
+            where: { id: pending.issueId },
+            data: { note: text.trim() },
+          });
         }
         // Решили из разбора — в рабочем чате об этом ещё не знают, поэтому
         // предлагаем сообщить туда одной кнопкой. Если решение пришло с

@@ -3,6 +3,7 @@ import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { setMessageReaction } from "@/lib/telegram";
 import { buildStatusReplyText, pickLanguage } from "@/lib/autoReply";
 import { sendBotReply, type BotReplyKind } from "@/lib/botReply";
+import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
 
 // Откуда пришла смена статуса. Различать обязательно: если статус
 // изменился потому, что агент сам написал в группу ("әріптестеріме
@@ -57,4 +58,86 @@ export async function reactToStatusChange(
     kind: nextStatus as BotReplyKind,
     text,
   });
+}
+
+// Единственное место, где меняется статус тикета.
+//
+// До него смена статуса была рассыпана по восьми местам, и каждое должно
+// было помнить три вещи разом: обновить сам статус, переоформить автора с
+// "Бота" на живого агента и позвать reactToStatusChange с правильным
+// source. Забыть любую из них ничего не ломало заметно — просто где-то не
+// появлялась реакция, где-то тикет навсегда оставался за ботом, а один
+// путь и вовсе был помечен в коде как "меняет статус в обход".
+//
+// Теперь порядок один и записан один раз. Заодно отсюда, и только отсюда,
+// пишется история статусов (IssueEvent) и время последней смены
+// (statusChangedAt) — иначе история была бы полна ровно настолько,
+// насколько внимательны все вызывающие.
+export type StatusChangeResult =
+  | { ok: false; reason: "not-found" }
+  | { ok: true; previous: IssueStatus; changed: boolean };
+
+export async function changeIssueStatus(params: {
+  issueId: string;
+  status: IssueStatus;
+  // Кто меняет: имя агента либо null, если действие не привязано к
+  // человеку (например, автоматика вебхука).
+  actor: string | null;
+  source: StatusChangeSource;
+  // Поля, которые в этих же местах меняются вместе со статусом.
+  note?: string | null;
+  escalatedTeam?: string | null;
+  escalatedAssignee?: string | null;
+}): Promise<StatusChangeResult> {
+  const { issueId, status, actor, source } = params;
+
+  const existing = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { status: true, telegramLink: true, createdBy: true },
+  });
+  if (!existing) return { ok: false, reason: "not-found" };
+
+  const changed = existing.status !== status;
+
+  await prisma.issue.update({
+    where: { id: issueId },
+    data: {
+      status,
+      ...(changed ? { statusChangedAt: new Date() } : {}),
+      ...(params.note !== undefined ? { note: params.note } : {}),
+      ...(params.escalatedTeam !== undefined
+        ? { escalatedTeam: params.escalatedTeam }
+        : {}),
+      ...(params.escalatedAssignee !== undefined
+        ? { escalatedAssignee: params.escalatedAssignee }
+        : {}),
+      // Авто-тикет числится за ботом ровно до первого действия живого
+      // агента — дальше он его.
+      ...(actor && existing.createdBy === AUTO_ISSUE_CREATOR
+        ? { createdBy: actor }
+        : {}),
+    },
+  });
+
+  if (!changed) return { ok: true, previous: existing.status, changed: false };
+
+  await prisma.issueEvent.create({
+    data: {
+      issueId,
+      from: existing.status,
+      to: status,
+      actor: actor ?? AUTO_ISSUE_CREATOR,
+      source,
+    },
+  });
+
+  await reactToStatusChange(
+    existing.status,
+    status,
+    existing.telegramLink,
+    source,
+    issueId
+  );
+
+  return { ok: true, previous: existing.status, changed: true };
 }

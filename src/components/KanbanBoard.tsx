@@ -63,12 +63,16 @@ const COLUMNS: Column[] = [
 // начале работы в чате говорят ("қараймыз"), а о завершении — лишь в трети
 // разговоров. Вход в колонку дешевле выхода, и без такой пометки разница
 // копится молча.
+//
+// Считается по statusChangedAt, а не updatedAt: последний обновляется от
+// любой правки — поправили описание, ИИ переписал текст, автор сменился с
+// "Бота" на живого агента — и счётчик обнулялся, хотя статус не двигался.
 const STALL_HOURS = 3;
 
 function stalledHours(issue: IssueDTO): number | null {
   if (issue.status !== "IN_PROGRESS" && issue.status !== "PENDING") return null;
   const hours = Math.floor(
-    (Date.now() - new Date(issue.updatedAt).getTime()) / 3_600_000
+    (Date.now() - new Date(issue.statusChangedAt).getTime()) / 3_600_000
   );
   return hours >= STALL_HOURS ? hours : null;
 }

@@ -54,6 +54,7 @@ model TelegramMessage {
   // там лежат сообщения, ИЗ которых состоит обращение (их текст идёт в
   // подсказки и в описание), а здесь — то, что мы САМИ сказали по нему.
   agentIssueId     String?
+  agentIssue       Issue?  @relation("issueAgentReply", fields: [agentIssueId], references: [id], onDelete: SetNull)
   // На какое сообщение этого чата отвечали (Telegram Reply). Нужно, чтобы
   // потом, уже вне момента доставки, найти реплику агента, относящуюся к
   // конкретному тикету: "жасалды" в ответ на сообщение с проблемой — это и
@@ -66,6 +67,10 @@ model TelegramMessage {
   // Просмотрено ли сообщение на сайте — для индикатора "новое/просмотрено"
   viewed        Boolean  @default(false)
   usedForIssueId String?
+  // SetNull, а не каскад: сообщение остаётся во "Входящих" и его можно
+  // завести заново. Раньше это делалось руками в DELETE /api/issues/[id]
+  // с комментарием "внешнего ключа нет, чистим сами".
+  usedForIssue   Issue?  @relation("issueSource", fields: [usedForIssueId], references: [id], onDelete: SetNull)
   receivedAt    DateTime @default(now())
 
   @@unique([chatId, messageId])
@@ -73,6 +78,9 @@ model TelegramMessage {
   // Окно чата за последние минуты — по нему ищется тикет, к которому
   // относится реплика агента, написанная без Reply.
   @@index([chatId, receivedAt])
+  // По этим полям ходят сбор заметки, слияние тикетов и удаление тикета.
+  @@index([usedForIssueId])
+  @@index([agentIssueId])
 }
 
 // Единственная строка (id всегда "singleton") с глобальными переключателями
@@ -114,6 +122,10 @@ model AppSetting {
 // message_id и только в течение 48 часов — см. src/lib/botReply.ts).
 model BotReply {
   id        String   @id @default(cuid())
+  // Каскад: удалили тикет — ответы бота по нему больше ни к чему не
+  // относятся. Раньше внешнего ключа не было вовсе, и такие строки
+  // оставались висеть навсегда.
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
   issueId   String
   chatId    String
   messageId Int
@@ -150,6 +162,7 @@ model PendingNotePrompt {
   id        String   @id @default(cuid())
   chatId    String
   messageId Int
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
   issueId   String
   // Если задан — при получении ответа применяется не только текст
   // заметки, но и этот статус ("✅ Решено"/"⏳ Пендинг" на карточке
@@ -228,6 +241,30 @@ model GlossaryTerm {
   updatedAt DateTime @updatedAt
 }
 
+// История статусов тикета. До неё нельзя было ответить ни на один вопрос
+// про работу отдела: сколько прошло от обращения до ответа, сколько до
+// решения, какая доля закрывается прямо из чата, а какая руками на сайте.
+// В самом Issue лежит только текущее состояние, а это конец истории без
+// самой истории.
+model IssueEvent {
+  id      String       @id @default(cuid())
+  issue   Issue        @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId String
+  // null у самого первого события — тикета до него не существовало.
+  from    IssueStatus?
+  to      IssueStatus
+  // Имя агента либо "Бот": статус двигает и живой человек, и разбор
+  // реплики в группе.
+  actor   String
+  // "app" — сайт или разбор, "chat" — реплика агента в рабочей группе.
+  // Тот же смысл, что у source в reactToStatusChange.
+  source  String
+  at      DateTime     @default(now())
+
+  @@index([issueId, at])
+  @@index([at])
+}
+
 model Issue {
   id           String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)
@@ -256,6 +293,19 @@ model Issue {
   createdBy    String
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+  // Когда статус менялся в последний раз. Отдельно от updatedAt нарочно:
+  // тот обновляется от любой правки — поправили описание, ИИ переписал
+  // текст, автор сменился с "Бот" на живого агента, — и "сколько тикет
+  // висит в работе" по нему считается неверно. Пишется только из
+  // changeIssueStatus (src/lib/issueStatus.ts), единственного места, где
+  // статус вообще меняется.
+  statusChangedAt DateTime @default(now())
+
+  events       IssueEvent[]
+  botReplies   BotReply[]
+  notePrompts  PendingNotePrompt[]
+  sourceMessages TelegramMessage[] @relation("issueSource")
+  agentReplies   TelegramMessage[] @relation("issueAgentReply")
 
   @@index([reportDate])
   // Библиотека решений (src/lib/solutionLibrary.ts) на каждой карточке

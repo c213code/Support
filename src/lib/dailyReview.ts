@@ -91,7 +91,7 @@ export async function buildReviewSummary(
   const stalled = issues.filter(
     (i) =>
       (i.status === "IN_PROGRESS" || i.status === "PENDING") &&
-      Date.now() - i.updatedAt.getTime() >= STALL_HOURS * 3_600_000
+      Date.now() - i.statusChangedAt.getTime() >= STALL_HOURS * 3_600_000
   ).length;
 
   const header = [
