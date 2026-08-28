@@ -19,6 +19,10 @@ import { startDedupeReview, advanceDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, type SendReportResult } from "@/lib/reportSend";
 import { detectAgentIntent } from "@/lib/agentIntent";
 import { resolveAgentTarget, type AgentTarget } from "@/lib/agentThread";
+import {
+  buildReplyVariants,
+  requestAutoReplyApproval,
+} from "@/lib/autoReplyApproval";
 import { collectResolutionContext } from "@/lib/resolutionNote";
 import { bestSolution } from "@/lib/solutionLibrary";
 import {
@@ -46,6 +50,7 @@ import {
 } from "@/lib/botReply";
 import {
   isAutoReplyEnabled,
+  isAutoReplyConfirmEnabled,
   setAutoReplyEnabled,
   isChatIntentEnabled,
   setChatIntentEnabled,
@@ -68,6 +73,7 @@ import {
   DEDUPE_SKIP_PREFIX,
   NOTIFY_RESOLVED_PREFIX,
   AGENT_TARGET_PREFIX,
+  AUTO_REPLY_PICK_PREFIX,
   CONFIRM_RESOLVED_PREFIX,
   RESOLVE_WITH_DRAFT_PREFIX,
   SOLVE_LIKE_PREFIX,
@@ -322,6 +328,78 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
       "✅ Что именно сделали? Ответь на ЭТО сообщение — заметка уйдёт в репорт. Тикет:",
       "RESOLVED",
       false
+    );
+    return;
+  }
+
+  // Выбор варианта автоответа (или отказ отвечать). Какой это черновик —
+  // определяет само сообщение с кнопками, поэтому в callback_data лежит
+  // только выбор.
+  if (data.startsWith(AUTO_REPLY_PICK_PREFIX)) {
+    if (!query.message) return;
+    const choice = data.slice(AUTO_REPLY_PICK_PREFIX.length);
+    const draft = await prisma.pendingAutoReply.findUnique({
+      where: {
+        chatId_messageId: {
+          chatId: String(query.message.chat.id),
+          messageId: query.message.message_id,
+        },
+      },
+    });
+    if (!draft) {
+      await answerCallbackQuery(query.id, "Черновик уже не актуален", true);
+      return;
+    }
+    await prisma.pendingAutoReply.delete({ where: { id: draft.id } });
+
+    const shown = query.message.text ?? "";
+    if (choice === "x") {
+      await answerCallbackQuery(query.id, "Не отвечаем");
+      await editMessageText(
+        query.message.chat.id,
+        query.message.message_id,
+        `${shown}\n\n🚫 Не отправлено`
+      );
+      return;
+    }
+
+    const text = draft.variants[Number(choice)];
+    if (!text) {
+      await answerCallbackQuery(query.id, "Такого варианта нет", true);
+      return;
+    }
+
+    // Пока черновик ждал ответа, агент мог ответить в группе сам — тогда
+    // отправлять уже нечего: правило "бот пишет только то, чего там ещё не
+    // прозвучало" действует и здесь.
+    if (
+      await agentAlreadyReplied(
+        draft.targetChatId,
+        draft.targetMessageId,
+        ownAgentTelegramIdList()
+      )
+    ) {
+      await answerCallbackQuery(query.id, "В группе уже ответили — не отправляю", true);
+      await editMessageText(
+        query.message.chat.id,
+        query.message.message_id,
+        `${shown}\n\n🤐 Не отправлено: в группе уже ответил живой человек`
+      );
+      return;
+    }
+
+    await sendBotReply({
+      issueId: draft.issueId,
+      chatId: draft.targetChatId,
+      replyToMessageId: draft.targetMessageId,
+      kind: "ACK",
+      text,
+    });
+    await answerCallbackQuery(query.id, "📨 Отправлено");
+    await editMessageText(
+      query.message.chat.id,
+      query.message.message_id,
+      `${shown}\n\n📨 Отправлено: ${text}`
     );
     return;
   }
@@ -783,37 +861,63 @@ async function decideAskKind(incomingText: string): Promise<AckAskKind> {
 // Откат — прежний троичный ACK. Он срабатывает, когда тогл выключен или
 // модель не ответила: без ИИ бот всё равно должен подтвердить приём, просто
 // более общими словами.
-async function buildAckMessage(incomingText: string): Promise<string> {
+// Варианты ответа на обращение. Первый — то, что бот отправил бы сам;
+// остальные отличаются решением "просить данные или нет" (см.
+// buildReplyVariants). Когда подтверждение выключено, берётся только
+// первый — поведение ровно прежнее.
+async function buildAckVariants(incomingText: string): Promise<string[]> {
   if (await isAiAskEnabled()) {
     const result = await classifySituation(incomingText);
     if (result) {
-      const missing = missingSlotsFor(
-        result.situation,
-        result.missing,
-        incomingText
-      );
-      return buildSituationAck(incomingText, result.situation, missing);
+      return buildReplyVariants({
+        incomingText,
+        situation: result.situation,
+        missing: missingSlotsFor(result.situation, result.missing, incomingText),
+        fallbackAskKind: "none",
+      });
     }
   }
 
-  return buildAckText(incomingText, new Date(), await decideAskKind(incomingText));
+  return buildReplyVariants({
+    incomingText,
+    situation: null,
+    missing: [],
+    fallbackAskKind: await decideAskKind(incomingText),
+  });
 }
 
 async function sendAcknowledgement(
   issueId: string,
   chatId: string,
   messageId: number,
-  incomingText: string
+  incomingText: string,
+  groupName: string
 ): Promise<void> {
   if (await hasBotReplied(issueId, "ACK")) return;
   if (await agentAlreadyReplied(chatId, messageId, ownAgentTelegramIdList())) return;
+
+  const variants = await buildAckVariants(incomingText);
+
+  // Режим подтверждения: в группу сейчас не пишем вовсе — показываем
+  // черновик дежурному в личку, и ответ уходит только по его кнопке.
+  if (await isAutoReplyConfirmEnabled()) {
+    await requestAutoReplyApproval({
+      issueId,
+      groupName,
+      incomingText,
+      targetChatId: chatId,
+      targetMessageId: messageId,
+      variants,
+    });
+    return;
+  }
 
   await sendBotReply({
     issueId,
     chatId,
     replyToMessageId: messageId,
     kind: "ACK",
-    text: await buildAckMessage(incomingText),
+    text: variants[0],
   });
 }
 
@@ -1197,10 +1301,12 @@ const HELP_TEXT = [
 ].join("\n");
 
 const AUTOREPLY_HELP = [
-  "Когда включено, бот сам отвечает в рабочих группах:",
-  "• на новое обращение — «жақсы, қарап береміз», и просит почту/ссылку, если их не прислали;",
+  "Когда включено, бот отвечает в рабочих группах:",
+  "• на новое обращение — «жақсы, қарап кб беретін боламыз», и просит то, чего не хватает;",
   "• при смене статуса на сайте или в разборе — «жұмысқа алдық» / «әріптестеріме жібердім»;",
   "• если написали повторно по решённому — извиняется за задержку.",
+  "",
+  "По умолчанию новое обращение бот сначала показывает здесь, в личке: черновик с вариантами, в группу уходит только по кнопке. Отключается тумблером «🙋 Спрашивать перед ответом» на сайте.",
   "",
   "Бот молчит там, где ты уже ответил сам, — и наоборот, твоя реплика в группе сама двигает статус.",
   "«Решено» в чат уходит только по твоей кнопке.",
@@ -1450,6 +1556,32 @@ export async function POST(request: NextRequest) {
   // и есть автор такого ответа, а та проверка иначе тихо архивирует
   // сообщение как обычное и до этой ветки просто не дойдёт.
   const repliedToId = message.reply_to_message?.message_id;
+
+  // Ответ реплаем на черновик автоответа ("Свой текст — ответь реплаем"):
+  // отправляем в группу ровно то, что человек написал. Проверяется здесь
+  // же, до разбора обычных сообщений: это личка, тикетом такое стать не
+  // должно.
+  if (repliedToId != null && message.chat.type === "private") {
+    const draft = await prisma.pendingAutoReply.findUnique({
+      where: { chatId_messageId: { chatId, messageId: repliedToId } },
+    });
+    if (draft) {
+      await prisma.pendingAutoReply.delete({ where: { id: draft.id } });
+      const own = text.trim();
+      if (own) {
+        await sendBotReply({
+          issueId: draft.issueId,
+          chatId: draft.targetChatId,
+          replyToMessageId: draft.targetMessageId,
+          kind: "ACK",
+          text: own,
+        });
+        await sendTelegramMessage(message.chat.id, `📨 Отправлено: ${own}`);
+      }
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   if (repliedToId != null) {
     const pending = await prisma.pendingNotePrompt.findUnique({
       where: { chatId_messageId: { chatId, messageId: repliedToId } },
@@ -1646,7 +1778,13 @@ export async function POST(request: NextRequest) {
         // Отвечаем на последнее сообщение серии, а не на первое: именно
         // в нём чаще всего и оказывается сама проблема (первое сплошь и
         // рядом — просто "Қайырлы күн").
-        await sendAcknowledgement(issue.id, chatId, message.message_id, mergedOwn);
+        await sendAcknowledgement(
+          issue.id,
+          chatId,
+          message.message_id,
+          mergedOwn,
+          issue.groupName
+        );
         linkedIssueId = issue.id;
       }
     }
@@ -1744,7 +1882,13 @@ export async function POST(request: NextRequest) {
         where: { id: savedMessage.id },
         data: { usedForIssueId: issue.id },
       });
-      await sendAcknowledgement(issue.id, chatId, message.message_id, text);
+      await sendAcknowledgement(
+        issue.id,
+        chatId,
+        message.message_id,
+        text,
+        issue.groupName
+      );
     }
   }
 

@@ -88,6 +88,7 @@ export function Inbox() {
   const [autoReplyEnabled, setAutoReplyEnabled] = useState<boolean | null>(null);
   const [chatIntentEnabled, setChatIntentEnabled] = useState<boolean | null>(null);
   const [aiAskEnabled, setAiAskEnabled] = useState<boolean | null>(null);
+  const [autoReplyConfirm, setAutoReplyConfirm] = useState<boolean | null>(null);
   const [boardQuery, setBoardQuery] = useState("");
   const [duplicateGroups, setDuplicateGroups] = useState<IssueDTO[][] | null>(
     null
@@ -146,6 +147,9 @@ export function Inbox() {
     fetch("/api/settings/ai-ask")
       .then((res) => res.json())
       .then((data) => setAiAskEnabled(Boolean(data.enabled)));
+    fetch("/api/settings/auto-reply-confirm")
+      .then((res) => res.json())
+      .then((data) => setAutoReplyConfirm(Boolean(data.enabled)));
   }, [loadGroups]);
 
   useEffect(() => {
@@ -713,6 +717,38 @@ export function Inbox() {
   // включённых автоответов: не просит на общих вопросах без ученика,
   // добавляет ай-апту на обращениях про конкретное задание по программе
   // (см. classifyAckAsk в lib/ai.ts).
+  // Спрашивать в личке перед ответом в группу. Выключить — значит
+  // разрешить боту писать коллегам без спроса, поэтому предупреждаем
+  // именно при выключении (у остальных тумблеров всё наоборот).
+  async function handleToggleAutoReplyConfirm() {
+    const next = !autoReplyConfirm;
+    if (
+      !next &&
+      !window.confirm(
+        "Выключить подтверждение? Бот начнёт отвечать в рабочих группах сразу, не спрашивая."
+      )
+    ) {
+      return;
+    }
+    setAutoReplyConfirm(next);
+    const res = await fetch("/api/settings/auto-reply-confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok) {
+      setAutoReplyConfirm(!next);
+      toast("Не удалось переключить подтверждение", "error");
+      return;
+    }
+    toast(
+      next
+        ? "Бот будет спрашивать в личке перед ответом"
+        : "Бот отвечает в группах сразу",
+      next ? "success" : "info"
+    );
+  }
+
   async function handleToggleAiAsk() {
     const next = !aiAskEnabled;
     setAiAskEnabled(next);
@@ -900,6 +936,17 @@ export function Inbox() {
                 enabled: autoReplyEnabled,
                 onToggle: handleToggleAutoReply,
                 color: "bg-emerald-600",
+              },
+              {
+                key: "autoreplyconfirm",
+                label: "🙋 Спрашивать перед ответом",
+                hint: "Бот присылает черновик в личку с вариантами — в группу уходит только по кнопке",
+                enabled: autoReplyConfirm,
+                onToggle: handleToggleAutoReplyConfirm,
+                color: "bg-violet-600",
+                note: autoReplyEnabled
+                  ? null
+                  : "Не действует: автоответы выключены",
               },
               {
                 key: "chatintent",

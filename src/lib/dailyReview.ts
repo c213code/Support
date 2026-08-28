@@ -451,7 +451,10 @@ async function moveReviewSession(chatId: string, step: 1 | -1): Promise<void> {
 // привязанные чаты в тот день (см. isOwnAgentMessage в вебхуке — только
 // после того, как свои сообщения агентов начали сохраняться, это стало
 // возможно посчитать).
-async function pickRecipient(reportDate: string): Promise<number | null> {
+// Экспортируется ещё и для подтверждения автоответов: спрашивать «так ли
+// писать?» нужно у того же человека, кому вечером уходит сводка, —
+// дежурного определяем одинаково.
+export async function pickRecipient(reportDate: string): Promise<number | null> {
   const entries = agentTelegramEntries();
   if (entries.length === 0) return null;
 

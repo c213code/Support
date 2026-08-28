@@ -113,6 +113,13 @@ model AppSetting {
   // срабатывания, а не отменяет проверку целиком. Выключен по умолчанию по
   // тому же принципу, что и остальные ИИ/автоответ-тоглы.
   aiAskEnabled      Boolean  @default(false)
+  // Спрашивать в личке перед тем, как ответить в рабочей группе. Работает
+  // поверх autoReplyEnabled и только для подтверждения приёма: реакция на
+  // смену статуса — следствие осознанного действия человека, её
+  // переспрашивать незачем. По умолчанию включено: если уж бот пишет
+  // коллегам, то первым режимом должен быть тот, где последнее слово за
+  // человеком.
+  autoReplyConfirm  Boolean  @default(true)
   updatedAt         DateTime @updatedAt
 }
 
@@ -187,6 +194,31 @@ model PendingNotePrompt {
 // старта (currentIndex — позиция в ней); каждое действие
 // (статус/эскалация/заметка/пропустить) редактирует то же самое
 // сообщение и сразу показывает следующий тикет.
+// Черновик автоответа, ждущий подтверждения в личке. Текст здесь, а не в
+// callback_data: там 64 байта, в них не влезет даже одна фраза, не говоря
+// про несколько вариантов.
+//
+// Ключ — сообщение-вопрос в личке: по нему находится черновик и когда
+// нажали кнопку, и когда ответили реплаем своим текстом.
+model PendingAutoReply {
+  id        String   @id @default(cuid())
+  // Личка агента, которому задан вопрос, и id самого вопроса.
+  chatId    String
+  messageId Int
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId   String
+  // Куда отправлять, если подтвердят: рабочая группа и то сообщение, на
+  // которое бот отвечает реплаем.
+  targetChatId    String
+  targetMessageId Int
+  // Варианты ответа по порядку — первый показан как основной.
+  variants  String[]
+  createdAt DateTime @default(now())
+
+  @@unique([chatId, messageId])
+  @@index([issueId])
+}
+
 model ReviewSession {
   chatId       String   @id
   reportDate   String
@@ -302,6 +334,7 @@ model Issue {
   statusChangedAt DateTime @default(now())
 
   events       IssueEvent[]
+  pendingReplies PendingAutoReply[]
   botReplies   BotReply[]
   notePrompts  PendingNotePrompt[]
   sourceMessages TelegramMessage[] @relation("issueSource")

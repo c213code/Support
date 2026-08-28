@@ -32,6 +32,27 @@ export async function isAutoReplyEnabled(): Promise<boolean> {
   return row?.autoReplyEnabled ?? false;
 }
 
+// Спрашивать в личке перед ответом в группу. Работает поверх автоответов
+// и только для подтверждения приёма: реакция на смену статуса — следствие
+// осознанного действия человека, её переспрашивать незачем.
+export async function isAutoReplyConfirmEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { autoReplyConfirm: true },
+  });
+  return row?.autoReplyConfirm ?? true;
+}
+
+export async function setAutoReplyConfirmEnabled(
+  enabled: boolean
+): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { autoReplyConfirm: enabled },
+    create: { id: SETTINGS_ID, autoReplyConfirm: enabled },
+  });
+}
+
 export async function setAutoReplyEnabled(enabled: boolean): Promise<void> {
   await prisma.appSetting.upsert({
     where: { id: SETTINGS_ID },

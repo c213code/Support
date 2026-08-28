@@ -70,3 +70,8 @@ export const AGENT_TARGET_PREFIX = "at:";
 // Сам текст заметки в callback_data не влезает (64 байта), поэтому
 // читается из текста сообщения — см. RESOLVED_NOTE_LINE в вебхуке.
 export const RESOLVE_WITH_DRAFT_PREFIX = "rd:";
+// Выбор варианта автоответа в личке: "ar:<номер>" либо "ar:x" — не
+// отвечать. Какой именно черновик имеется в виду, определяет само
+// сообщение с кнопками (PendingAutoReply ищется по chatId+messageId), так
+// что в callback_data остаётся только выбор.
+export const AUTO_REPLY_PICK_PREFIX = "ar:";
