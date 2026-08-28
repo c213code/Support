@@ -29,7 +29,9 @@ export type BotReplyKind =
 export async function sendBotReply(opts: {
   issueId: string;
   chatId: string;
-  replyToMessageId: number;
+  // Без реплая, если не задан: так отвечают на общую поломку, о которой
+  // написали несколько человек — цитата выделила бы одного из них.
+  replyToMessageId?: number;
   kind: BotReplyKind;
   text: string;
 }): Promise<boolean> {

@@ -719,3 +719,59 @@ export async function classifySituation(
     return null;
   }
 }
+
+const TOPIC_TIMEOUT_MS = 5000;
+
+// Короткое название темы обращения — для ответа, который уходит в группу
+// без реплая. Реплай сам показывает, о чём речь; общий ответ на поломку,
+// затронувшую нескольких человек, отвечать реплаем нельзя (это выделило бы
+// одного из них), и без названия темы в чате получается «жұмысқа алдық» ни
+// к чему не привязанное.
+//
+// Возвращает существительное, а не пересказ: «Квал тест мәселесі», а не
+// «методисттердің квал тесттері шықпай тұрғаны туралы мәселе».
+const TOPIC_SYSTEM_PROMPT = `Ты сокращаешь обращение в поддержку JUZ40 до названия темы. Ответь json.
+
+Дай короткое название на языке обращения (обычно казахский): 2–4 слова, именная группа без глаголов и без слова "мәселе" в конце, если оно и так понятно. Не добавляй имён, почт и номеров.
+
+Примеры:
+"Менің аккаунтымды қарап жібере аласыздар ма? Квал тесттер мүлдем шықпайды" → "Квал тест"
+"ПФ баяу жұмыс істеп тұр, сабақтар ашылмайды" → "Платформаның баяулауы"
+"1-ай 3-апта үй жұмысында жауаптар араласып кеткен" → "1-ай 3-апта үй жұмысы"
+
+Ответь строго json: {"topic":"..."}`;
+
+export async function summarizeIssueTopic(
+  description: string
+): Promise<string | null> {
+  if (groqApiKeys().length === 0 || !description.trim()) return null;
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 300,
+        reasoning_effort: "low",
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: TOPIC_SYSTEM_PROMPT + (await buildAiContext()) },
+          { role: "user", content: description },
+        ],
+      },
+      TOPIC_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") return null;
+
+    const topic = JSON.parse(content)?.topic;
+    if (typeof topic !== "string") return null;
+    const trimmed = topic.trim();
+    // Слишком длинное — это уже пересказ, а не тема: лучше обойтись без
+    // названия, чем прилепить к ответу целое предложение.
+    return trimmed && trimmed.length <= 60 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}

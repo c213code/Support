@@ -1,7 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { setMessageReaction } from "@/lib/telegram";
-import { buildStatusReplyText, pickLanguage } from "@/lib/autoReply";
+import {
+  buildSharedStatusReplyText,
+  buildStatusReplyText,
+  pickLanguage,
+} from "@/lib/autoReply";
+import { summarizeIssueTopic } from "@/lib/ai";
+import { isStatusReplyEnabled } from "@/lib/settings";
 import { sendBotReply, type BotReplyKind } from "@/lib/botReply";
 import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
 
@@ -44,11 +50,37 @@ export async function reactToStatusChange(
   // (см. ISSUE_RESOLVE_PREFIX в вебхуке), а не автоматически при смене
   // статуса.
   if (source !== "app" || !issueId || nextStatus === "RESOLVED") return;
+  // Реакция-эмодзи выше остаётся всегда: она видна только на исходном
+  // сообщении и никого не отвлекает. Выключается именно текст в чате.
+  if (!(await isStatusReplyEnabled())) return;
 
-  const text = buildStatusReplyText(
-    nextStatus,
-    pickLanguage(message.text ?? "")
-  );
+  const language = pickLanguage(message.text ?? "");
+
+  // Тикет, в который слили несколько обращений (extraLinks непустой), —
+  // это одна поломка у нескольких человек. Реплаем тут отвечать нельзя:
+  // цитата выделит одного, а написали все. Отвечаем одним сообщением без
+  // цитаты и с названием темы — иначе "жұмысқа алдық" повиснет в чате ни
+  // к чему не привязанное.
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { extraLinks: true, description: true },
+  });
+  const shared = (issue?.extraLinks.length ?? 0) > 0;
+
+  if (shared) {
+    const topic = await summarizeIssueTopic(issue?.description ?? "");
+    const sharedText = buildSharedStatusReplyText(nextStatus, language, topic);
+    if (!sharedText) return;
+    await sendBotReply({
+      issueId,
+      chatId: message.chatId,
+      kind: nextStatus as BotReplyKind,
+      text: sharedText,
+    });
+    return;
+  }
+
+  const text = buildStatusReplyText(nextStatus, language);
   if (!text) return;
 
   await sendBotReply({

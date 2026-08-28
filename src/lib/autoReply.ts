@@ -158,6 +158,22 @@ const STATUS_REPLY: Partial<Record<IssueStatus, Record<ReplyLanguage, string>>> 
   },
 };
 
+// То же самое, но для поломки, о которой написали несколько человек: без
+// обращения к кому-то одному и с названием темы, чтобы в чате было
+// понятно, о чём речь, — реплая-то нет.
+export function buildSharedStatusReplyText(
+  status: IssueStatus,
+  language: ReplyLanguage,
+  topic: string | null
+): string | null {
+  const base = STATUS_REPLY[status]?.[language];
+  if (!base) return null;
+  if (!topic) return base;
+  // Тире, а не падеж: падеж модель ставит неуверенно, а тире читается
+  // естественно в обоих языках.
+  return `${topic} — ${base.charAt(0).toLowerCase()}${base.slice(1)}`;
+}
+
 export function buildStatusReplyText(
   status: IssueStatus,
   language: ReplyLanguage

@@ -53,6 +53,25 @@ export async function setAutoReplyConfirmEnabled(
   });
 }
 
+// Ответы бота на смену статуса (см. reactToStatusChange). Отдельный
+// рубильник: подтверждение приёма полезно почти всегда, а вот
+// "жұмысқа алдық" при каждом перетаскивании карточки — далеко не всегда.
+export async function isStatusReplyEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { statusReplyEnabled: true },
+  });
+  return row?.statusReplyEnabled ?? true;
+}
+
+export async function setStatusReplyEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { statusReplyEnabled: enabled },
+    create: { id: SETTINGS_ID, statusReplyEnabled: enabled },
+  });
+}
+
 export async function setAutoReplyEnabled(enabled: boolean): Promise<void> {
   await prisma.appSetting.upsert({
     where: { id: SETTINGS_ID },

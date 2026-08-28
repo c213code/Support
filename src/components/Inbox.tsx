@@ -89,6 +89,7 @@ export function Inbox() {
   const [chatIntentEnabled, setChatIntentEnabled] = useState<boolean | null>(null);
   const [aiAskEnabled, setAiAskEnabled] = useState<boolean | null>(null);
   const [autoReplyConfirm, setAutoReplyConfirm] = useState<boolean | null>(null);
+  const [statusReplyEnabled, setStatusReplyEnabled] = useState<boolean | null>(null);
   const [boardQuery, setBoardQuery] = useState("");
   const [duplicateGroups, setDuplicateGroups] = useState<IssueDTO[][] | null>(
     null
@@ -150,6 +151,9 @@ export function Inbox() {
     fetch("/api/settings/auto-reply-confirm")
       .then((res) => res.json())
       .then((data) => setAutoReplyConfirm(Boolean(data.enabled)));
+    fetch("/api/settings/status-reply")
+      .then((res) => res.json())
+      .then((data) => setStatusReplyEnabled(Boolean(data.enabled)));
   }, [loadGroups]);
 
   useEffect(() => {
@@ -749,6 +753,30 @@ export function Inbox() {
     );
   }
 
+  // Ответ в чат при смене статуса. Отдельно от подтверждения приёма:
+  // "жұмысқа алдық" на каждое перетаскивание карточки надоедает быстрее
+  // всего, особенно если тикет за день двигают несколько раз.
+  async function handleToggleStatusReply() {
+    const next = !statusReplyEnabled;
+    setStatusReplyEnabled(next);
+    const res = await fetch("/api/settings/status-reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok) {
+      setStatusReplyEnabled(!next);
+      toast("Не удалось переключить ответы о статусе", "error");
+      return;
+    }
+    toast(
+      next
+        ? "Бот пишет в чат при смене статуса"
+        : "Бот молчит при смене статуса — остаётся только эмодзи-реакция",
+      next ? "success" : "info"
+    );
+  }
+
   async function handleToggleAiAsk() {
     const next = !aiAskEnabled;
     setAiAskEnabled(next);
@@ -947,6 +975,15 @@ export function Inbox() {
                 note: autoReplyEnabled
                   ? null
                   : "Не действует: автоответы выключены",
+              },
+              {
+                key: "statusreply",
+                label: "💬 Писать при смене статуса",
+                hint: "«Жұмысқа алдық» в чат, когда двигаешь карточку. Выключено — остаётся только эмодзи-реакция",
+                enabled: statusReplyEnabled,
+                onToggle: handleToggleStatusReply,
+                color: "bg-amber-500",
+                note: autoReplyEnabled ? null : "Не действует: автоответы выключены",
               },
               {
                 key: "chatintent",
