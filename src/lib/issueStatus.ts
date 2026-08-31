@@ -8,7 +8,12 @@ import {
 } from "@/lib/autoReply";
 import { summarizeIssueTopic } from "@/lib/ai";
 import { isStatusReplyEnabled } from "@/lib/settings";
-import { sendBotReply, type BotReplyKind } from "@/lib/botReply";
+import {
+  deleteBotReply,
+  editBotReply,
+  sendBotReply,
+  type BotReplyKind,
+} from "@/lib/botReply";
 import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
 
 // Откуда пришла смена статуса. Различать обязательно: если статус
@@ -83,6 +88,18 @@ export async function reactToStatusChange(
   const text = buildStatusReplyText(nextStatus, language);
   if (!text) return;
 
+  // Статус часто меняют в два шага подряд: карточку кладут в "В работе", а
+  // через несколько секунд жмут "Передано" — или роняют не в ту колонку и
+  // тут же перетаскивают обратно. В проде таких пар за неделю набралось
+  // больше десятка, и каждая давала в чате два сообщения бота подряд про
+  // один тикет.
+  //
+  // Поэтому свежий ответ про статус не дублируем, а переписываем: в группе
+  // остаётся одно сообщение, которое показывает текущее положение дел.
+  // Правка лучше нового сообщения ровно по той же причине, по какой она
+  // лучше удаления — тот, кто уже прочитал, видит, что изменилось.
+  if (await replacePreviousStatusReply(issueId, nextStatus, text)) return;
+
   await sendBotReply({
     issueId,
     chatId: message.chatId,
@@ -90,6 +107,55 @@ export async function reactToStatusChange(
     kind: nextStatus as BotReplyKind,
     text,
   });
+}
+
+// Сколько времени ответ про статус считается "тем же самым действием".
+// Пять минут: за это время человек успевает доработать карточку (взял →
+// передал), но не успевает начаться новая история по тикету.
+const STATUS_REPLY_REPLACE_MS = 5 * 60 * 1000;
+
+// Строками, а не BotReplyKind: сюда же попадает "SENT" — ответ на возврат
+// тикета в "Отправлено". В самом типе его нет, потому что это не отдельный
+// вид ответа, а статус, записанный как есть (см. kind в sendBotReply ниже),
+// и "FOLLOW_UP" — он же, когда возврат случился из-за повторного обращения.
+const STATUS_REPLY_KINDS: string[] = [
+  "IN_PROGRESS",
+  "PENDING",
+  "ESCALATED",
+  "SENT",
+  "FOLLOW_UP",
+];
+
+// true — предыдущее сообщение про статус переписано (или удалено), новое
+// слать не нужно.
+async function replacePreviousStatusReply(
+  issueId: string,
+  nextStatus: IssueStatus,
+  text: string
+): Promise<boolean> {
+  const previous = await prisma.botReply.findFirst({
+    where: {
+      issueId,
+      deleted: false,
+      kind: { in: STATUS_REPLY_KINDS },
+      sentAt: { gte: new Date(Date.now() - STATUS_REPLY_REPLACE_MS) },
+    },
+    orderBy: { sentAt: "desc" },
+    select: { id: true, text: true },
+  });
+  if (!previous) return false;
+
+  // Вернули в "Отправлено" сразу после того, как взяли в работу, — значит
+  // промахнулись колонкой. Извиняться за задержку тут не за что, и "взяли
+  // в работу" тоже неправда: сообщение просто убираем.
+  if (nextStatus === "SENT") {
+    const removed = await deleteBotReply(previous.id);
+    return removed.ok;
+  }
+
+  if (previous.text === text) return true;
+  const edited = await editBotReply(previous.id, text);
+  return edited.ok;
 }
 
 // Единственное место, где меняется статус тикета.
