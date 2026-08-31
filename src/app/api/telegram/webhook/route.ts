@@ -1797,6 +1797,13 @@ export async function POST(request: NextRequest) {
     recent &&
     Date.now() - recent.receivedAt.getTime() < MERGE_WINDOW_MS
   ) {
+    // Пропуск наследуется всей серией. Иначе решение "по этому сообщению
+    // тикет не заводим" жило ровно до следующей фразы того же человека:
+    // реплай нашему агенту тикета не заводил, а дописанное через две
+    // секунды продолжение — заводило, причём вместе с процитированным
+    // текстом агента. В проде так появились четыре тикета, включая ответ
+    // Алпе на его же разбор.
+    const skipSeries = skipAutoCreate || recent.skippedAutoIssue;
     // recent.text уже может содержать свою цитату (если само было
     // ответом) — просто приклеиваем следующее сообщение(с его цитатой)
     // следом, каждое несёт свой контекст само по себе.
@@ -1809,6 +1816,7 @@ export async function POST(request: NextRequest) {
       data: {
         text: mergedContextual,
         viewed: false,
+        skippedAutoIssue: skipSeries,
         // Подтягиваем время к последнему сообщению в серии — иначе
         // склеенная карточка «застревала» под старым receivedAt первого
         // сообщения и могла выпасть из фильтра «сегодня» во «Входящих»,
@@ -1822,7 +1830,7 @@ export async function POST(request: NextRequest) {
     // только обрывок исходного запроса.
     let linkedIssueId: string | null = null;
     if (recent.usedForIssueId) {
-      const merged = await buildDescription(mergedOwn, mergedContextual, skipAutoCreate);
+      const merged = await buildDescription(mergedOwn, mergedContextual, skipSeries);
       // null тут означает "склеенный текст выглядит мусором" — описание не
       // трогаем, тикет уже заведён и затирать его нечем.
       if (merged !== null) {
@@ -1844,7 +1852,7 @@ export async function POST(request: NextRequest) {
         mergedOwn,
         mergedContextual,
         recent.messageLink,
-        skipAutoCreate
+        skipSeries
       );
       if (issue) {
         await prisma.telegramMessage.update({
@@ -1888,6 +1896,11 @@ export async function POST(request: NextRequest) {
         text: contextualText,
         replyToMessageId: message.reply_to_message?.message_id ?? null,
         messageLink,
+        // Своя строка серии тоже помнит пропуск. Без этого память жила
+        // ровно одно сообщение: третья фраза подряд находила эту строку
+        // как "последнее сообщение автора", видела в ней пропуск = false и
+        // заводила тикет, от которого две первые отказались.
+        skippedAutoIssue: skipSeries,
         ...(linkedIssueId
           ? { usedForIssueId: linkedIssueId, archived: true, viewed: true }
           : {}),
@@ -1914,6 +1927,9 @@ export async function POST(request: NextRequest) {
       text: contextualText,
       replyToMessageId: message.reply_to_message?.message_id ?? null,
       messageLink,
+      // Запоминаем решение, а не только применяем его: следующее сообщение
+      // этого же человека склеится с этим, и там о пропуске нужно знать.
+      skippedAutoIssue: skipAutoCreate,
     },
   });
 
