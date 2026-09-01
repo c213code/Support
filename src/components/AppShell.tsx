@@ -10,7 +10,12 @@ import {
   IconHistory,
   IconLogout,
   IconMail,
+  IconSearch,
 } from "@/components/Icons";
+
+// Страницы, где смонтирована командная палитра (⌘K) — только там кнопка
+// «Поиск» имеет смысл (ей нужны тикеты дня).
+const PALETTE_ROUTES = new Set(["/", "/inbox"]);
 
 // Тёмная бренд-панель слева — «спина» приложения (раньше была светлая шапка
 // сверху, AppHeader). Держит ту же навигацию, счётчик «Входящих», текущего
@@ -123,6 +128,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
             <IconMail className="h-[19px] w-[19px]" />
           </Link>
+        )}
+
+        {PALETTE_ROUTES.has(pathname) && (
+          <button
+            onClick={() =>
+              window.dispatchEvent(
+                new KeyboardEvent("keydown", { key: "k", metaKey: true })
+              )
+            }
+            title="Поиск по тикетам и командам (⌘K)"
+            aria-label="Поиск по тикетам и командам"
+            className="mt-1 flex h-11 w-11 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/8 hover:text-slate-100"
+          >
+            <IconSearch className="h-[19px] w-[19px]" />
+          </button>
         )}
 
         <div className="flex-1" />

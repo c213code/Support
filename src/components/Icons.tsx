@@ -31,6 +31,13 @@ export const IconInbox = (p: IconProps) => (
   </Svg>
 );
 
+export const IconSearch = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="11" cy="11" r="8" />
+    <path d="m21 21-4.3-4.3" />
+  </Svg>
+);
+
 export const IconMail = (p: IconProps) => (
   <Svg {...p}>
     <rect width="20" height="16" x="2" y="4" rx="2" />
