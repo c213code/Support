@@ -68,8 +68,18 @@ async function callGroqChat(
         body: JSON.stringify(body),
       });
       if (res.ok) return await res.json();
-    } catch {
+      // Не ok (401 ключ / 404 модель выведена / 429 квота): статус ИИ-функций
+      // по дизайну молчит и откатывается в null, из-за чего в проде «ИИ
+      // недоступен» без причины. Логируем статус и короткий кусок тела ошибки
+      // (Groq отдаёт {"error":{"message":...}} — секретов там нет, ключ в
+      // заголовке и в лог не попадает), чтобы причину было видно в логах.
+      const detail = await res.text().catch(() => "");
+      console.warn(
+        `[groq] ${res.status} ${res.statusText}: ${detail.slice(0, 300)}`
+      );
+    } catch (err) {
       // Сеть/таймаут — пробуем следующий ключ.
+      console.warn(`[groq] запрос упал (сеть/таймаут): ${String(err).slice(0, 200)}`);
     } finally {
       clearTimeout(timeout);
     }
