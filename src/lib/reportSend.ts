@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { generateReportText } from "@/lib/report";
+import { formatTimeAlmaty } from "@/lib/date";
 
 export type SendReportResult =
   | { ok: true; text: string }
@@ -51,4 +52,20 @@ export async function sendReportToGroup(reportDate: string): Promise<SendReportR
   });
 
   return { ok: true, text };
+}
+
+// Человекочитаемая причина, почему /send (или кнопка «Отправить в группу»)
+// не сработала. Живёт здесь, рядом с SendReportResult, потому что нужна и в
+// колбэках вебхука, и в командах бота.
+export function describeSendFailure(
+  result: Extract<SendReportResult, { ok: false }>
+): string {
+  switch (result.reason) {
+    case "no-target":
+      return "Группа для отправки ещё не настроена (REPORT_TARGET_CHAT_ID)";
+    case "empty":
+      return "За этот день нечего отправлять";
+    case "already-sent":
+      return `Уже отправлено сегодня в ${formatTimeAlmaty(result.sentAt)}`;
+  }
 }
