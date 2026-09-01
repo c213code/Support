@@ -1,32 +1,33 @@
 @import "tailwindcss";
 
 /*
- * Тема повторяет бренд JUZ40 (juz40-edu.kz): бирюзовый #285b6e как основной,
- * яркая бирюза #2898bd как акцент, шрифт Inter. Приложение всегда светлое —
- * без auto dark mode (компоненты тёмную тему не поддерживают).
+ * Тема повторяет бренд JUZ40 (juz40-edu.kz): фирменный ярко-синий #2a60f7
+ * как основной (он же доминирует на лендинге), шрифт Inter. Раньше тут была
+ * бирюза #285b6e — это фактически было не в бренде, отсюда «чужой/серый» вид.
+ * Приложение всегда светлое — без auto dark mode.
  */
 @theme {
-  --color-background: #f6f7f9;
+  --color-background: #f4f7fe;
   --color-foreground: #1f293e;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 
-  /* Основной бренд — приглушённая бирюза (кнопки, активная навигация) */
-  --color-brand-50: #eef5f7;
-  --color-brand-100: #d5e6ea;
-  --color-brand-200: #aecdd6;
-  --color-brand-300: #7fb0bd;
-  --color-brand-400: #4f93a4;
-  --color-brand-500: #33788b;
-  --color-brand-600: #285b6e;
-  --color-brand-700: #234f5f;
-  --color-brand-800: #1e4250;
-  --color-brand-900: #182f39;
+  /* Основной бренд — синий JUZ40 (кнопки, активная навигация); 600 = #2a60f7 */
+  --color-brand-50: #f0f3ff;
+  --color-brand-100: #e3e9ff;
+  --color-brand-200: #c4d2ff;
+  --color-brand-300: #9db4ff;
+  --color-brand-400: #6b8bff;
+  --color-brand-500: #4a72fb;
+  --color-brand-600: #2a60f7;
+  --color-brand-700: #1e4fd4;
+  --color-brand-800: #1a3fa8;
+  --color-brand-900: #17317c;
 
-  /* Яркий бирюзовый акцент (ссылки, индикаторы, hover) */
-  --color-accent-400: #4dafd4;
-  --color-accent-500: #2898bd;
-  --color-accent-600: #227d9b;
+  /* Акцент (ссылки, индикаторы, hover) — тот же синий чуть светлее */
+  --color-accent-400: #6b8bff;
+  --color-accent-500: #2a60f7;
+  --color-accent-600: #1e4fd4;
 }
 
 body {
@@ -36,7 +37,7 @@ body {
 }
 
 ::selection {
-  background: color-mix(in srgb, #2898bd 28%, transparent);
+  background: color-mix(in srgb, #2a60f7 24%, transparent);
 }
 
 /*
