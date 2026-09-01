@@ -17,6 +17,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/Toast";
 import { useHotkeys } from "@/lib/useHotkeys";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
+import { useBotSettings } from "@/lib/useBotSettings";
 import type { IssueStatus } from "@/lib/status";
 import {
   formatDateHuman,
@@ -83,14 +84,6 @@ export function Inbox() {
     null
   );
   const [mergingIssueId, setMergingIssueId] = useState<string | null>(null);
-  const [aiCleaningEnabled, setAiCleaningEnabled] = useState<boolean | null>(
-    null
-  );
-  const [autoReplyEnabled, setAutoReplyEnabled] = useState<boolean | null>(null);
-  const [chatIntentEnabled, setChatIntentEnabled] = useState<boolean | null>(null);
-  const [aiAskEnabled, setAiAskEnabled] = useState<boolean | null>(null);
-  const [autoReplyConfirm, setAutoReplyConfirm] = useState<boolean | null>(null);
-  const [statusReplyEnabled, setStatusReplyEnabled] = useState<boolean | null>(null);
   const [boardQuery, setBoardQuery] = useState("");
   const [duplicateGroups, setDuplicateGroups] = useState<IssueDTO[][] | null>(
     null
@@ -111,6 +104,7 @@ export function Inbox() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const boardSearchRef = useRef<HTMLInputElement>(null);
   const currentAgent = useCurrentAgent();
+  const bot = useBotSettings();
   const { confirm, element: confirmElement } = useConfirm();
   const toast = useToast();
   const isToday = date === todayDateString();
@@ -137,24 +131,7 @@ export function Inbox() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load on mount
     loadGroups();
-    fetch("/api/settings/ai-cleaning")
-      .then((res) => res.json())
-      .then((data) => setAiCleaningEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/auto-reply")
-      .then((res) => res.json())
-      .then((data) => setAutoReplyEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/chat-intent")
-      .then((res) => res.json())
-      .then((data) => setChatIntentEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/ai-ask")
-      .then((res) => res.json())
-      .then((data) => setAiAskEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/auto-reply-confirm")
-      .then((res) => res.json())
-      .then((data) => setAutoReplyConfirm(Boolean(data.enabled)));
-    fetch("/api/settings/status-reply")
-      .then((res) => res.json())
-      .then((data) => setStatusReplyEnabled(Boolean(data.enabled)));
+    // Тумблеры бота грузит и переключает useBotSettings.
   }, [loadGroups]);
 
   useEffect(() => {
@@ -646,157 +623,6 @@ export function Inbox() {
     );
   }
 
-  // Тогл "описания авто-тикетов пишет ИИ" — общая настройка на всё
-  // приложение (не по агенту), сразу шлём на сервер и откатываем чекбокс
-  // назад, если запрос не прошёл.
-  async function handleToggleAiCleaning() {
-    const next = !aiCleaningEnabled;
-    setAiCleaningEnabled(next);
-    const res = await fetch("/api/settings/ai-cleaning", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    if (!res.ok) {
-      setAiCleaningEnabled(!next);
-      toast("Не удалось переключить ИИ-описания", "error");
-      return;
-    }
-    toast(next ? "ИИ-описания включены" : "ИИ-описания выключены", "info");
-  }
-
-  // Тогл автоответов бота в рабочие группы. Единственная настройка,
-  // которая заставляет бота писать от имени школы туда, где сидят
-  // коллеги, — поэтому подтверждаем включение явно, а выключение делаем
-  // без вопросов (выключить всегда должно быть легко).
-  async function handleToggleAutoReply() {
-    const next = !autoReplyEnabled;
-    if (
-      next &&
-      !window.confirm(
-        "Бот начнёт сам отвечать в рабочих группах: подтверждать приём обращений и сообщать о смене статуса. Включить?"
-      )
-    ) {
-      return;
-    }
-    setAutoReplyEnabled(next);
-    const res = await fetch("/api/settings/auto-reply", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    if (!res.ok) {
-      setAutoReplyEnabled(!next);
-      toast("Не удалось переключить автоответы", "error");
-      return;
-    }
-    toast(
-      next ? "Автоответы включены" : "Автоответы выключены",
-      next ? "success" : "info"
-    );
-  }
-
-  // Чтение реплик агента в группе → автоматическая смена статуса.
-  // Отдельно от автоответов: тут бот ничего не пишет коллегам, но молча
-  // меняет то, что уйдёт в репорт, — выключать это надо уметь отдельно.
-  async function handleToggleChatIntent() {
-    const next = !chatIntentEnabled;
-    setChatIntentEnabled(next);
-    const res = await fetch("/api/settings/chat-intent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    if (!res.ok) {
-      setChatIntentEnabled(!next);
-      toast("Не удалось переключить чтение реплик", "error");
-      return;
-    }
-    toast(
-      next ? "Статусы будут ставиться по твоим ответам" : "Чтение реплик выключено",
-      "info"
-    );
-  }
-
-  // ИИ-уточнение, что просить в автоответе — работает только поверх уже
-  // включённых автоответов: не просит на общих вопросах без ученика,
-  // добавляет ай-апту на обращениях про конкретное задание по программе
-  // (см. classifyAckAsk в lib/ai.ts).
-  // Спрашивать в личке перед ответом в группу. Выключить — значит
-  // разрешить боту писать коллегам без спроса, поэтому предупреждаем
-  // именно при выключении (у остальных тумблеров всё наоборот).
-  async function handleToggleAutoReplyConfirm() {
-    const next = !autoReplyConfirm;
-    if (
-      !next &&
-      !window.confirm(
-        "Выключить подтверждение? Бот начнёт отвечать в рабочих группах сразу, не спрашивая."
-      )
-    ) {
-      return;
-    }
-    setAutoReplyConfirm(next);
-    const res = await fetch("/api/settings/auto-reply-confirm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    if (!res.ok) {
-      setAutoReplyConfirm(!next);
-      toast("Не удалось переключить подтверждение", "error");
-      return;
-    }
-    toast(
-      next
-        ? "Бот будет спрашивать в личке перед ответом"
-        : "Бот отвечает в группах сразу",
-      next ? "success" : "info"
-    );
-  }
-
-  // Ответ в чат при смене статуса. Отдельно от подтверждения приёма:
-  // "жұмысқа алдық" на каждое перетаскивание карточки надоедает быстрее
-  // всего, особенно если тикет за день двигают несколько раз.
-  async function handleToggleStatusReply() {
-    const next = !statusReplyEnabled;
-    setStatusReplyEnabled(next);
-    const res = await fetch("/api/settings/status-reply", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    if (!res.ok) {
-      setStatusReplyEnabled(!next);
-      toast("Не удалось переключить ответы о статусе", "error");
-      return;
-    }
-    toast(
-      next
-        ? "Бот пишет в чат при смене статуса"
-        : "Бот молчит при смене статуса — остаётся только эмодзи-реакция",
-      next ? "success" : "info"
-    );
-  }
-
-  async function handleToggleAiAsk() {
-    const next = !aiAskEnabled;
-    setAiAskEnabled(next);
-    const res = await fetch("/api/settings/ai-ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    if (!res.ok) {
-      setAiAskEnabled(!next);
-      toast("Не удалось переключить ИИ-запрос данных", "error");
-      return;
-    }
-    toast(
-      next ? "ИИ будет уточнять запрос почты/ссылки" : "ИИ-уточнение выключено",
-      "info"
-    );
-  }
-
   // Фильтр по тексту на доске: за активный день набирается несколько
   // десятков карточек в трёх колонках, и найти "тот тикет про ДТ" глазами
   // дольше, чем набрать пару букв.
@@ -909,11 +735,11 @@ export function Inbox() {
       },
       {
         id: "toggle-ai",
-        label: aiCleaningEnabled
+        label: bot.aiCleaningEnabled
           ? "Выключить ИИ-описания"
           : "Включить ИИ-описания",
         Icon: IconRefresh,
-        run: handleToggleAiCleaning,
+        run: bot.toggleAiCleaning,
       },
       {
         id: "shortcuts",
@@ -922,10 +748,9 @@ export function Inbox() {
         run: () => setShowShortcuts(true),
       },
     ],
-    // handleToggleAiCleaning пересоздаётся каждый рендер, но зависит только
-    // от aiCleaningEnabled — его и отслеживаем.
+    // bot.toggleAiCleaning стабилен по значению флага — его и отслеживаем.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [aiCleaningEnabled]
+    [bot.aiCleaningEnabled]
   );
 
   return (
@@ -970,26 +795,26 @@ export function Inbox() {
                 key: "ai",
                 label: "✨ ИИ-описания",
                 hint: "Описания авто-тикетов пишет ИИ вместо чистки регулярками",
-                enabled: aiCleaningEnabled,
-                onToggle: handleToggleAiCleaning,
+                enabled: bot.aiCleaningEnabled,
+                onToggle: bot.toggleAiCleaning,
                 color: "bg-brand-600",
               },
               {
                 key: "autoreply",
                 label: "🤖 Автоответы в группах",
                 hint: "Бот подтверждает приём обращения и сообщает о смене статуса",
-                enabled: autoReplyEnabled,
-                onToggle: handleToggleAutoReply,
+                enabled: bot.autoReplyEnabled,
+                onToggle: bot.toggleAutoReply,
                 color: "bg-emerald-600",
               },
               {
                 key: "autoreplyconfirm",
                 label: "🙋 Спрашивать перед ответом",
                 hint: "Бот присылает черновик в личку с вариантами — в группу уходит только по кнопке",
-                enabled: autoReplyConfirm,
-                onToggle: handleToggleAutoReplyConfirm,
+                enabled: bot.autoReplyConfirm,
+                onToggle: bot.toggleAutoReplyConfirm,
                 color: "bg-violet-600",
-                note: autoReplyEnabled
+                note: bot.autoReplyEnabled
                   ? null
                   : "Не действует: автоответы выключены",
               },
@@ -997,28 +822,28 @@ export function Inbox() {
                 key: "statusreply",
                 label: "💬 Писать при смене статуса",
                 hint: "«Жұмысқа алдық» в чат, когда двигаешь карточку. Выключено — остаётся только эмодзи-реакция",
-                enabled: statusReplyEnabled,
-                onToggle: handleToggleStatusReply,
+                enabled: bot.statusReplyEnabled,
+                onToggle: bot.toggleStatusReply,
                 color: "bg-amber-500",
-                note: autoReplyEnabled ? null : "Не действует: автоответы выключены",
+                note: bot.autoReplyEnabled ? null : "Не действует: автоответы выключены",
               },
               {
                 key: "chatintent",
                 label: "👂 Читать мои ответы",
                 hint: "Статус ставится сам по твоей реплике в группе",
-                enabled: chatIntentEnabled,
-                onToggle: handleToggleChatIntent,
+                enabled: bot.chatIntentEnabled,
+                onToggle: bot.toggleChatIntent,
                 color: "bg-sky-600",
               },
               {
                 key: "aiask",
                 label: "🎯 Отвечать по ситуации",
                 hint: "ИИ узнаёт тип обращения и просит только недостающее — вместо почты на каждое сообщение. Надстройка над автоответами",
-                note: autoReplyEnabled
+                note: bot.autoReplyEnabled
                   ? null
                   : "Не действует: автоответы выключены",
-                enabled: aiAskEnabled,
-                onToggle: handleToggleAiAsk,
+                enabled: bot.aiAskEnabled,
+                onToggle: bot.toggleAiAsk,
                 color: "bg-amber-600",
               },
             ]}
