@@ -10,6 +10,7 @@ import {
   IconInbox,
   IconHistory,
   IconLogout,
+  IconMail,
 } from "@/components/Icons";
 
 const NAV = [
@@ -26,7 +27,24 @@ export function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [inboxCount, setInboxCount] = useState<number | null>(null);
+  // Ссылка на инструмент смены почты появляется в меню, только когда он
+  // настроен на сервере (заданы PLATFORM_* env) — иначе вела бы на страницу
+  // «не настроено».
+  const [platformTool, setPlatformTool] = useState(false);
   const currentAgent = useCurrentAgent();
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setPlatformTool(Boolean(data.platformToolEnabled));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +111,19 @@ export function AppHeader() {
               </Link>
             );
           })}
+          {platformTool && (
+            <Link
+              href="/platform/change-email"
+              className={`relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition sm:px-3 ${
+                pathname === "/platform/change-email"
+                  ? "bg-brand-600 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <IconMail className="h-4 w-4" />
+              <span className="hidden sm:inline">Почта</span>
+            </Link>
+          )}
         </nav>
       </div>
       <div className="flex items-center gap-3">

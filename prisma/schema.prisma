@@ -360,3 +360,25 @@ model Issue {
   // это скан всей таблицы, и он растёт вместе с историей.
   @@index([status, reportDate])
 }
+
+// Журнал смен почты ученикам в основной платформе JUZ40
+// (api.juz40-edu.kz) через инструмент /platform/change-email. Платформа —
+// отдельная система со своей БД, её данные тут не храним; это только след
+// того, что инструмент сделал: кто из агентов, какому ученику, с какой
+// почты на какую и когда. Нужен, потому что меняем прод-данные учеников —
+// без журнала «кто это сделал» не ответить.
+model PlatformEmailChange {
+  id          String   @id @default(cuid())
+  // Имя агента из сессии Support (getCurrentIdentity().name), а не из клиента.
+  actor       String
+  // UUID ученика в платформе (в её API это id).
+  studentId   String
+  // ФИО на момент смены — чтобы журнал читался без похода в платформу.
+  studentName String?
+  oldEmail    String
+  newEmail    String
+  at          DateTime @default(now())
+
+  @@index([at])
+  @@index([studentId, at])
+}
