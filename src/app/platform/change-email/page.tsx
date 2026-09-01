@@ -1,4 +1,4 @@
-import { AppHeader } from "@/components/AppHeader";
+import { AppShell } from "@/components/AppShell";
 import { ChangeEmailTool } from "@/components/ChangeEmailTool";
 import { platformEnabled } from "@/lib/platform";
 
@@ -9,8 +9,7 @@ export default function ChangeEmailPage() {
   const enabled = platformEnabled();
 
   return (
-    <div className="min-h-screen">
-      <AppHeader />
+    <AppShell>
       {enabled ? (
         <ChangeEmailTool />
       ) : (
@@ -34,6 +33,6 @@ export default function ChangeEmailPage() {
           </div>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AppHeader } from "@/components/AppHeader";
+import { AppShell } from "@/components/AppShell";
 import { prisma } from "@/lib/prisma";
 import { formatDateHuman } from "@/lib/date";
 
@@ -28,8 +28,7 @@ export default async function HistoryPage() {
   const totalIssues = rows.reduce((sum, r) => sum + r._count._all, 0);
 
   return (
-    <div className="min-h-screen">
-      <AppHeader />
+    <AppShell>
       <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6">
         <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-lg font-semibold text-slate-900">
@@ -78,6 +77,6 @@ export default async function HistoryPage() {
           </ul>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

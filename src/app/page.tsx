@@ -1,4 +1,4 @@
-import { AppHeader } from "@/components/AppHeader";
+import { AppShell } from "@/components/AppShell";
 import { Dashboard } from "@/components/Dashboard";
 import { todayDateString } from "@/lib/date";
 
@@ -11,9 +11,8 @@ export default async function Home({ searchParams }: Props) {
   const date = params.date ?? todayDateString();
 
   return (
-    <div className="min-h-screen">
-      <AppHeader />
+    <AppShell>
       <Dashboard initialDate={date} />
-    </div>
+    </AppShell>
   );
 }

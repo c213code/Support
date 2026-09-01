@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GroupPresetDTO, IssueDTO, TelegramMessageDTO } from "@/lib/types";
 import { IssueForm, type IssueFormValues } from "@/components/IssueForm";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import { ReportLedger } from "@/components/ReportLedger";
 import { BotSettingsMenu } from "@/components/BotSettingsMenu";
 import { GlossaryPanel } from "@/components/GlossaryPanel";
 import { ResolveDialog } from "@/components/ResolveDialog";
@@ -810,6 +811,22 @@ export function Inbox() {
     );
   }, [issues, boardQuery]);
 
+  // Счётчики по статусам для плиток над доской — по всему дню, не по
+  // отфильтрованному виду.
+  const counts = useMemo(
+    () => ({
+      sent: issues.filter((i) => i.status === "SENT").length,
+      active: issues.filter(
+        (i) =>
+          i.status === "IN_PROGRESS" ||
+          i.status === "PENDING" ||
+          i.status === "ESCALATED"
+      ).length,
+      resolved: issues.filter((i) => i.status === "RESOLVED").length,
+    }),
+    [issues]
+  );
+
   // Подсветить тикет, выбранный в ⌘K или найденный по ссылке: переключаем
   // дату на ту, где он реально лежит (доска показывает один день, а тикет
   // может быть из прошлого), открываем его форму и заодно помечаем на
@@ -913,7 +930,7 @@ export function Inbox() {
 
   return (
     <div
-      className={`mx-auto px-4 py-6 sm:px-6 ${tab === "board" ? "max-w-6xl" : "max-w-3xl"}`}
+      className={`mx-auto px-4 py-6 sm:px-6 ${tab === "board" ? "max-w-[1500px]" : "max-w-3xl"}`}
     >
       {confirmElement}
       <CommandPalette
@@ -1082,7 +1099,27 @@ export function Inbox() {
       </div>
 
       {tab === "board" && (
-        <div>
+        <div className="flex gap-5">
+          <div className="min-w-0 flex-1">
+          <div className="mb-4 flex flex-wrap gap-2.5">
+            {[
+              { n: counts.sent, l: "Отправлено", edge: "border-t-slate-400" },
+              { n: counts.active, l: "В работе", edge: "border-t-amber-400" },
+              { n: counts.resolved, l: "Решено", edge: "border-t-emerald-500" },
+            ].map((p) => (
+              <div
+                key={p.l}
+                className={`min-w-[96px] rounded-xl border border-slate-200 border-t-[3px] ${p.edge} bg-white px-4 py-2.5`}
+              >
+                <div className="text-2xl font-extrabold leading-none tabular-nums text-slate-800">
+                  {p.n}
+                </div>
+                <div className="mt-1 text-[11px] font-medium text-slate-500">
+                  {p.l}
+                </div>
+              </div>
+            ))}
+          </div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-3">
               <h2 className="text-base font-semibold text-slate-700">
@@ -1299,6 +1336,10 @@ export function Inbox() {
               highlightId={highlightId}
             />
           )}
+          </div>
+          <aside className="hidden w-[320px] shrink-0 xl:block">
+            <ReportLedger issues={issues} groups={groups} date={date} />
+          </aside>
         </div>
       )}
 
