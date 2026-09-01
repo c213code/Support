@@ -340,6 +340,23 @@ export function KanbanBoard({
                         )}
                       </div>
                     )}
+                    {/* Распознан запрос «смените почту A → B» — кнопка ведёт в
+                        инструмент смены с уже подставленными почтами. Меняет
+                        всё равно агент (там предпросмотр и подтверждение). */}
+                    {issue.emailChange && (
+                      <div className="mt-1">
+                        <a
+                          href={`/platform/change-email?old=${encodeURIComponent(
+                            issue.emailChange.oldEmail
+                          )}&new=${encodeURIComponent(issue.emailChange.newEmail)}`}
+                          onClick={(e) => e.stopPropagation()}
+                          title={`Сменить почту: ${issue.emailChange.oldEmail} → ${issue.emailChange.newEmail}`}
+                          className="inline-flex max-w-full items-center gap-1 truncate rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 transition hover:bg-brand-100"
+                        >
+                          ✉️ Сменить почту →
+                        </a>
+                      </div>
+                    )}
                     {onBotRepliesChanged && onBotReplyError && (
                       <BotReplies
                         issueId={issue.id}

@@ -39,6 +39,11 @@ export type IssueDTO = {
   // Почта/телефон/вложение из исходных сообщений — только для карточки,
   // в текст репорта не попадают (см. src/lib/ticketHints.ts).
   hints?: { emails: string[]; phones: string[]; hasAttachment: boolean };
+  // Если в исходном сообщении распознан запрос «смените почту A → B» —
+  // подставляется пара почт для кнопки быстрой смены на карточке. Считается
+  // только когда инструмент смены почты включён (заданы PLATFORM_* env), см.
+  // GET /api/issues и src/lib/emailChangeRequest.ts.
+  emailChange?: { oldEmail: string; newEmail: string } | null;
 };
 
 export type GroupPresetDTO = {

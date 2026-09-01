@@ -6,6 +6,8 @@ import { isIssueStatus } from "@/lib/status";
 import { isEscalationTeam } from "@/lib/escalation";
 import { cleanTicketDescription } from "@/lib/textClean";
 import { extractTicketHints } from "@/lib/ticketHints";
+import { detectEmailChangeRequest } from "@/lib/emailChangeRequest";
+import { platformEnabled } from "@/lib/platform";
 
 export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
@@ -68,20 +70,32 @@ export async function GET(request: NextRequest) {
     textsByIssue.set(source.usedForIssueId, list);
   }
 
+  // Распознавание «смените почту» считаем только когда инструмент включён —
+  // иначе кнопка на карточке вела бы в никуда (см. platformEnabled).
+  const platformOn = platformEnabled();
+
   return NextResponse.json({
-    issues: issues.map((issue) => ({
-      ...issue,
-      botReplies: byIssue.get(issue.id) ?? [],
-      // Одно и то же сообщение может попасть в оба списка (привязано и
-      // указано ссылкой) — extractTicketHints складывает почты/телефоны в
-      // Set, поэтому дубликаты безвредны.
-      hints: extractTicketHints([
+    issues: issues.map((issue) => {
+      // Исходные (сырые) тексты обращения: и в hints, и в распознавании смены
+      // почты нужен именно сырой текст — в description почты уже вычищены.
+      const rawTexts = [
         ...(textsByIssue.get(issue.id) ?? []),
         ...[issue.telegramLink, ...issue.extraLinks].map((l) =>
           l ? (textByLink.get(l) ?? null) : null
         ),
-      ]),
-    })),
+      ];
+      return {
+        ...issue,
+        botReplies: byIssue.get(issue.id) ?? [],
+        // Одно и то же сообщение может попасть в оба списка (привязано и
+        // указано ссылкой) — extractTicketHints складывает почты/телефоны в
+        // Set, поэтому дубликаты безвредны.
+        hints: extractTicketHints(rawTexts),
+        emailChange: platformOn
+          ? detectEmailChangeRequest(rawTexts.filter(Boolean).join("\n"))
+          : null,
+      };
+    }),
   });
 }
 

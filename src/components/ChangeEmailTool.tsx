@@ -37,6 +37,24 @@ export function ChangeEmailTool() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<ChangeResult | null>(null);
 
+  // Предзаполнение с карточки тикета: /platform/change-email?old=A&new=B.
+  // Читаем из window.location, а не useSearchParams — чтобы не тянуть Suspense
+  // ради двух параметров. Старую почту кладём в поиск (ученик найдётся сам),
+  // новую — в поле; ученика агент всё равно выбирает и подтверждает руками.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const o = p.get("old");
+    const n = p.get("new");
+    if (!o && !n) return;
+    // setState вне синхронного тела эффекта (как и другие эффекты здесь) —
+    // синхронный setState линтер запрещает из-за каскадных рендеров.
+    const t = setTimeout(() => {
+      if (n) setNewEmail(n);
+      if (o) setQuery(o);
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+
   // Дебаунс-поиск: пока ученик не выбран и запрос ≥3 символов. Все setState
   // — внутри отложенного колбэка (не синхронно в теле эффекта), иначе линтер
   // ругается на каскадные рендеры. Показ результатов и так огорожен теми же
