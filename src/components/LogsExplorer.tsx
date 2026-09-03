@@ -289,7 +289,7 @@ export function LogsExplorer() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
+              <table className="w-full min-w-[960px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-xs text-slate-400">
                     <th className="px-3 py-2 font-medium">Время</th>
@@ -297,6 +297,7 @@ export function LogsExplorer() {
                     <th className="px-3 py-2 font-medium">Статус</th>
                     <th className="px-3 py-2 font-medium">URI</th>
                     <th className="px-3 py-2 font-medium">Кто</th>
+                    <th className="px-3 py-2 font-medium">Сообщение</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -328,15 +329,13 @@ export function LogsExplorer() {
                           <td className="max-w-[160px] truncate px-3 py-2 font-mono text-xs text-slate-500">
                             {hit.username ?? "—"}
                           </td>
+                          <td className="min-w-[280px] max-w-lg whitespace-normal break-words px-3 py-2 font-mono text-xs text-slate-700">
+                            {hit.message || "—"}
+                          </td>
                         </tr>
                         {isOpen && (
                           <tr className="border-b border-slate-100 bg-slate-50">
-                            <td colSpan={5} className="px-3 py-3">
-                              {hit.message && (
-                                <p className="mb-2 whitespace-pre-wrap text-xs text-slate-700">
-                                  {hit.message}
-                                </p>
-                              )}
+                            <td colSpan={6} className="px-3 py-3">
                               <pre className="max-h-80 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
                                 {JSON.stringify(hit.raw, null, 2)}
                               </pre>
