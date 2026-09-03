@@ -338,6 +338,16 @@ export function KanbanBoard({
                             📎 вложение
                           </span>
                         )}
+                        {issue.hints.emails.length > 0 && (
+                          <a
+                            href={`/logs?email=${encodeURIComponent(issue.hints.emails[0])}`}
+                            onClick={(e) => e.stopPropagation()}
+                            title={`Логи ученика: ${issue.hints.emails[0]}`}
+                            className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 transition hover:bg-slate-200"
+                          >
+                            🪵 Логи
+                          </a>
+                        )}
                       </div>
                     )}
                     {/* Распознан запрос «смените почту A → B» — кнопка ведёт в

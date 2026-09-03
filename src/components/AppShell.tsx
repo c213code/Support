@@ -11,6 +11,7 @@ import {
   IconLogout,
   IconMail,
   IconSearch,
+  IconDatabase,
 } from "@/components/Icons";
 
 // Страницы, где смонтирована командная палитра (⌘K) — только там кнопка
@@ -32,6 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [inboxCount, setInboxCount] = useState<number | null>(null);
   const [platformTool, setPlatformTool] = useState(false);
+  const [logsTool, setLogsTool] = useState(false);
   const currentAgent = useCurrentAgent();
 
   useEffect(() => {
@@ -53,7 +55,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     fetch("/api/auth/me")
       .then((res) => res.json())
       .then((data) => {
-        if (!cancelled) setPlatformTool(Boolean(data.platformToolEnabled));
+        if (cancelled) return;
+        setPlatformTool(Boolean(data.platformToolEnabled));
+        setLogsTool(Boolean(data.logsToolEnabled));
       })
       .catch(() => {});
 
@@ -127,6 +131,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="absolute -left-3.5 top-2.5 bottom-2.5 w-[3px] rounded-r bg-brand-500" />
             )}
             <IconMail className="h-[19px] w-[19px]" />
+          </Link>
+        )}
+
+        {logsTool && (
+          <Link
+            href="/logs"
+            title="Логи (Elasticsearch)"
+            aria-label="Логи"
+            className={linkClass(pathname === "/logs")}
+          >
+            {pathname === "/logs" && (
+              <span className="absolute -left-3.5 top-2.5 bottom-2.5 w-[3px] rounded-r bg-brand-500" />
+            )}
+            <IconDatabase className="h-[19px] w-[19px]" />
           </Link>
         )}
 

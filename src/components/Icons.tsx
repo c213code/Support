@@ -192,3 +192,11 @@ export const IconFilter = (p: IconProps) => (
     <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
   </Svg>
 );
+
+export const IconDatabase = (p: IconProps) => (
+  <Svg {...p}>
+    <ellipse cx="12" cy="5" rx="9" ry="3" />
+    <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+    <path d="M3 12a9 3 0 0 0 18 0" />
+  </Svg>
+);

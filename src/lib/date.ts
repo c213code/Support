@@ -54,3 +54,20 @@ export function formatTimeAlmaty(date: Date): string {
     minute: "2-digit",
   }).format(date);
 }
+
+// Дата+время с секундами — для строк лога, где важно различить события в
+// пределах одной минуты и понять, сегодняшний это день или нет. Источник —
+// внешний сервис логов (Elasticsearch), формат timestamp не гарантирован —
+// невалидную дату не парсим молча в NaN, а показываем прочерк, а не роняем
+// Intl.DateTimeFormat.format() (RangeError на Invalid Date) на всю таблицу.
+export function formatDateTimeAlmaty(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: TIMEZONE,
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
+}
