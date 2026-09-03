@@ -45,6 +45,20 @@ function rowKey(hit: LogHit, i: number): string {
   return hit.requestId ? `${hit.requestId}-${i}` : `${hit.timestamp}-${i}`;
 }
 
+// Режим "по ученику" ищет точной фразой по всем полям без разбора формата —
+// email, телефон, ссылка, request id — что угодно, что реально встречается в
+// документе. Единственное, что стоит привести к одному виду сам, — телефон:
+// агент может ввести его с "+7", с "8" вместо "7", с пробелами/дефисами, а
+// искать нужно ровно ту цифровую строку, что лежит в логе.
+function normalizeStudentQuery(raw: string): string {
+  const trimmed = raw.trim();
+  const digitsOnly = trimmed.replace(/[\s\-()]/g, "");
+  if (/^(\+7|8|7)\d{10}$/.test(digitsOnly)) {
+    return "7" + digitsOnly.slice(-10);
+  }
+  return trimmed;
+}
+
 // Логи — однородные записи одной формы: таблица читается быстрее карточек,
 // когда задача — просканировать полсотни строк и найти одну аномалию.
 //
@@ -90,8 +104,9 @@ export function LogsExplorer({
   async function search(overrides?: { mode?: Mode; input?: string; period?: string }) {
     const activeMode = overrides?.mode ?? mode;
     const activePeriod = overrides?.period ?? period;
-    const value = (overrides?.input ?? input).trim();
-    if (!value) return;
+    const rawValue = (overrides?.input ?? input).trim();
+    if (!rawValue) return;
+    const value = activeMode === "student" ? normalizeStudentQuery(rawValue) : rawValue;
 
     lastAttemptRef.current = { mode: activeMode, input: value, period: activePeriod };
     setLoading(true);
@@ -251,7 +266,7 @@ export function LogsExplorer({
               onKeyDown={(e) => e.key === "Enter" && search()}
               placeholder={
                 mode === "student"
-                  ? "email ученика…"
+                  ? "email, телефон (77771234567), ссылка или ID ученика…"
                   : "responseStatusCode:500 AND requestUri:/login…"
               }
               className="w-full rounded-lg border border-slate-300 py-2 pl-8 pr-3 text-sm outline-none focus:border-brand-500"
@@ -390,7 +405,7 @@ export function LogsExplorer({
           <IconDatabase className="h-8 w-8" />
           <p className="text-sm">
             {mode === "student"
-              ? "Введи почту ученика и нажми Enter."
+              ? "Введи email, телефон, ссылку или ID ученика и нажми Enter — ищем точным совпадением по всем полям, формат неважен."
               : "Введи запрос в синтаксисе Elasticsearch и нажми Enter."}
           </p>
         </div>
