@@ -117,3 +117,22 @@ export async function setAiAskEnabled(enabled: boolean): Promise<void> {
     create: { id: SETTINGS_ID, aiAskEnabled: enabled },
   });
 }
+
+// ИИ-разбор логов ученика (см. logsAiEnabled в schema.prisma). Отдельно от
+// aiCleaningEnabled: там во внешнюю модель уходит текст обращения, здесь —
+// тела запросов и ответов платформы.
+export async function isLogsAiEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { logsAiEnabled: true },
+  });
+  return row?.logsAiEnabled ?? false;
+}
+
+export async function setLogsAiEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { logsAiEnabled: enabled },
+    create: { id: SETTINGS_ID, logsAiEnabled: enabled },
+  });
+}

@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { VpnServiceButton } from "@/components/VpnServiceButton";
 import { formatDateTimeAlmaty } from "@/lib/date";
+import { RAW_FIELDS, pickRawField } from "@/lib/logFields";
 import { IconDatabase, IconSearch } from "@/components/Icons";
 
 type Mode = "student" | "free";
@@ -59,21 +60,6 @@ function ColumnHeader({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Устройство и версия приложения не входят в нормализованный верх LogHit
-// (сервис логов специально прокидывает весь документ в raw именно для
-// такого случая — полей без готового места в верхушке типа), достаём их
-// напрямую по пути в исходном документе.
-function pick(source: Record<string, unknown>, path: string): string | null {
-  const value = path
-    .split(".")
-    .reduce<unknown>(
-      (acc, key) =>
-        acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined,
-      source
-    );
-  return typeof value === "string" && value ? value : null;
-}
-
 // requestBody/responseBody приходят строкой — обычно это JSON, но не всегда
 // (бывает голый текст/HTML). Пытаемся раскрасить как JSON; не вышло —
 // показываем как есть, лишь бы не терять содержимое ради красоты.
@@ -100,18 +86,52 @@ function normalizeStudentQuery(raw: string): string {
   return trimmed;
 }
 
+type Investigation = {
+  summary: string;
+  timeline: Array<{
+    time: string;
+    what: string;
+    requestId: string | null;
+    suspect: boolean;
+  }>;
+};
+
+// Результат разбора вместе с тем, на скольких записях он построен: пустая
+// хронология на обрезанных данных и пустая хронология на полных — это разные
+// по достоверности ответы, и агент должен видеть, какой из них перед ним.
+type InvestigationState = {
+  investigation: Investigation;
+  analyzed: number;
+  found: number;
+};
+
+// Почему разбор не запустился. Панель об этих случаях говорит по-разному:
+// "выключено" чинится кнопкой, "нет логов" — расширением периода, "модель не
+// ответила" — повтором. Один общий текст "не получилось" отправил бы агента
+// гадать, что именно делать.
+const AI_REASON_TEXT: Record<string, string> = {
+  "ai-off": "ИИ-разбор выключен",
+  "no-logs": "За этот период логов не нашлось — расширь диапазон и попробуй снова",
+  "logs-shape-error":
+    "Сервис логов ответил непонятно (нашёл записи, но не отдал их) — это сбой, а не пустой результат",
+  "ai-error": "Модель не ответила — попробуй ещё раз",
+};
+
 // Логи — однородные записи одной формы: таблица читается быстрее карточек,
 // когда задача — просканировать полсотни строк и найти одну аномалию.
 //
 // Используется и как страница /logs (без пропсов — email читается из URL),
-// и как модалка прямо с карточки тикета (initialEmail/onClose — модалка
-// монтирует компонент заново на каждое открытие, так что initialEmail нужен
-// только на момент монтирования, реагировать на его смену не на чем).
+// и как модалка прямо с карточки тикета (initialEmail/initialSituation/
+// onClose — модалка монтирует компонент заново на каждое открытие, так что
+// начальные значения нужны только на момент монтирования, реагировать на их
+// смену не на чем).
 export function LogsExplorer({
   initialEmail,
+  initialSituation,
   onClose,
 }: {
   initialEmail?: string;
+  initialSituation?: string;
   onClose?: () => void;
 } = {}) {
   const toast = useToast();
@@ -133,6 +153,21 @@ export function LogsExplorer({
   // одним куском (см. историю фичи).
   const [showRawFor, setShowRawFor] = useState<string | null>(null);
 
+  // ИИ-разбор: свой рубильник (logsAiEnabled), потому что сюда во внешнюю
+  // модель уходят тела запросов и ответов платформы — риск не тот же, что у
+  // ИИ-описаний тикетов. null — ещё не знаем, включён ли.
+  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
+  // Статус рубильника не удалось прочитать. Отдельно от "выключен": утверждать
+  // "ИИ-разбор выключен", когда мы просто не смогли спросить, — враньё, из-за
+  // которого агент пойдёт выяснять у коллег, кто его выключил.
+  const [aiStatusUnknown, setAiStatusUnknown] = useState(false);
+  const [aiEnabling, setAiEnabling] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [situation, setSituation] = useState(initialSituation ?? "");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiState, setAiState] = useState<InvestigationState | null>(null);
+  const [aiReason, setAiReason] = useState<string | null>(null);
+
   const autoSearchedRef = useRef(false);
   // Параметры последней попытки — ретрай через 8с бьёт именно по ним, а не
   // по тому, что окажется в input/mode/period к тому моменту (агент вполне
@@ -143,6 +178,32 @@ export function LogsExplorer({
   useEffect(() => {
     return () => {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/settings/logs-ai")
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setAiEnabled(Boolean(data?.enabled));
+        setAiStatusUnknown(false);
+      })
+      .catch((err) => {
+        // Не узнали статус — ведём себя как при выключенном (не шлём данные
+        // во внешнюю модель вслепую), но говорим правду: "не смогли
+        // проверить", а не "выключено".
+        console.warn(`[logs] статус ИИ-разбора не прочитан: ${String(err)}`);
+        if (cancelled) return;
+        setAiEnabled(false);
+        setAiStatusUnknown(true);
+      });
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -157,6 +218,11 @@ export function LogsExplorer({
     setLoading(true);
     setServiceDown(false);
     setServiceDownDetail(null);
+    // Разбор относится к конкретной выборке. Пережить её он не должен: иначе
+    // вывод по одному ученику останется висеть над таблицей другого, а
+    // подпись "сверься с таблицей ниже" будет отсылать не туда.
+    setAiState(null);
+    setAiReason(null);
     try {
       const path = activeMode === "student" ? "/api/logs/student" : "/api/logs/search";
       const param = activeMode === "student" ? "email" : "q";
@@ -231,6 +297,93 @@ export function LogsExplorer({
     } catch (err) {
       toast(`Не удалось включить сервис: ${String(err)}`, "error");
       setEnabling(false);
+    }
+  }
+
+  async function enableAi() {
+    if (aiEnabling) return;
+    setAiEnabling(true);
+    try {
+      const res = await fetch("/api/settings/logs-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast(data?.error ?? `Не удалось включить ИИ-разбор (HTTP ${res.status})`, "error");
+        return;
+      }
+      // Верим ответу сервера, а не своему намерению: рубильник командный.
+      setAiEnabled(Boolean(data?.enabled));
+      setAiReason(null);
+      toast("ИИ-разбор включён для всей команды", "success");
+    } catch (err) {
+      toast(`Не удалось включить ИИ-разбор: ${String(err)}`, "error");
+    } finally {
+      setAiEnabling(false);
+    }
+  }
+
+  async function investigate() {
+    const text = situation.trim();
+    if (!text || aiLoading) return;
+
+    // Разбираем ровно ту выборку, что сейчас в таблице, а не то, что успели
+    // напечатать в поле поиска. Иначе модель посмотрит логи одного ученика,
+    // а сверять их агент будет с таблицей другого (та же причина, по которой
+    // ретрай сервиса ходит через lastAttemptRef).
+    const attempt = lastAttemptRef.current;
+    if (!attempt || !result) {
+      toast("Сначала найди логи — разбор строится по тому, что в таблице", "error");
+      return;
+    }
+
+    setAiLoading(true);
+    setAiState(null);
+    setAiReason(null);
+    try {
+      const res = await fetch("/api/logs/investigate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          situation: text,
+          ...(attempt.mode === "student"
+            ? { email: attempt.input }
+            : { q: attempt.input }),
+          from: attempt.period,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast(data?.error ?? `Разбор не удался (HTTP ${res.status})`, "error");
+        return;
+      }
+      if (!data?.investigation) {
+        const reason = typeof data?.reason === "string" ? data.reason : "ai-error";
+        // Рубильник выключили в соседней вкладке — состояние панели об этом
+        // не знает и осталось бы с полем ввода без пути дальше.
+        if (reason === "ai-off") setAiEnabled(false);
+        setAiReason(reason);
+        return;
+      }
+      // Ответ читаем так же придирчиво, как результат поиска: без timeline
+      // рендер упадёт на .length, а "пришло что-то не то" — это сбой, а не
+      // разбор без событий.
+      const investigation = data.investigation;
+      if (typeof investigation?.summary !== "string" || !Array.isArray(investigation.timeline)) {
+        toast("Разбор вернулся в неожиданном формате", "error");
+        return;
+      }
+      setAiState({
+        investigation,
+        analyzed: typeof data.analyzed === "number" ? data.analyzed : 0,
+        found: typeof data.found === "number" ? data.found : 0,
+      });
+    } catch (err) {
+      toast(`Сеть недоступна: ${String(err)}`, "error");
+    } finally {
+      setAiLoading(false);
     }
   }
 
@@ -343,6 +496,121 @@ export function LogsExplorer({
             </button>
           ))}
         </div>
+
+        {/* ИИ-разбор — рядом с поиском, а не отдельной страницей: вопрос
+            задают о тех же логах и в том же периоде, что уже выбраны. */}
+        <div className="mt-2 border-t border-slate-100 pt-2">
+          <button
+            type="button"
+            onClick={() => setAiOpen((v) => !v)}
+            className="text-xs font-medium text-brand-600 hover:underline"
+          >
+            {aiOpen ? "Скрыть разбор ИИ" : "🤖 Разобраться с ИИ"}
+          </button>
+
+          {aiOpen && (
+            <div className="mt-2">
+              {aiEnabled === false ? (
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-xs text-slate-600">
+                    {aiStatusUnknown
+                      ? "Не удалось проверить, включён ли ИИ-разбор — пока считаем, что выключен."
+                      : "ИИ-разбор выключен."}{" "}
+                    При включении тела запросов и ответов платформы (там попадаются
+                    ссылки восстановления и токены) уходят во внешнюю модель Groq.
+                    Рубильник общий на всю команду.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={enableAi}
+                    disabled={aiEnabling}
+                    className="mt-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    {aiEnabling ? "Включаем…" : "Понимаю, включить"}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <textarea
+                    value={situation}
+                    onChange={(e) => setSituation(e.target.value)}
+                    rows={2}
+                    placeholder="Ученик говорит, что сдал тест, но результата в платформе нет…"
+                    className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={investigate}
+                    disabled={aiLoading || !situation.trim() || aiEnabled === null}
+                    className="self-start rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-700 disabled:opacity-40"
+                  >
+                    {aiLoading ? "ИИ читает логи…" : "Разобрать"}
+                  </button>
+                </div>
+              )}
+
+              {aiReason && (
+                <p className="mt-2 text-xs text-slate-500">
+                  {AI_REASON_TEXT[aiReason] ?? "Разбор не получился"}
+                </p>
+              )}
+
+              {aiState && (
+                <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50/50 p-3">
+                  <p className="text-sm text-slate-800">{aiState.investigation.summary}</p>
+
+                  {/* Разбор построен не на всех найденных записях. Без этой
+                      строки "в логах этого нет" читалось бы как факт, хотя
+                      нужная запись могла просто не попасть в окно. */}
+                  {aiState.found > aiState.analyzed && (
+                    <p className="mt-2 rounded bg-amber-50 p-2 text-[11px] text-amber-800">
+                      Разобраны {aiState.analyzed} самых свежих записей из {aiState.found} —
+                      остальные модель не видела. Сузь период, чтобы охватить остальное.
+                    </p>
+                  )}
+
+                  {aiState.investigation.timeline.length === 0 ? (
+                    <p className="mt-2 rounded bg-amber-50 p-2 text-[11px] text-amber-800">
+                      ИИ не сослался ни на одну запись лога — вывод выше ничем не
+                      подтверждён. Пересказывать его ученику нельзя, проверь таблицу сам.
+                    </p>
+                  ) : (
+                    <ol className="mt-3 space-y-2 border-l-2 border-brand-200 pl-3">
+                      {aiState.investigation.timeline.map((event, i) => (
+                        <li key={`${event.time}-${i}`} className="text-xs">
+                          <span className="font-mono font-semibold text-slate-700">
+                            {event.time || "—"}
+                          </span>
+                          <span className="ml-2 text-slate-700">{event.what}</span>
+                          {/* Ссылка на конкретную запись — то, чем этот вывод
+                              отличается от пересказа: её можно найти в таблице
+                              ниже и проверить своими глазами. */}
+                          {event.requestId && (
+                            <span className="ml-2 font-mono text-[10px] text-slate-400">
+                              {event.requestId}
+                            </span>
+                          )}
+                          {/* Модель сослалась на запись, которой ей не давали:
+                              событие показываем, но как неподтверждённое. */}
+                          {event.suspect && (
+                            <span className="ml-2 rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-800">
+                              не подтверждено записью
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+
+                  <p className="mt-3 text-[11px] text-slate-400">
+                    Это подсказка по логам, а не факт: сверься с таблицей ниже, прежде
+                    чем говорить это ученику.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Сервис выключен — единственное состояние с прямым действием прямо
@@ -409,8 +677,8 @@ export function LogsExplorer({
                   {result.hits.map((hit, i) => {
                     const key = rowKey(hit, i);
                     const isOpen = expanded === key;
-                    const requestBody = prettyBody(pick(hit.raw, "parsed_json.requestBody"));
-                    const responseBody = prettyBody(pick(hit.raw, "parsed_json.responseBody"));
+                    const requestBody = prettyBody(pickRawField(hit.raw, RAW_FIELDS.requestBody));
+                    const responseBody = prettyBody(pickRawField(hit.raw, RAW_FIELDS.responseBody));
                     return (
                       <Fragment key={key}>
                         <tr
@@ -442,10 +710,10 @@ export function LogsExplorer({
                             {hit.username ?? "—"}
                           </td>
                           <td className="whitespace-nowrap border-r border-slate-100 px-2.5 py-1.5 text-slate-500">
-                            {pick(hit.raw, "parsed_json.X-Device-Name") ?? "—"}
+                            {pickRawField(hit.raw, RAW_FIELDS.device) ?? "—"}
                           </td>
                           <td className="whitespace-nowrap border-r border-slate-100 px-2.5 py-1.5 text-slate-500">
-                            {pick(hit.raw, "parsed_json.app-version") ?? "—"}
+                            {pickRawField(hit.raw, RAW_FIELDS.appVersion) ?? "—"}
                           </td>
                           <td className="min-w-[280px] max-w-lg whitespace-normal break-words px-2.5 py-1.5 text-slate-700">
                             {hit.message || "—"}

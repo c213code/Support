@@ -807,3 +807,163 @@ export async function summarizeIssueTopic(
     return null;
   }
 }
+
+// Разбор логов дольше остальных вызовов: модель сопоставляет десятки
+// событий во времени, а не жмёт одну фразу. Агент в это время смотрит на
+// "ИИ читает логи…" и ждёт осознанно — он сам нажал кнопку.
+const LOGS_INVESTIGATION_TIMEOUT_MS = 25000;
+
+// Одно событие лога в том виде, в каком его видит модель: без служебных
+// полей filebeat/kubernetes, которые в исходном документе занимают больше
+// места, чем всё полезное вместе взятое.
+export type LogEventForAi = {
+  time: string;
+  method: string | null;
+  uri: string | null;
+  status: string | null;
+  requestId: string | null;
+  message: string;
+  requestBody: string | null;
+  responseBody: string | null;
+};
+
+export type LogInvestigation = {
+  // Вывод одной-двумя фразами: что по логам произошло на самом деле.
+  summary: string;
+  // Хронология с привязкой к конкретным записям — то, чем агент говорит с
+  // учеником "фактами", а не "у нас всё работает".
+  timeline: Array<{
+    time: string;
+    what: string;
+    requestId: string | null;
+    // Модель сослалась на запись, которой ей не давали. Само событие
+    // оставляем, но помечаем: пустой requestId бывает и у честного события
+    // (запись без id — так прямо разрешено промптом), и без этого флага
+    // выдумка выглядела бы в точности как подтверждённый факт.
+    suspect: boolean;
+  }>;
+};
+
+// null — модель не ответила (сеть/квота/сломанный json). "По логам ничего не
+// нашлось" сюда НЕ относится: это валидный разбор с пустым timeline и
+// объяснением в summary, и повторять его смысла нет.
+
+const LOGS_INVESTIGATION_SYSTEM_PROMPT = `Ты помогаешь агенту поддержки онлайн-школы JUZ40 разобраться в логах платформы. Тебе дают ситуацию со слов ученика и список записей лога по нему. Ответ — json.
+
+Твоя задача — восстановить по логам хронологию: что и когда на самом деле происходило. Агент по твоему ответу будет говорить с учеником фактами ("вы отправили ответы в 14:35, они дошли, но результат не сохранился из-за ошибки на нашей стороне"), поэтому цена выдумки здесь максимальная.
+
+ЖЕЛЕЗНОЕ ПРАВИЛО: каждое событие в хронологии обязано опираться на конкретную запись лога. Поле requestId бери ровно из той записи, на которой основано событие — не придумывай и не меняй его. Если событие видно по записи без requestId, поставь null. Записей, которых тебе не давали, не существует.
+
+Не пересказывай лог построчно: агенту не нужны сорок строк "GET /api/lessons 200". Оставь в хронологии только то, что относится к описанной ситуации и к тому, где всё пошло не так: ключевое действие ученика, ответ сервера на него, ошибки (4xx/5xx), подозрительные разрывы во времени.
+
+В поле summary — вывод для агента в 1-2 фразы: подтверждают логи слова ученика или нет, и что именно сломалось, если сломалось. Если по логам видно, что со стороны платформы всё отработало штатно — так и скажи, не выдумывай проблему из вежливости.
+
+Время бери из поля time записи как есть, не пересчитывай часовые пояса и не меняй формат: оно уже приведено к тому виду, в котором агент видит его в таблице.
+
+Тебе дают окно записей, а не весь лог: тела запросов и ответов обрезаны, и самих записей может быть больше, чем прислано. Поэтому "в присланных записях этого нет" — это не то же самое, что "этого не было". Так и говори, если чего-то не хватает.
+
+Язык ответа — русский.
+
+ОСОБЫЙ СЛУЧАЙ: если в присланных записях нет ничего, что относится к описанной ситуации, верни пустой timeline и честно объясни это в summary. Пустой ответ лучше правдоподобной выдумки.
+
+Ответь строго json: {"summary":"...","timeline":[{"time":"...","what":"...","requestId":"..."}]}`;
+
+// Разбор логов ученика по описанной ситуации. Возвращает хронологию,
+// очищенную от выдуманных ссылок на записи: модель может сослаться на
+// requestId, которого ей не давали (та же галлюцинация, что у
+// findDuplicateGroups с чужими id тикетов), и такое событие агенту показывать
+// нельзя — он на него будет ссылаться в разговоре с учеником.
+export async function investigateStudentLogs(
+  situation: string,
+  events: LogEventForAi[]
+): Promise<LogInvestigation | null> {
+  if (groqApiKeys().length === 0 || events.length === 0) return null;
+
+  const knownRequestIds = new Set(
+    events.map((e) => e.requestId).filter((id): id is string => Boolean(id))
+  );
+
+  // Контекст проекта тянется из БД (см. projectContext) — держим его снаружи
+  // try, иначе упавший Postgres неотличим от неответившей модели, и агенту
+  // будет предложено "попробовать ещё раз" вместо починки базы.
+  const context = await buildAiContext();
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        // Сопоставление событий во времени — это рассуждение, а не выбор из
+        // двух слов: reasoning_effort не понижаем, лимит держим с запасом
+        // (модель тратит токены на скрытые размышления до ответа).
+        max_tokens: 3000,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: LOGS_INVESTIGATION_SYSTEM_PROMPT + context,
+          },
+          {
+            role: "user",
+            content: `Ситуация со слов ученика:\n${situation}\n\nЗаписи лога (json):\n${JSON.stringify(events)}`,
+          },
+        ],
+      },
+      LOGS_INVESTIGATION_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      console.warn("[groq] investigateStudentLogs: ответ без content");
+      return null;
+    }
+
+    const parsed = JSON.parse(content);
+    const summary = typeof parsed?.summary === "string" ? parsed.summary.trim() : "";
+    if (!summary) {
+      console.warn("[groq] investigateStudentLogs: в json нет summary");
+      return null;
+    }
+
+    const rawTimeline: unknown[] = Array.isArray(parsed?.timeline) ? parsed.timeline : [];
+    const timeline = rawTimeline
+      .map((item) => {
+        const e = (item ?? {}) as Record<string, unknown>;
+        const citedId = typeof e.requestId === "string" ? e.requestId : null;
+        // Ссылка на запись, которой модели не давали, — выдумка. Само
+        // событие оставляем (агент должен видеть, что модель вообще
+        // предложила), но ссылку убираем и помечаем suspect: без пометки
+        // выдумка отрисовалась бы неотличимо от честного события без id.
+        const verified = citedId !== null && knownRequestIds.has(citedId);
+        return {
+          time: typeof e.time === "string" ? e.time : "",
+          what: typeof e.what === "string" ? e.what.trim() : "",
+          requestId: verified ? citedId : null,
+          suspect: citedId !== null && !verified,
+        };
+      })
+      .filter((e) => e.what);
+
+    const suspectCount = timeline.filter((e) => e.suspect).length;
+    if (suspectCount > 0) {
+      // Модель сослалась на несуществующие записи — это её регрессия, и
+      // увидеть её надо в логах, а не по жалобам агентов.
+      console.warn(
+        `[groq] investigateStudentLogs: ${suspectCount} событий со ссылкой на записи, которых не было во входных данных`
+      );
+    }
+
+    // Хронология пустая — это валидный ответ ("в логах ничего про это нет"),
+    // но не повод показывать пустую панель: summary объяснит, почему.
+    return { summary, timeline };
+  } catch (err) {
+    // Пустой catch здесь означал бы ровно ту тишину, из-за которой в этом
+    // проекте уже один раз "все ИИ-функции перестали работать без единой
+    // ошибки в логах" (см. CLAUDE.md про снятую llama-3.3): сюда попадает и
+    // сломанный json от модели, которая перестала держать json_object.
+    console.warn(
+      `[groq] investigateStudentLogs упал (${events.length} записей): ${String(err).slice(0, 300)}`
+    );
+    return null;
+  }
+}

@@ -34,19 +34,19 @@ model GroupPreset {
 }
 
 model TelegramMessage {
-  id            String   @id @default(cuid())
-  chatId        String
-  messageId     Int
-  chatTitle     String?
-  groupName     String?
-  groupEmoji    String?
+  id               String   @id @default(cuid())
+  chatId           String
+  messageId        Int
+  chatTitle        String?
+  groupName        String?
+  groupEmoji       String?
   // Telegram user id автора — чтобы склеивать несколько подряд идущих
   // сообщений одного и того же человека в один запрос во "Входящих".
   // BigInt, не Int: у многих Telegram-аккаунтов id уже больше 2^31 и не
   // помещается в 32-битный integer.
-  fromId        BigInt?
-  authorName    String?
-  text          String?
+  fromId           BigInt?
+  authorName       String?
+  text             String?
   // Какой тикет агент обсуждал этой своей репликой. Заполняется только у
   // собственных сообщений агентов и только автоматически — по стрелке
   // реплая, по своей же предыдущей реплике или по последнему обращению
@@ -59,9 +59,9 @@ model TelegramMessage {
   // дописывает следующей фразой через несколько секунд, и без памяти о
   // пропуске серия заводила тикет, который поштучно каждое сообщение
   // заводить отказалось.
-  skippedAutoIssue Boolean @default(false)
+  skippedAutoIssue Boolean  @default(false)
   agentIssueId     String?
-  agentIssue       Issue?  @relation("issueAgentReply", fields: [agentIssueId], references: [id], onDelete: SetNull)
+  agentIssue       Issue?   @relation("issueAgentReply", fields: [agentIssueId], references: [id], onDelete: SetNull)
   // На какое сообщение этого чата отвечали (Telegram Reply). Нужно, чтобы
   // потом, уже вне момента доставки, найти реплику агента, относящуюся к
   // конкретному тикету: "жасалды" в ответ на сообщение с проблемой — это и
@@ -69,16 +69,16 @@ model TelegramMessage {
   // цитаты в `text` для этого не годится: Telegram обрезает её до 200
   // символов, и сопоставление по строке разъезжается.
   replyToMessageId Int?
-  messageLink   String
-  archived      Boolean  @default(false)
+  messageLink      String
+  archived         Boolean  @default(false)
   // Просмотрено ли сообщение на сайте — для индикатора "новое/просмотрено"
-  viewed        Boolean  @default(false)
-  usedForIssueId String?
+  viewed           Boolean  @default(false)
+  usedForIssueId   String?
   // SetNull, а не каскад: сообщение остаётся во "Входящих" и его можно
   // завести заново. Раньше это делалось руками в DELETE /api/issues/[id]
   // с комментарием "внешнего ключа нет, чистим сами".
-  usedForIssue   Issue?  @relation("issueSource", fields: [usedForIssueId], references: [id], onDelete: SetNull)
-  receivedAt    DateTime @default(now())
+  usedForIssue     Issue?   @relation("issueSource", fields: [usedForIssueId], references: [id], onDelete: SetNull)
+  receivedAt       DateTime @default(now())
 
   @@unique([chatId, messageId])
   @@index([archived, receivedAt])
@@ -95,20 +95,20 @@ model TelegramMessage {
 // регулярок". Не привязано к конкретному агенту/сессии осознанно: это
 // настройка для всей команды, а не личное предпочтение.
 model AppSetting {
-  id                String   @id @default("singleton")
-  aiCleaningEnabled Boolean  @default(false)
+  id                 String   @id @default("singleton")
+  aiCleaningEnabled  Boolean  @default(false)
   // Общий рубильник автоответов бота в рабочие группы (подтверждение
   // приёма, реакция на смену статуса — см. src/lib/autoReply.ts). Выключен
   // по умолчанию осознанно: это единственная фича, которая пишет от имени
   // школы в чат, где сидят коллеги, — включать её должен человек, а не
   // деплой.
-  autoReplyEnabled  Boolean  @default(false)
+  autoReplyEnabled   Boolean  @default(false)
   // Отдельный рубильник для обратного направления: бот читает реплики
   // агента в группе и сам двигает статусы (см. src/lib/agentIntent.ts).
   // Отдельный от autoReplyEnabled намеренно — это разные риски: там бот
   // пишет коллегам, тут молча меняет то, что уйдёт в репорт боссам, и
   // выключать одно, не трогая другое, надо уметь.
-  chatIntentEnabled Boolean  @default(false)
+  chatIntentEnabled  Boolean  @default(false)
   // Автоответ на приём обращения (buildAckText в src/lib/autoReply.ts)
   // просит почту/ссылку ученика по жёсткому regex-признаку "есть ли она уже
   // в тексте" — это ловит и общие вопросы без ученика (график работы,
@@ -119,22 +119,29 @@ model AppSetting {
   // когда regex уже сказал "просить" — то есть сужает/детализирует ложные
   // срабатывания, а не отменяет проверку целиком. Выключен по умолчанию по
   // тому же принципу, что и остальные ИИ/автоответ-тоглы.
-  aiAskEnabled      Boolean  @default(false)
+  aiAskEnabled       Boolean  @default(false)
   // Спрашивать в личке перед тем, как ответить в рабочей группе. Работает
   // поверх autoReplyEnabled и только для подтверждения приёма: реакция на
   // смену статуса — следствие осознанного действия человека, её
   // переспрашивать незачем. По умолчанию включено: если уж бот пишет
   // коллегам, то первым режимом должен быть тот, где последнее слово за
   // человеком.
-  autoReplyConfirm  Boolean  @default(true)
+  autoReplyConfirm   Boolean  @default(true)
   // Отвечать ли в группу при смене статуса на сайте (перетащили карточку в
   // "В работе" — бот пишет "жұмысқа алдық"). Отдельно от подтверждения
   // приёма: там бот сообщает, что обращение вообще увидели, а здесь —
   // сопровождает работу, и это первое, что начинает раздражать, когда
   // тикет двигают несколько раз за день. Эмодзи-реакция остаётся в любом
   // случае: она не шумит.
-  statusReplyEnabled Boolean @default(true)
-  updatedAt         DateTime @updatedAt
+  statusReplyEnabled Boolean  @default(true)
+  // ИИ-разбор логов ученика на странице "Логи" (investigateStudentLogs в
+  // lib/ai.ts). Отдельный рубильник от aiCleaningEnabled намеренно: риск
+  // другой. Описания тикетов — это текст обращения, а сюда во внешнюю
+  // модель уходят тела запросов и ответов самой платформы, где попадаются
+  // ссылки восстановления пароля и токены. Выключено по умолчанию —
+  // включает человек, а не деплой.
+  logsAiEnabled      Boolean  @default(false)
+  updatedAt          DateTime @updatedAt
 }
 
 // Что именно бот написал в рабочую группу по конкретному тикету. Нужна
@@ -180,23 +187,23 @@ model ReportSendLog {
 // обычного сообщения агента (см. ISSUE_NOTE_PREFIX в вебхуке). Одноразовая
 // — удаляется сразу после того, как ответ пришёл и заметка сохранена.
 model PendingNotePrompt {
-  id        String   @id @default(cuid())
-  chatId    String
-  messageId Int
-  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  issueId   String
+  id             String       @id @default(cuid())
+  chatId         String
+  messageId      Int
+  issue          Issue        @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId        String
   // Если задан — при получении ответа применяется не только текст
   // заметки, но и этот статус ("✅ Решено"/"⏳ Пендинг" на карточке
   // разбора требуют "как решили"/"что сейчас" перед сменой статуса, по
   // аналогии с ResolveDialog на сайте). Null — старое поведение "просто
   // заметка" (кнопка "📝 Заметка"), статус не трогаем.
-  targetStatus IssueStatus?
+  targetStatus   IssueStatus?
   // Предлагать ли после сохранения заметки кнопку "сообщить в чат". Нужно,
   // только когда решение пришло из разбора: в группе о нём ещё не знают.
   // Если же статус проставился потому, что агент сам написал в группе
   // "жөңделді", предлагать нечего — там уже всё сказано.
-  offerChatReply Boolean @default(false)
-  createdAt DateTime @default(now())
+  offerChatReply Boolean      @default(false)
+  createdAt      DateTime     @default(now())
 
   @@unique([chatId, messageId])
 }
@@ -215,19 +222,19 @@ model PendingNotePrompt {
 // Ключ — сообщение-вопрос в личке: по нему находится черновик и когда
 // нажали кнопку, и когда ответили реплаем своим текстом.
 model PendingAutoReply {
-  id        String   @id @default(cuid())
+  id              String   @id @default(cuid())
   // Личка агента, которому задан вопрос, и id самого вопроса.
-  chatId    String
-  messageId Int
-  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  issueId   String
+  chatId          String
+  messageId       Int
+  issue           Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId         String
   // Куда отправлять, если подтвердят: рабочая группа и то сообщение, на
   // которое бот отвечает реплаем.
   targetChatId    String
   targetMessageId Int
   // Варианты ответа по порядку — первый показан как основной.
-  variants  String[]
-  createdAt DateTime @default(now())
+  variants        String[]
+  createdAt       DateTime @default(now())
 
   @@unique([chatId, messageId])
   @@index([issueId])
@@ -312,47 +319,47 @@ model IssueEvent {
 }
 
 model Issue {
-  id           String      @id @default(cuid())
+  id                String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)
-  reportDate   String
-  groupName    String
-  groupEmoji   String?
-  position     Int         @default(0)
-  description  String
+  reportDate        String
+  groupName         String
+  groupEmoji        String?
+  position          Int         @default(0)
+  description       String
   // Ссылка на исходное сообщение. Осталась отдельным полем (а не первым
   // элементом extraLinks), чтобы не переливать данные существующих тикетов
   // миграцией — она накатывается сама при деплое, а data-миграции так
   // гонять нельзя.
-  telegramLink String?
+  telegramLink      String?
   // Ссылки на дополнительные сообщения, приклеенные к этому же тикету:
   // один и тот же запрос ("доступ беру") часто прилетает несколько раз от
   // разных людей, и это один тикет с несколькими пруфами, а не N тикетов.
-  extraLinks   String[]    @default([])
-  status       IssueStatus @default(PENDING)
-  note         String?
-  ticketLink   String?
+  extraLinks        String[]    @default([])
+  status            IssueStatus @default(PENDING)
+  note              String?
+  ticketLink        String?
   // Заполняются только при status = ESCALATED: какой команде передали и
   // кто там занимается. Не выносил в отдельную модель — это просто два
   // поля на тикете, а не связь с чем-то, что живёт своей жизнью.
   escalatedTeam     String?
   escalatedAssignee String?
-  createdBy    String
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdBy         String
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
   // Когда статус менялся в последний раз. Отдельно от updatedAt нарочно:
   // тот обновляется от любой правки — поправили описание, ИИ переписал
   // текст, автор сменился с "Бот" на живого агента, — и "сколько тикет
   // висит в работе" по нему считается неверно. Пишется только из
   // changeIssueStatus (src/lib/issueStatus.ts), единственного места, где
   // статус вообще меняется.
-  statusChangedAt DateTime @default(now())
+  statusChangedAt   DateTime    @default(now())
 
-  events       IssueEvent[]
+  events         IssueEvent[]
   pendingReplies PendingAutoReply[]
-  botReplies   BotReply[]
-  notePrompts  PendingNotePrompt[]
-  sourceMessages TelegramMessage[] @relation("issueSource")
-  agentReplies   TelegramMessage[] @relation("issueAgentReply")
+  botReplies     BotReply[]
+  notePrompts    PendingNotePrompt[]
+  sourceMessages TelegramMessage[]   @relation("issueSource")
+  agentReplies   TelegramMessage[]   @relation("issueAgentReply")
 
   @@index([reportDate])
   // Библиотека решений (src/lib/solutionLibrary.ts) на каждой карточке

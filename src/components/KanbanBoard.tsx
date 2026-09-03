@@ -123,8 +123,11 @@ export function KanbanBoard({
   // остаётся доской, а не списком.
   const [mobileColumn, setMobileColumn] = useState<Column["key"]>("active");
   // Логи ученика — прямо с карточки, модалкой поверх доски (не уходя со
-  // страницы): email ученика, для которого сейчас открыт поиск, или null.
-  const [logsEmail, setLogsEmail] = useState<string | null>(null);
+  // страницы). Вместе с почтой несём описание тикета: оно же и есть "опиши
+  // ситуацию" для ИИ-разбора, и перепечатывать его руками незачем.
+  const [logsFor, setLogsFor] = useState<{ email: string; situation: string } | null>(
+    null
+  );
   const large = size === "large";
 
   function handleDrop(column: Column) {
@@ -349,7 +352,10 @@ export function KanbanBoard({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setLogsEmail(studentEmail);
+                              setLogsFor({
+                                email: studentEmail,
+                                situation: issue.description,
+                              });
                             }}
                             title={`Логи ученика: ${studentEmail}`}
                             className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 transition hover:bg-slate-200"
@@ -462,10 +468,14 @@ export function KanbanBoard({
         })}
       </div>
 
-      {logsEmail && (
-        <Modal onClose={() => setLogsEmail(null)} size="xl" labelledBy="logs-modal-title">
+      {logsFor && (
+        <Modal onClose={() => setLogsFor(null)} size="xl" labelledBy="logs-modal-title">
           <div className="max-h-[85vh] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
-            <LogsExplorer initialEmail={logsEmail} onClose={() => setLogsEmail(null)} />
+            <LogsExplorer
+              initialEmail={logsFor.email}
+              initialSituation={logsFor.situation}
+              onClose={() => setLogsFor(null)}
+            />
           </div>
         </Modal>
       )}
