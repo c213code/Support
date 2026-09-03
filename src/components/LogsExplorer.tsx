@@ -45,6 +45,21 @@ function rowKey(hit: LogHit, i: number): string {
   return hit.requestId ? `${hit.requestId}-${i}` : `${hit.timestamp}-${i}`;
 }
 
+// Устройство и версия приложения не входят в нормализованный верх LogHit
+// (сервис логов специально прокидывает весь документ в raw именно для
+// такого случая — полей без готового места в верхушке типа), достаём их
+// напрямую по пути в исходном документе.
+function pick(source: Record<string, unknown>, path: string): string | null {
+  const value = path
+    .split(".")
+    .reduce<unknown>(
+      (acc, key) =>
+        acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined,
+      source
+    );
+  return typeof value === "string" && value ? value : null;
+}
+
 // Режим "по ученику" ищет точной фразой по всем полям без разбора формата —
 // email, телефон, ссылка, request id — что угодно, что реально встречается в
 // документе. Единственное, что стоит привести к одному виду сам, — телефон:
@@ -331,7 +346,7 @@ export function LogsExplorer({
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[960px] text-left text-sm">
+              <table className="w-full min-w-[1120px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-xs text-slate-400">
                     <th className="px-3 py-2 font-medium">Время</th>
@@ -339,6 +354,8 @@ export function LogsExplorer({
                     <th className="px-3 py-2 font-medium">Статус</th>
                     <th className="px-3 py-2 font-medium">URI</th>
                     <th className="px-3 py-2 font-medium">Кто</th>
+                    <th className="px-3 py-2 font-medium">Устройство</th>
+                    <th className="px-3 py-2 font-medium">Версия</th>
                     <th className="px-3 py-2 font-medium">Сообщение</th>
                   </tr>
                 </thead>
@@ -371,13 +388,19 @@ export function LogsExplorer({
                           <td className="max-w-[160px] truncate px-3 py-2 font-mono text-xs text-slate-500">
                             {hit.username ?? "—"}
                           </td>
+                          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-500">
+                            {pick(hit.raw, "parsed_json.X-Device-Name") ?? "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-500">
+                            {pick(hit.raw, "parsed_json.app-version") ?? "—"}
+                          </td>
                           <td className="min-w-[280px] max-w-lg whitespace-normal break-words px-3 py-2 font-mono text-xs text-slate-700">
                             {hit.message || "—"}
                           </td>
                         </tr>
                         {isOpen && (
                           <tr className="border-b border-slate-100 bg-slate-50">
-                            <td colSpan={6} className="px-3 py-3">
+                            <td colSpan={8} className="px-3 py-3">
                               <pre className="max-h-80 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
                                 {JSON.stringify(hit.raw, null, 2)}
                               </pre>
