@@ -5,6 +5,8 @@ import type { IssueDTO } from "@/lib/types";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { Avatar } from "@/components/Avatar";
 import { BotReplies } from "@/components/BotReplies";
+import { Modal } from "@/components/Modal";
+import { LogsExplorer } from "@/components/LogsExplorer";
 import { groupColor } from "@/lib/groups";
 import { issueLinks } from "@/lib/report";
 import {
@@ -120,6 +122,9 @@ export function KanbanBoard({
   // экрана прокрутки. Показываем по одной, переключаясь табами — доска
   // остаётся доской, а не списком.
   const [mobileColumn, setMobileColumn] = useState<Column["key"]>("active");
+  // Логи ученика — прямо с карточки, модалкой поверх доски (не уходя со
+  // страницы): email ученика, для которого сейчас открыт поиск, или null.
+  const [logsEmail, setLogsEmail] = useState<string | null>(null);
   const large = size === "large";
 
   function handleDrop(column: Column) {
@@ -212,6 +217,7 @@ export function KanbanBoard({
               ) : (
                 items.map((issue) => {
                 const color = groupColor(issue.groupName);
+                const studentEmail = issue.hints?.emails[0] ?? null;
                 return (
                   <div
                     key={issue.id}
@@ -338,15 +344,18 @@ export function KanbanBoard({
                             📎 вложение
                           </span>
                         )}
-                        {issue.hints.emails.length > 0 && (
-                          <a
-                            href={`/logs?email=${encodeURIComponent(issue.hints.emails[0])}`}
-                            onClick={(e) => e.stopPropagation()}
-                            title={`Логи ученика: ${issue.hints.emails[0]}`}
+                        {studentEmail && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLogsEmail(studentEmail);
+                            }}
+                            title={`Логи ученика: ${studentEmail}`}
                             className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 transition hover:bg-slate-200"
                           >
                             🪵 Логи
-                          </a>
+                          </button>
                         )}
                       </div>
                     )}
@@ -452,6 +461,14 @@ export function KanbanBoard({
           );
         })}
       </div>
+
+      {logsEmail && (
+        <Modal onClose={() => setLogsEmail(null)} size="xl" labelledBy="logs-modal-title">
+          <div className="max-h-[85vh] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
+            <LogsExplorer initialEmail={logsEmail} onClose={() => setLogsEmail(null)} />
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

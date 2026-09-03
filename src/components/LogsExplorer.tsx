@@ -47,7 +47,18 @@ function rowKey(hit: LogHit, i: number): string {
 
 // Логи — однородные записи одной формы: таблица читается быстрее карточек,
 // когда задача — просканировать полсотни строк и найти одну аномалию.
-export function LogsExplorer() {
+//
+// Используется и как страница /logs (без пропсов — email читается из URL),
+// и как модалка прямо с карточки тикета (initialEmail/onClose — модалка
+// монтирует компонент заново на каждое открытие, так что initialEmail нужен
+// только на момент монтирования, реагировать на его смену не на чем).
+export function LogsExplorer({
+  initialEmail,
+  onClose,
+}: {
+  initialEmail?: string;
+  onClose?: () => void;
+} = {}) {
   const toast = useToast();
 
   const [mode, setMode] = useState<Mode>("student");
@@ -120,11 +131,12 @@ export function LogsExplorer() {
     }
   }
 
-  // Со страницы тикета: /logs?email=... — сразу режим "по ученику" и поиск.
+  // С карточки тикета (initialEmail, модалка) или со страницы /logs?email=...
+  // — сразу режим "по ученику" и поиск, без ручного ввода.
   useEffect(() => {
     if (autoSearchedRef.current) return;
     autoSearchedRef.current = true;
-    const email = new URLSearchParams(window.location.search).get("email");
+    const email = initialEmail ?? new URLSearchParams(window.location.search).get("email");
     if (!email) return;
     const t = setTimeout(() => {
       setMode("student");
@@ -132,7 +144,7 @@ export function LogsExplorer() {
       search({ mode: "student", input: email });
     }, 0);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- одноразовое чтение URL при монтировании
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- одноразовое чтение при монтировании (initialEmail фиксирован на момент открытия модалки)
   }, []);
 
   async function startServiceAndRetry() {
@@ -174,15 +186,30 @@ export function LogsExplorer() {
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <div className="mb-5 flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-slate-900">Логи</h1>
+          <h1 id="logs-modal-title" className="text-lg font-semibold text-slate-900">
+            Логи
+          </h1>
           <p className="mt-0.5 text-sm text-slate-500">
             Прямой доступ к Elasticsearch — то же самое, что раньше искали в Kibana.
           </p>
         </div>
-        <VpnServiceButton
-          onError={(m) => toast(m, "error")}
-          onInfo={(m) => toast(m, "success")}
-        />
+        <div className="flex items-center gap-2">
+          <VpnServiceButton
+            onError={(m) => toast(m, "error")}
+            onInfo={(m) => toast(m, "success")}
+          />
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              title="Закрыть"
+              aria-label="Закрыть"
+              className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Режим + строка поиска + период — один блок, чтобы искать можно было
