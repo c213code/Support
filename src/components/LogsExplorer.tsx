@@ -74,6 +74,18 @@ function pick(source: Record<string, unknown>, path: string): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+// requestBody/responseBody приходят строкой — обычно это JSON, но не всегда
+// (бывает голый текст/HTML). Пытаемся раскрасить как JSON; не вышло —
+// показываем как есть, лишь бы не терять содержимое ради красоты.
+function prettyBody(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
 // Режим "по ученику" ищет точной фразой по всем полям без разбора формата —
 // email, телефон, ссылка, request id — что угодно, что реально встречается в
 // документе. Единственное, что стоит привести к одному виду сам, — телефон:
@@ -116,6 +128,10 @@ export function LogsExplorer({
   const [serviceDownDetail, setServiceDownDetail] = useState<string | null>(null);
   const [enabling, setEnabling] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Полный документ (со служебными полями filebeat/kubernetes) — по запросу,
+  // а не сразу: тело запроса/ответа теряется в этом шуме, если показать всё
+  // одним куском (см. историю фичи).
+  const [showRawFor, setShowRawFor] = useState<string | null>(null);
 
   const autoSearchedRef = useRef(false);
   // Параметры последней попытки — ретрай через 8с бьёт именно по ним, а не
@@ -393,10 +409,15 @@ export function LogsExplorer({
                   {result.hits.map((hit, i) => {
                     const key = rowKey(hit, i);
                     const isOpen = expanded === key;
+                    const requestBody = prettyBody(pick(hit.raw, "parsed_json.requestBody"));
+                    const responseBody = prettyBody(pick(hit.raw, "parsed_json.responseBody"));
                     return (
                       <Fragment key={key}>
                         <tr
-                          onClick={() => setExpanded(isOpen ? null : key)}
+                          onClick={() => {
+                            setExpanded(isOpen ? null : key);
+                            setShowRawFor(null);
+                          }}
                           className={`cursor-pointer border-b border-slate-100 font-mono text-xs transition hover:bg-sky-50 ${
                             isOpen ? "bg-sky-50" : i % 2 === 1 ? "bg-slate-50/70" : "bg-white"
                           }`}
@@ -432,10 +453,50 @@ export function LogsExplorer({
                         </tr>
                         {isOpen && (
                           <tr className="border-b border-slate-100 bg-slate-100/70">
-                            <td colSpan={8} className="px-2.5 py-3">
-                              <pre className="max-h-80 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-100">
-                                {JSON.stringify(hit.raw, null, 2)}
-                              </pre>
+                            <td colSpan={8} className="space-y-2.5 px-2.5 py-3">
+                              {!requestBody && !responseBody && (
+                                <p className="text-xs text-slate-500">
+                                  У этой записи нет тела запроса/ответа — смотри «Сообщение» в строке
+                                  или разверни полный документ ниже.
+                                </p>
+                              )}
+                              {requestBody && (
+                                <div>
+                                  <p className="mb-1 text-[11px] font-semibold text-slate-500">
+                                    Что отправили (requestBody)
+                                  </p>
+                                  <pre className="max-h-64 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-100">
+                                    {requestBody}
+                                  </pre>
+                                </div>
+                              )}
+                              {responseBody && (
+                                <div>
+                                  <p className="mb-1 text-[11px] font-semibold text-slate-500">
+                                    Что ответили (responseBody)
+                                  </p>
+                                  <pre className="max-h-64 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-100">
+                                    {responseBody}
+                                  </pre>
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowRawFor(showRawFor === key ? null : key);
+                                }}
+                                className="text-[11px] font-medium text-brand-600 hover:underline"
+                              >
+                                {showRawFor === key
+                                  ? "Скрыть полный документ"
+                                  : "Показать полный документ (со служебными полями)"}
+                              </button>
+                              {showRawFor === key && (
+                                <pre className="max-h-80 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-100">
+                                  {JSON.stringify(hit.raw, null, 2)}
+                                </pre>
+                              )}
                             </td>
                           </tr>
                         )}
