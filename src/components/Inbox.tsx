@@ -7,6 +7,7 @@ import { KanbanBoard } from "@/components/KanbanBoard";
 import { ReportLedger } from "@/components/ReportLedger";
 import { BotSettingsMenu } from "@/components/BotSettingsMenu";
 import { GlossaryPanel } from "@/components/GlossaryPanel";
+import { GroqStatusPanel } from "@/components/GroqStatusPanel";
 import { ResolveDialog } from "@/components/ResolveDialog";
 import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
 import { AttachToIssuePicker } from "@/components/AttachToIssuePicker";
@@ -101,6 +102,7 @@ export function Inbox() {
   const [addingNewIssue, setAddingNewIssue] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
+  const [showGroqStatus, setShowGroqStatus] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const boardSearchRef = useRef<HTMLInputElement>(null);
   const currentAgent = useCurrentAgent();
@@ -771,6 +773,13 @@ export function Inbox() {
         />
       )}
 
+      {showGroqStatus && (
+        <GroqStatusPanel
+          onClose={() => setShowGroqStatus(false)}
+          onError={(m) => toast(m, "error")}
+        />
+      )}
+
       {showShortcuts && (
         <ShortcutsHelp
           shortcuts={SHORTCUTS}
@@ -788,6 +797,14 @@ export function Inbox() {
             className="rounded-full border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-50"
           >
             🧠 Словарь
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowGroqStatus(true)}
+            title="Живая проверка Groq — ключи, модель, тестовый вызов"
+            className="rounded-full border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-50"
+          >
+            ⚡ Groq
           </button>
           <BotSettingsMenu
             toggles={[

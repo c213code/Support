@@ -1038,3 +1038,111 @@ export async function explainLogError(event: LogErrorEvent): Promise<string | nu
     return null;
   }
 }
+
+// Живая проверка Groq по кнопке в панели "⚡ Groq". Все ИИ-функции этого
+// проекта по дизайну молча откатываются на fallback при любой ошибке модели
+// (ключ/квота/снятая модель/пустой content из-за reasoning_effort — см.
+// CLAUDE.md про историю со снятой llama-3.3-70b-versatile), поэтому в проде
+// "недоступно" выглядит как полная тишина в логах, а не как ошибка. Это
+// единственное место, которое реально дёргает Groq и говорит правду.
+const GROQ_STATUS_TIMEOUT_MS = 15000;
+
+export type GroqStatus = {
+  model: string;
+  keysConfigured: number;
+  keysWorking: number;
+  // null — список моделей не удалось получить ни одним ключом (не то же
+  // самое, что "модель не найдена").
+  modelListed: boolean | null;
+  testReply: string | null;
+  ok: boolean;
+  error: string | null;
+  checkedAt: string;
+};
+
+export async function checkGroqStatus(): Promise<GroqStatus> {
+  const keys = groqApiKeys();
+  const checkedAt = new Date().toISOString();
+
+  if (keys.length === 0) {
+    return {
+      model: GROQ_MODEL,
+      keysConfigured: 0,
+      keysWorking: 0,
+      modelListed: null,
+      testReply: null,
+      ok: false,
+      error: "GROQ_API_KEY не задан",
+      checkedAt,
+    };
+  }
+
+  let keysWorking = 0;
+  let modelListed: boolean | null = null;
+  let error: string | null = null;
+
+  for (const apiKey of keys) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GROQ_STATUS_TIMEOUT_MS);
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/models", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        keysWorking += 1;
+        const data = (await res.json()) as { data?: Array<{ id?: string }> };
+        const listed = (data.data ?? []).some((m) => m.id === GROQ_MODEL);
+        // Один ключ мог не увидеть модель, а другой — да (разные аккаунты).
+        // "не найдена" ставим, только если ни один ключ её не подтвердил.
+        modelListed = modelListed || listed;
+      } else {
+        error = `Список моделей: ${res.status} ${res.statusText}`;
+      }
+    } catch (err) {
+      error = `Список моделей: ${String(err).slice(0, 200)}`;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  // Настоящий чат-вызов — ровно то, чем эта функция ловит задокументированную
+  // беду: reasoning-модель при маленьком max_tokens тратит весь бюджет на
+  // скрытые размышления и возвращает пустой content. Список моделей эту
+  // проблему не покажет, только реальный вызов.
+  let testReply: string | null = null;
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 500,
+        messages: [
+          { role: "user", content: "Сколько будет 2+2? Ответь только числом, без пояснений." },
+        ],
+      },
+      GROQ_STATUS_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content === "string" && content.trim()) {
+      testReply = content.trim();
+    } else {
+      error = "Модель не ответила на тестовый вопрос (пустой content)";
+    }
+  } catch (err) {
+    error = `Тестовый вызов: ${String(err).slice(0, 200)}`;
+  }
+
+  const ok = keysWorking > 0 && Boolean(testReply?.includes("4"));
+
+  return {
+    model: GROQ_MODEL,
+    keysConfigured: keys.length,
+    keysWorking,
+    modelListed,
+    testReply,
+    ok,
+    error: ok ? null : error,
+    checkedAt,
+  };
+}
