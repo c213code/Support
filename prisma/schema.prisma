@@ -389,3 +389,25 @@ model PlatformEmailChange {
   @@index([at])
   @@index([studentId, at])
 }
+
+// Журнал обнулений результата деңгейлік теста (/platform/reset-unt) —
+// DELETE в основной платформе необратим (не "мягкое" удаление). Пишем ПОСЛЕ
+// успешного удаления (тот же принцип, что у PlatformEmailChange): журналировать
+// несделанное нельзя, а сбой самой записи журнала не должен превращать уже
+// случившееся удаление в ответ "ошибка" клиенту.
+model UntResultReset {
+  id            String   @id @default(cuid())
+  actor         String
+  untId         String
+  untName       String?
+  resultId      String
+  studentEmail  String?
+  studentName   String?
+  // finishTime результата на момент удаления — подтверждение, что тест
+  // правда был завершён, а не обнулили то, что ещё решалось.
+  finishTimeWas String?
+  at            DateTime @default(now())
+
+  @@index([at])
+  @@index([resultId])
+}

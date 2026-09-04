@@ -360,3 +360,145 @@ export async function changeStudentEmail(
     newEmail,
   };
 }
+
+// --- деңгейлік тест (УНТ/ДТ): обнуление результата ---
+//
+// Ученики иногда закрывают ПИИ (персональные данные) до/во время сдачи, из-за
+// чего попытка "залипает" в незавершённом виде и телефон/почта считаются
+// занятыми валидацией при повторной попытке. Штатный путь агента поддержки —
+// найти конкретный результат в отчёте по тесту и удалить его, если он уже
+// ЗАВЕРШЁН (status "FINISHED" + реальный finishTime); удалять незавершённую
+// попытку нельзя — ученик потеряет прогресс, а не мешающий валидации хвост.
+
+export type UntTestSummary = {
+  id: string;
+  name: string;
+  openTime: string | null;
+  endTime: string | null;
+  published: boolean;
+};
+
+export async function listUntTests(): Promise<UntTestSummary[]> {
+  const res = await authed("/v1/unts");
+  if (!res.ok) {
+    throw new PlatformError(
+      `Не удалось получить список тестов (HTTP ${res.status})`,
+      "upstream_error"
+    );
+  }
+  const data = (await res.json().catch(() => null)) as unknown;
+  if (!Array.isArray(data)) {
+    throw new PlatformError(
+      "Платформа вернула неожиданный формат списка тестов",
+      "upstream_error"
+    );
+  }
+  return (data as Record<string, unknown>[])
+    .map((t) => ({
+      id: String(t.id ?? ""),
+      name: String(t.name ?? ""),
+      openTime: typeof t.openTime === "string" ? t.openTime : null,
+      endTime: typeof t.endTime === "string" ? t.endTime : null,
+      published: Boolean(t.published),
+    }))
+    .filter((t) => t.id);
+}
+
+// Продукт (SMART/SMART-PRO/...) — это streamTypes слота теста, а не отдельно
+// хранимое поле теста; тест может обслуживать несколько продуктов сразу
+// разными слотами. Возвращаем уникальный список, чтобы UI мог выбрать сам,
+// если он один, и спросить агента, если их несколько.
+export async function getUntProducts(untId: string): Promise<string[]> {
+  const res = await authed(`/v1/unts/${untId}`);
+  if (res.status === 404) {
+    throw new PlatformError("Тест не найден", "not_found");
+  }
+  if (!res.ok) {
+    throw new PlatformError(`Не удалось прочитать тест (HTTP ${res.status})`, "upstream_error");
+  }
+  const data = (await res.json().catch(() => null)) as {
+    slots?: Array<{ streamTypes?: unknown }>;
+  } | null;
+  const products = new Set<string>();
+  for (const slot of data?.slots ?? []) {
+    for (const p of Array.isArray(slot.streamTypes) ? slot.streamTypes : []) {
+      if (typeof p === "string" && p) products.add(p);
+    }
+  }
+  return [...products];
+}
+
+export type UntResultMatch = {
+  resultId: string;
+  fullName: string;
+  combination: string | null;
+  score: number;
+};
+
+// /report принимает student= и сам фильтрует по email/телефону на стороне
+// платформы (это тот же параметр, что использует админ-панель) — здесь его
+// не переизобретаем, только читаем результат.
+export async function findUntResults(
+  untId: string,
+  product: string,
+  student: string
+): Promise<UntResultMatch[]> {
+  const res = await authed(
+    `/v1/unts/${untId}/report?product=${encodeURIComponent(product)}&student=${encodeURIComponent(student)}`
+  );
+  if (!res.ok) {
+    throw new PlatformError(`Поиск результата не удался (HTTP ${res.status})`, "upstream_error");
+  }
+  const data = (await res.json().catch(() => null)) as { studentUntInfos?: unknown } | null;
+  const list = Array.isArray(data?.studentUntInfos) ? data!.studentUntInfos : null;
+  if (list === null) {
+    throw new PlatformError("Платформа вернула неожиданный формат отчёта", "upstream_error");
+  }
+  return (list as Record<string, unknown>[])
+    .map((r) => ({
+      resultId: String(r.resultId ?? ""),
+      fullName: String(r.fullName ?? "—"),
+      combination: typeof r.combination === "string" ? r.combination : null,
+      score: typeof r.score === "number" ? r.score : 0,
+    }))
+    .filter((r) => r.resultId);
+}
+
+export type UntResultStatus = {
+  resultId: string;
+  status: string;
+  finishTime: string | null;
+  studentEmail: string | null;
+  studentName: string;
+};
+
+export async function getUntResultStatus(resultId: string): Promise<UntResultStatus> {
+  const res = await authed(`/v1/unts/results/${resultId}/personal-report`);
+  if (res.status === 404) {
+    throw new PlatformError("Результат не найден — возможно, уже удалён", "not_found");
+  }
+  if (!res.ok) {
+    throw new PlatformError(`Не удалось прочитать результат (HTTP ${res.status})`, "upstream_error");
+  }
+  const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!data || typeof data.id !== "string") {
+    throw new PlatformError("Платформа вернула неожиданный формат результата", "upstream_error");
+  }
+  const student = (data.student ?? {}) as Record<string, unknown>;
+  return {
+    resultId: data.id,
+    status: typeof data.status === "string" ? data.status : "",
+    finishTime: typeof data.finishTime === "string" ? data.finishTime : null,
+    studentEmail: typeof student.username === "string" ? student.username : null,
+    studentName: typeof student.fullName === "string" ? student.fullName : "",
+  };
+}
+
+export async function deleteUntResult(resultId: string): Promise<void> {
+  const res = await authed(`/v1/unts/results/${resultId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    console.warn(`[platform] DELETE /unts/results/${resultId} HTTP ${res.status}: ${detail}`);
+    throw new PlatformError(`Удаление не прошло (HTTP ${res.status})`, "upstream_error");
+  }
+}

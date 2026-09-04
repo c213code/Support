@@ -12,6 +12,7 @@ import {
   IconMail,
   IconSearch,
   IconDatabase,
+  IconRefresh,
 } from "@/components/Icons";
 
 // Страницы, где смонтирована командная палитра (⌘K) — только там кнопка
@@ -131,6 +132,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="absolute -left-3.5 top-2.5 bottom-2.5 w-[3px] rounded-r bg-brand-500" />
             )}
             <IconMail className="h-[19px] w-[19px]" />
+          </Link>
+        )}
+
+        {platformTool && (
+          <Link
+            href="/platform/reset-unt"
+            title="Обнуление результата ДТ"
+            aria-label="Обнуление результата ДТ"
+            className={linkClass(pathname === "/platform/reset-unt")}
+          >
+            {pathname === "/platform/reset-unt" && (
+              <span className="absolute -left-3.5 top-2.5 bottom-2.5 w-[3px] rounded-r bg-brand-500" />
+            )}
+            <IconRefresh className="h-[19px] w-[19px]" />
           </Link>
         )}
 
