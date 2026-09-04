@@ -46,6 +46,11 @@ function rowKey(hit: LogHit, i: number): string {
   return hit.requestId ? `${hit.requestId}-${i}` : `${hit.timestamp}-${i}`;
 }
 
+function isErrorStatus(status: string | null): boolean {
+  const code = Number(status);
+  return Number.isFinite(code) && code >= 400;
+}
+
 // Заголовок колонки в духе Kibana Discover: маленькая плашка "t" (тип поля —
 // у нас всё текстовое) перед именем. Чисто узнаваемость — тот же язык, что у
 // инструмента, который эта страница заменяет.
@@ -167,6 +172,12 @@ export function LogsExplorer({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiState, setAiState] = useState<InvestigationState | null>(null);
   const [aiReason, setAiReason] = useState<string | null>(null);
+
+  // Объяснение одной ошибочной записи (4xx/5xx) — по строке, а не по всей
+  // выборке разом, поэтому храним по ключу строки, а не как единое состояние.
+  const [errorExplain, setErrorExplain] = useState<
+    Record<string, { loading: boolean; explanation: string | null; reason: string | null }>
+  >({});
 
   const autoSearchedRef = useRef(false);
   // Параметры последней попытки — ретрай через 8с бьёт именно по ним, а не
@@ -384,6 +395,60 @@ export function LogsExplorer({
       toast(`Сеть недоступна: ${String(err)}`, "error");
     } finally {
       setAiLoading(false);
+    }
+  }
+
+  async function explainError(
+    key: string,
+    hit: LogHit,
+    requestBody: string | null,
+    responseBody: string | null
+  ) {
+    if (errorExplain[key]?.loading) return;
+    setErrorExplain((prev) => ({
+      ...prev,
+      [key]: { loading: true, explanation: null, reason: null },
+    }));
+    try {
+      const res = await fetch("/api/logs/explain-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          method: hit.method,
+          uri: hit.uri,
+          status: hit.status,
+          requestId: hit.requestId,
+          message: hit.message,
+          requestBody,
+          responseBody,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast(data?.error ?? `Не удалось объяснить ошибку (HTTP ${res.status})`, "error");
+        setErrorExplain((prev) => ({
+          ...prev,
+          [key]: { loading: false, explanation: null, reason: "ai-error" },
+        }));
+        return;
+      }
+      if (!data?.explanation) {
+        const reason = typeof data?.reason === "string" ? data.reason : "ai-error";
+        // Рубильник выключили в соседней вкладке, пока строка была раскрыта.
+        if (reason === "ai-off") setAiEnabled(false);
+        setErrorExplain((prev) => ({ ...prev, [key]: { loading: false, explanation: null, reason } }));
+        return;
+      }
+      setErrorExplain((prev) => ({
+        ...prev,
+        [key]: { loading: false, explanation: data.explanation, reason: null },
+      }));
+    } catch (err) {
+      toast(`Сеть недоступна: ${String(err)}`, "error");
+      setErrorExplain((prev) => ({
+        ...prev,
+        [key]: { loading: false, explanation: null, reason: "ai-error" },
+      }));
     }
   }
 
@@ -722,6 +787,51 @@ export function LogsExplorer({
                         {isOpen && (
                           <tr className="border-b border-slate-100 bg-slate-100/70">
                             <td colSpan={8} className="space-y-2.5 px-2.5 py-3">
+                              {isErrorStatus(hit.status) && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[11px] font-semibold text-amber-800">
+                                      Ошибка {hit.status}
+                                      {hit.requestId ? ` · requestId ${hit.requestId}` : ""}
+                                    </p>
+                                    {aiEnabled && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          explainError(key, hit, requestBody, responseBody);
+                                        }}
+                                        disabled={errorExplain[key]?.loading}
+                                        className="shrink-0 text-[11px] font-medium text-brand-600 hover:underline disabled:opacity-50"
+                                      >
+                                        {errorExplain[key]?.loading
+                                          ? "Объясняю…"
+                                          : "Объяснить ошибку (ИИ)"}
+                                      </button>
+                                    )}
+                                  </div>
+                                  <p className="mt-1 whitespace-pre-wrap break-words font-mono text-xs text-amber-900">
+                                    {hit.message || "Текст ошибки не пришёл в записи"}
+                                  </p>
+                                  {errorExplain[key]?.explanation && (
+                                    <p className="mt-2 border-t border-amber-200 pt-2 text-xs text-amber-900">
+                                      {errorExplain[key].explanation}
+                                    </p>
+                                  )}
+                                  {errorExplain[key]?.reason && (
+                                    <p className="mt-2 text-[11px] text-amber-700">
+                                      {AI_REASON_TEXT[errorExplain[key].reason as string] ??
+                                        "Не удалось объяснить — попробуй ещё раз"}
+                                    </p>
+                                  )}
+                                  {!aiEnabled && (
+                                    <p className="mt-2 text-[11px] text-amber-700">
+                                      Включи ИИ в панели «Разобраться с ИИ» выше, чтобы получить
+                                      объяснение
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                               {!requestBody && !responseBody && (
                                 <p className="text-xs text-slate-500">
                                   У этой записи нет тела запроса/ответа — смотри «Сообщение» в строке

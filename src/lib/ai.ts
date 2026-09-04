@@ -967,3 +967,74 @@ export async function investigateStudentLogs(
     return null;
   }
 }
+
+// Разбор одной ошибочной записи — агент кликает на конкретную строку 4xx/5xx
+// в таблице, а не описывает ситуацию словами. Отдельная (более короткая и
+// дешёвая) функция от investigateStudentLogs: там модель сопоставляет
+// хронологию по десяткам записей, здесь — объясняет одну.
+const LOG_ERROR_EXPLANATION_TIMEOUT_MS = 20000;
+
+export type LogErrorEvent = {
+  method: string | null;
+  uri: string | null;
+  status: string | null;
+  requestId: string | null;
+  message: string;
+  requestBody: string | null;
+  responseBody: string | null;
+};
+
+const LOG_ERROR_EXPLANATION_SYSTEM_PROMPT = `Ты помогаешь агенту поддержки онлайн-школы JUZ40 понять одну ошибочную запись лога платформы (HTTP 4xx/5xx). Тебе дают метод, путь, код ответа, requestId, текст message и тела запроса/ответа (могут быть обрезаны или отсутствовать). Ответ — json.
+
+Объясни простыми словами: что пытался сделать пользователь, что именно пошло не так и, если видно по данным, на чьей стороне проблема (платформа, сам ученик, внешняя интеграция). Агент не программист — переведи технические термины из message (стектрейсы, коды исключений и т.п.) в понятную причину, а не повторяй их как есть.
+
+Если по присланным данным причину не видно — так и скажи, не выдумывай её.
+
+Язык ответа — русский, 1-3 предложения.
+
+Ответь строго json: {"explanation":"..."}`;
+
+export async function explainLogError(event: LogErrorEvent): Promise<string | null> {
+  if (groqApiKeys().length === 0) return null;
+
+  const context = await buildAiContext();
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 600,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: LOG_ERROR_EXPLANATION_SYSTEM_PROMPT + context,
+          },
+          {
+            role: "user",
+            content: `Запись лога (json):\n${JSON.stringify(event)}`,
+          },
+        ],
+      },
+      LOG_ERROR_EXPLANATION_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      console.warn("[groq] explainLogError: ответ без content");
+      return null;
+    }
+
+    const parsed = JSON.parse(content);
+    const explanation = typeof parsed?.explanation === "string" ? parsed.explanation.trim() : "";
+    if (!explanation) {
+      console.warn("[groq] explainLogError: в json нет explanation");
+      return null;
+    }
+    return explanation;
+  } catch (err) {
+    console.warn(`[groq] explainLogError упал: ${String(err).slice(0, 300)}`);
+    return null;
+  }
+}
