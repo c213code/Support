@@ -70,6 +70,23 @@ export function ResetUntResultTool() {
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
 
+  // Предзаполнение с карточки тикета: /platform/reset-unt?student=A&q=ДТ.
+  // Почта/телефон уходит в поле ученика, "ДТ" — в поиск теста (см.
+  // src/lib/untResetRequest.ts); тест и продукт агент всё равно выбирает сам.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const s = p.get("student");
+    const q = p.get("q");
+    if (!s && !q) return;
+    // setState вне синхронного тела эффекта — как и в ChangeEmailTool, иначе
+    // линтер ругается на каскадные рендеры.
+    const t = setTimeout(() => {
+      if (s) setStudent(s);
+      if (q) setTestQuery(q);
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     fetch("/api/platform/unts/tests")

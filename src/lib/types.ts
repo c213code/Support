@@ -44,6 +44,11 @@ export type IssueDTO = {
   // только когда инструмент смены почты включён (заданы PLATFORM_* env), см.
   // GET /api/issues и src/lib/emailChangeRequest.ts.
   emailChange?: { oldEmail: string; newEmail: string } | null;
+  // В обращении упомянут деңгейлік тест (ДТ) — на карточке появляется кнопка
+  // в /platform/reset-unt с подставленной почтой/телефоном ученика. Считается
+  // только когда инструмент включён (заданы PLATFORM_* env), см. GET
+  // /api/issues и src/lib/untResetRequest.ts.
+  untReset?: boolean;
 };
 
 export type GroupPresetDTO = {

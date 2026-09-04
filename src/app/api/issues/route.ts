@@ -7,6 +7,7 @@ import { isEscalationTeam } from "@/lib/escalation";
 import { cleanTicketDescription } from "@/lib/textClean";
 import { extractTicketHints } from "@/lib/ticketHints";
 import { detectEmailChangeRequest } from "@/lib/emailChangeRequest";
+import { mentionsUntTest } from "@/lib/untResetRequest";
 import { platformEnabled } from "@/lib/platform";
 
 export async function GET(request: NextRequest) {
@@ -94,6 +95,7 @@ export async function GET(request: NextRequest) {
         emailChange: platformOn
           ? detectEmailChangeRequest(rawTexts.filter(Boolean).join("\n"))
           : null,
+        untReset: platformOn && mentionsUntTest(rawTexts.filter(Boolean).join("\n")),
       };
     }),
   });

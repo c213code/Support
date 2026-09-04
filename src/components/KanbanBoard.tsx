@@ -382,6 +382,24 @@ export function KanbanBoard({
                         </a>
                       </div>
                     )}
+                    {/* Упомянут ДТ/деңгейлік тест — ведёт в обнуление
+                        результата с уже подставленной почтой/телефоном
+                        ученика, тест агент выбирает сам (см.
+                        src/lib/untResetRequest.ts). */}
+                    {issue.untReset && (
+                      <div className="mt-1">
+                        <a
+                          href={`/platform/reset-unt?student=${encodeURIComponent(
+                            studentEmail ?? issue.hints?.phones[0] ?? ""
+                          )}&q=${encodeURIComponent("ДТ")}`}
+                          onClick={(e) => e.stopPropagation()}
+                          title="Обнулить результат ДТ"
+                          className="inline-flex max-w-full items-center gap-1 truncate rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 transition hover:bg-brand-100"
+                        >
+                          🎯 Обнулить ДТ →
+                        </a>
+                      </div>
+                    )}
                     {onBotRepliesChanged && onBotReplyError && (
                       <BotReplies
                         issueId={issue.id}
