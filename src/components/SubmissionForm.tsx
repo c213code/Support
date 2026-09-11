@@ -1,14 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Script from "next/script";
 import { OFFICIAL_GROUPS } from "@/lib/groups";
+import styles from "./SubmissionForm.module.css";
+
+// Минимум Telegram WebApp API, которым пользуется форма
+// (core.telegram.org/bots/webapps). Версии — в isVersionAtLeast ниже:
+// старые клиенты Telegram части методов не знают.
+type BottomButton = {
+  setParams: (params: { text?: string; is_active?: boolean; is_visible?: boolean }) => void;
+  showProgress: (leaveActive?: boolean) => void;
+  hideProgress: () => void;
+  hide: () => void;
+  onClick: (callback: () => void) => void;
+  offClick: (callback: () => void) => void;
+};
 
 type TelegramWebApp = {
   initData: string;
   ready: () => void;
   expand: () => void;
   close: () => void;
+  isVersionAtLeast: (version: string) => boolean;
+  setHeaderColor: (color: string) => void;
+  setBackgroundColor: (color: string) => void;
+  enableClosingConfirmation: () => void;
+  disableClosingConfirmation: () => void;
+  disableVerticalSwipes: () => void;
+  HapticFeedback: {
+    selectionChanged: () => void;
+    impactOccurred: (style: "light" | "medium" | "heavy" | "rigid" | "soft") => void;
+    notificationOccurred: (type: "error" | "success" | "warning") => void;
+  };
+  MainButton: BottomButton;
 };
 
 declare global {
@@ -17,37 +42,123 @@ declare global {
   }
 }
 
-// Цвета берём из темы Telegram (он сам задаёт эти CSS-переменные внутри
-// мини-аппа), чтобы форма выглядела частью приложения, а не чужим сайтом.
-// Запасные значения — для открытия в обычном браузере.
-const theme = {
-  bg: "var(--tg-theme-bg-color, #ffffff)",
-  text: "var(--tg-theme-text-color, #0f172a)",
-  hint: "var(--tg-theme-hint-color, #64748b)",
-  field: "var(--tg-theme-secondary-bg-color, #f1f5f9)",
-  button: "var(--tg-theme-button-color, #2563eb)",
-  buttonText: "var(--tg-theme-button-text-color, #ffffff)",
+// Форма открыта из Telegram, только если есть подписанная initData: сам
+// скрипт telegram-web-app.js создаёт WebApp и в обычном браузере.
+function telegramApp(): TelegramWebApp | null {
+  const app = window.Telegram?.WebApp;
+  return app?.initData ? app : null;
+}
+
+// Подпись Telegram для сервера. Основной источник — скрипт Telegram; если он
+// не загрузился, Telegram всё равно передаёт те же данные в адресе страницы
+// (#tgWebAppData=…) — с ними отправка работает и без скрипта.
+function currentInitData(): string {
+  const fromScript = window.Telegram?.WebApp?.initData;
+  if (fromScript) return fromScript;
+  return new URLSearchParams(window.location.hash.slice(1)).get("tgWebAppData") ?? "";
+}
+
+function haptic(kind: "select" | "tap" | "success" | "warning" | "error") {
+  const app = telegramApp();
+  if (!app?.isVersionAtLeast("6.1")) return;
+  if (kind === "select") app.HapticFeedback.selectionChanged();
+  else if (kind === "tap") app.HapticFeedback.impactOccurred("light");
+  else app.HapticFeedback.notificationOccurred(kind);
+}
+
+// Цвет плитки — цвет группы на доске поддержки (groupColor в
+// src/lib/groups.ts), чтобы куратор видел тот же знак, которым тикет будет
+// отмечен у дежурного. Значения продублированы вручную (оттенки -600 тех же
+// цветов) — при смене цветов в groups.ts поправить и здесь.
+const GROUP_HUE: Record<string, string> = {
+  "Әдістеме & IT": "#7c3aed",
+  "Сату - Платформа": "#0d9488",
+  "IT & Product": "#0284c7",
+  "IT + Сервис": "#ea580c",
 };
+
+// Черновик живёт на телефоне: закрыл форму случайно — текст на месте.
+// Фото в черновик не кладём (десятки-сотни КБ, localStorage не для этого).
+const DRAFT_KEY = "support-form-draft-v1";
+// Куратор обычно пишет в одну и ту же группу — подставляем её сразу.
+const LAST_GROUP_KEY = "support-form-last-group";
+
+// Потолок фото. Не 10 МБ Telegram, а меньше лимита Vercel на тело запроса
+// (4.5 МБ): больший файл платформа отбросит ещё до нашего маршрута. Сжатое
+// фото весит сотни КБ — лимит касается только оригинала, который браузер
+// не смог сжать. Тот же лимит проверяет сервер (POST /api/miniapp/submit).
+const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+// Сколько ждать ответа сервера. Самый долгий путь там — ИИ-описание плюс
+// загрузка фото в Telegram (до 20 с); минута — с большим запасом.
+const SUBMIT_TIMEOUT_MS = 60_000;
+// Сколько ждать скрипт Telegram, прежде чем признать, что он не загрузился.
+const SCRIPT_TIMEOUT_MS = 10_000;
+
+const PHOTO_TOO_BIG = "Фото слишком большое — сделайте скриншот экрана и прикрепите его";
+
+type Draft = {
+  groupName: string;
+  description: string;
+  studentContact: string;
+  lessonLink: string;
+  submissionId: string;
+};
+
+// id этой отправки: по нему сервер узнаёт повтор (ответ потерялся, куратор
+// нажал ещё раз) и не заводит второй тикет. Живёт в черновике — повтор
+// узнаётся и после переоткрытия формы; новый — после успешной отправки.
+function newSubmissionId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function readStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string | null) {
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    // Хранилище недоступно (приватный режим и т.п.) — форма работает и без
+    // черновика, просто не переживёт закрытие.
+  }
+}
 
 // Сжимаем фото на телефоне до отправки: скрин с камеры весит 2-4 МБ, после
 // — сотни килобайт, и текст ошибки на нём остаётся читаемым. JPEG, а не
-// WebP: sendPhoto в Telegram гарантированно принимает JPEG.
+// WebP: sendPhoto в Telegram гарантированно принимает JPEG. Любой сбой —
+// исключение, а не тихая подмена: решение о запасном пути принимает
+// onPhotoPicked.
 async function compressImage(file: File): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const ctx = canvas.getContext("2d");
+  // Без контекста (iOS при нехватке памяти) рисовать некуда, и получился бы
+  // пустой белый JPEG — агенту это хуже честной ошибки.
+  if (!ctx) {
+    bitmap.close();
+    throw new Error("canvas 2d недоступен");
+  }
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
-  return new Promise((resolve) =>
-    canvas.toBlob((blob) => resolve(blob ?? file), "image/jpeg", 0.82)
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("toBlob вернул пустоту"))),
+      "image/jpeg",
+      0.82
+    )
   );
 }
-
-// Лимит Telegram на sendPhoto — тот же, что проверяет сервер
-// (POST /api/miniapp/submit).
-const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
 function formatSize(bytes: number): string {
   return bytes < 1024 * 1024
@@ -55,10 +166,60 @@ function formatSize(bytes: number): string {
     : `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
 }
 
+// Почта или телефон — подсказываем на лету, чтобы опечатку было видно до
+// отправки, а не когда дежурный не найдёт ученика.
+function contactKind(value: string): "empty" | "email" | "phone" | "unknown" {
+  const v = value.trim();
+  if (!v) return "empty";
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return "email";
+  const digits = v.replace(/[\s()+-]/g, "");
+  if (/^\d{10,12}$/.test(digits)) return "phone";
+  return "unknown";
+}
+
+const FIELD_IDS = {
+  group: "field-group",
+  description: "field-description",
+  contact: "field-contact",
+  link: "field-link",
+  photo: "field-photo",
+} as const;
+type Field = keyof typeof FIELD_IDS;
+
+function CheckIcon({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 12.5l4.5 4.5L19 7.5"
+        stroke="currentColor"
+        strokeWidth={size > 20 ? 2.4 : 3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.1l1.3-2h6.2l1.3 2h2.1A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
 export function SubmissionForm() {
-  // null — скрипт Telegram ещё не загрузился; "" — форма открыта не из
-  // Telegram (подписи нет, сервер такую подачу всё равно отклонит).
-  const [initData, setInitData] = useState<string | null>(null);
+  // loading — скрипт Telegram ещё грузится; telegram — открыто из Telegram;
+  // browser — скрипт есть, а подписи нет: открыто не из Telegram;
+  // script-failed — скрипт не загрузился (бывает и внутри Telegram).
+  const [env, setEnv] = useState<"loading" | "telegram" | "browser" | "script-failed">("loading");
+  const [restored, setRestored] = useState(false);
 
   const [groupName, setGroupName] = useState("");
   const [description, setDescription] = useState("");
@@ -67,242 +228,537 @@ export function SubmissionForm() {
   const [photo, setPhoto] = useState<Blob | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [compressing, setCompressing] = useState(false);
+  const [submissionId, setSubmissionId] = useState(newSubmissionId);
 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
+  // Ошибки полей показываем только после первой попытки отправить — не
+  // встречаем человека красным текстом на пустой форме.
+  const [showErrors, setShowErrors] = useState(false);
+  const [sent, setSent] = useState<{ groupName: string; description: string } | null>(null);
+
+  const submitRef = useRef<() => void>(() => {});
+  // Синхронный замок отправки. sending из состояния не годится: нажатия
+  // MainButton приходят событиями Telegram, React не успевает перерисовать
+  // между двумя быстрыми тапами, и без замка ушли бы два запроса.
+  const inFlightRef = useRef(false);
 
   function onTelegramReady() {
     const app = window.Telegram?.WebApp;
-    app?.ready();
-    app?.expand();
-    setInitData(app?.initData ?? "");
+    if (!app?.initData) {
+      setEnv("browser");
+      return;
+    }
+    app.ready();
+    app.expand();
+    if (app.isVersionAtLeast("6.1")) {
+      // Шапка и фон вокруг страницы — того же цвета, что страница: без
+      // полосы другого цвета над формой.
+      app.setHeaderColor("secondary_bg_color");
+      app.setBackgroundColor("secondary_bg_color");
+    }
+    // Иначе свайп вниз при прокрутке длинной формы закрывает мини-апп.
+    if (app.isVersionAtLeast("7.7")) app.disableVerticalSwipes();
+    setEnv("telegram");
   }
+
+  // Скрипт может зависнуть так, что не сработает ни onReady, ни onError, —
+  // тогда не было бы ни MainButton, ни кнопки на странице.
+  useEffect(() => {
+    const t = setTimeout(
+      () => setEnv((current) => (current === "loading" ? "script-failed" : current)),
+      SCRIPT_TIMEOUT_MS
+    );
+    return () => clearTimeout(t);
+  }, []);
+
+  // Черновик и последняя группа — с телефона. setState — вне синхронного
+  // тела эффекта (как и в других формах проекта), иначе линтер ругается на
+  // каскадные рендеры; страница собирается статически, поэтому читать
+  // localStorage при первом рендере нельзя — разошлась бы гидратация.
+  useEffect(() => {
+    const raw = readStorage(DRAFT_KEY);
+    const lastGroup = readStorage(LAST_GROUP_KEY);
+    const t = setTimeout(() => {
+      try {
+        const draft = raw ? (JSON.parse(raw) as Partial<Draft>) : {};
+        setGroupName(draft.groupName || lastGroup || "");
+        setDescription(draft.description ?? "");
+        setStudentContact(draft.studentContact ?? "");
+        setLessonLink(draft.lessonLink ?? "");
+        if (draft.submissionId) setSubmissionId(draft.submissionId);
+      } catch {
+        if (lastGroup) setGroupName(lastGroup);
+      }
+      setRestored(true);
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (!restored || sent) return;
+    const draft: Draft = { groupName, description, studentContact, lessonLink, submissionId };
+    const empty = !description && !studentContact && !lessonLink;
+    writeStorage(DRAFT_KEY, empty ? null : JSON.stringify(draft));
+  }, [restored, sent, groupName, description, studentContact, lessonLink, submissionId]);
+
+  const dirty = Boolean(description || studentContact || lessonLink || photo);
+
+  // Закрыть начатую форму — спросить. Текст переживёт закрытие в черновике,
+  // фото — нет; различать это в одном системном вопросе Telegram нельзя,
+  // поэтому спрашиваем всегда, когда что-то начато.
+  useEffect(() => {
+    const app = telegramApp();
+    if (!app?.isVersionAtLeast("6.2")) return;
+    if (dirty && !sent) app.enableClosingConfirmation();
+    else app.disableClosingConfirmation();
+  }, [env, dirty, sent]);
+
+  // Отправка внутри Telegram — нативной нижней кнопкой: она всегда на месте,
+  // не прыгает под клавиатурой и показывает прогресс сама.
+  useEffect(() => {
+    const button = telegramApp()?.MainButton;
+    if (!button) return;
+    if (sent) {
+      button.hide();
+      return;
+    }
+    button.setParams({
+      text: sending ? "Отправляем…" : "Отправить обращение",
+      is_visible: true,
+      is_active: !sending && !compressing,
+    });
+    if (sending) button.showProgress(false);
+    else button.hideProgress();
+  }, [env, sent, sending, compressing]);
+
+  useEffect(() => {
+    const button = telegramApp()?.MainButton;
+    if (!button) return;
+    const onClick = () => submitRef.current();
+    button.onClick(onClick);
+    return () => button.offClick(onClick);
+  }, [env]);
+
+  useEffect(() => {
+    submitRef.current = submit;
+  });
+
+  useEffect(() => {
+    return () => {
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+    };
+  }, [photoPreview]);
 
   async function onPhotoPicked(file: File | undefined) {
     if (!file) return;
     setError(null);
     setCompressing(true);
     // Не каждый браузер умеет открыть любой формат (HEIC на Android, например)
-    // — тогда отправляем оригинал, если он укладывается в лимит Telegram, а не
-    // заставляем куратора искать другое фото.
+    // — тогда пробуем отправить оригинал, если он в лимите. Telegram может
+    // его не принять (тот же HEIC) — тогда сервер попросит скриншот.
     let chosen: Blob | null = null;
     try {
       chosen = await compressImage(file);
-    } catch {
+    } catch (err) {
+      // Причина — для отладки в WebView, если куратор пожалуется.
+      console.warn("[miniapp] фото не сжалось, пробую оригинал:", err);
       if (file.type.startsWith("image/") && file.size <= MAX_PHOTO_BYTES) chosen = file;
     }
     if (chosen) {
-      if (photoPreview) URL.revokeObjectURL(photoPreview);
       setPhoto(chosen);
       setPhotoPreview(URL.createObjectURL(chosen));
+      haptic("tap");
     } else {
-      setError("Не удалось обработать фото — сделайте скриншот или выберите другое");
+      setError(
+        file.size > MAX_PHOTO_BYTES
+          ? PHOTO_TOO_BIG
+          : "Не удалось открыть это фото — сделайте скриншот или выберите другое"
+      );
+      haptic("error");
     }
     setCompressing(false);
   }
 
-  const complete =
-    groupName &&
-    description.trim() &&
-    studentContact.trim() &&
-    lessonLink.trim() &&
-    photo;
+  function removePhoto() {
+    setPhoto(null);
+    setPhotoPreview(null);
+  }
+
+  const missing: Field[] = [
+    ...(!groupName ? (["group"] as const) : []),
+    ...(!description.trim() ? (["description"] as const) : []),
+    ...(!studentContact.trim() ? (["contact"] as const) : []),
+    ...(!lessonLink.trim() ? (["link"] as const) : []),
+    ...(!photo ? (["photo"] as const) : []),
+  ];
+  const isMissing = (field: Field) => showErrors && missing.includes(field);
 
   async function submit() {
-    if (!complete || !photo || sending) return;
+    if (inFlightRef.current || compressing) return;
+    if (missing.length > 0) {
+      setShowErrors(true);
+      haptic("warning");
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      document
+        .getElementById(FIELD_IDS[missing[0]])
+        ?.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
+      return;
+    }
+    if (!photo) return;
+
+    inFlightRef.current = true;
     setSending(true);
     setError(null);
     try {
       const form = new FormData();
-      form.append("initData", initData ?? "");
+      form.append("initData", currentInitData());
+      form.append("submissionId", submissionId);
       form.append("groupName", groupName);
       form.append("description", description);
       form.append("studentContact", studentContact);
       form.append("lessonLink", lessonLink);
       form.append("photo", photo, "photo.jpg");
-      const res = await fetch("/api/miniapp/submit", { method: "POST", body: form });
+      const res = await fetch("/api/miniapp/submit", {
+        method: "POST",
+        body: form,
+        signal:
+          typeof AbortSignal.timeout === "function"
+            ? AbortSignal.timeout(SUBMIT_TIMEOUT_MS)
+            : undefined,
+      });
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error ?? `Не удалось отправить (ошибка ${res.status})`);
+      // 413 может прийти и от самой платформы (Vercel) — уже не нашим JSON.
+      if (res.status === 413) {
+        setError(PHOTO_TOO_BIG);
+        haptic("error");
         return;
       }
-      setSent(true);
-    } catch {
-      setError("Нет связи — проверьте интернет и отправьте ещё раз");
+      // Успех — только явный ответ нашего маршрута. 200 от чего-то другого
+      // (например, редирект на страницу входа) — это не отправка, и стирать
+      // черновик нельзя.
+      if (!res.ok || data?.ok !== true) {
+        setError(data?.error ?? `Не отправилось (ошибка ${res.status}) — попробуйте ещё раз`);
+        haptic("error");
+        return;
+      }
+      writeStorage(DRAFT_KEY, null);
+      writeStorage(LAST_GROUP_KEY, groupName);
+      setSent({ groupName, description: description.trim() });
+      haptic("success");
+      window.scrollTo({ top: 0 });
+    } catch (err) {
+      const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+      setError(
+        timedOut
+          ? "Сервер не ответил за минуту — отправьте ещё раз, второго обращения не появится"
+          : "Нет связи — проверьте интернет и отправьте ещё раз"
+      );
+      haptic("error");
     } finally {
+      inFlightRef.current = false;
       setSending(false);
     }
   }
 
   function startOver() {
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    // Группа остаётся: следующее обращение почти всегда туда же.
     setDescription("");
     setStudentContact("");
     setLessonLink("");
-    setPhoto(null);
-    setPhotoPreview(null);
-    setSent(false);
+    removePhoto();
+    setSubmissionId(newSubmissionId());
+    setShowErrors(false);
+    setError(null);
+    setSent(null);
+    window.scrollTo({ top: 0 });
   }
 
-  const fieldStyle = { background: theme.field, color: theme.text };
-  const fieldClass = "w-full rounded-xl px-3 py-2.5 text-[15px] outline-none";
+  const kind = contactKind(studentContact);
+  const linkLooksLikeUrl = /^https?:\/\/\S+$/i.test(lessonLink.trim());
+  // Кнопка на странице — там, где нет MainButton Telegram.
+  const pageButton = env === "browser" || env === "script-failed";
 
-  return (
-    <main
-      className="min-h-dvh px-4 pb-8 pt-5"
-      style={{ background: theme.bg, color: theme.text }}
-    >
-      <Script src="https://telegram.org/js/telegram-web-app.js" onReady={onTelegramReady} />
+  const telegramScript = (
+    <Script
+      src="https://telegram.org/js/telegram-web-app.js"
+      onReady={onTelegramReady}
+      onError={() => setEnv("script-failed")}
+    />
+  );
 
-      {initData === "" && (
-        <p className="mb-4 rounded-xl px-3 py-2.5 text-sm" style={fieldStyle}>
-          Откройте эту форму кнопкой в боте Telegram — иначе обращение не
-          отправится.
-        </p>
-      )}
+  if (sent) {
+    const hue = GROUP_HUE[sent.groupName];
+    const group = OFFICIAL_GROUPS.find((g) => g.name === sent.groupName);
+    return (
+      <main className={styles.root}>
+        {telegramScript}
+        <div className={styles.success} role="status">
+          <div className={styles.successMark}>
+            <CheckIcon size={38} />
+          </div>
+          <h1 className={styles.successTitle}>Обращение отправлено</h1>
+          <p className={styles.successText}>Дежурный увидит его на доске поддержки.</p>
 
-      {sent ? (
-        <div className="py-10 text-center">
-          <p className="text-4xl">✅</p>
-          <h1 className="mt-3 text-lg font-semibold">Обращение отправлено</h1>
-          <p className="mt-1 text-sm" style={{ color: theme.hint }}>
-            Дежурный увидит его на доске поддержки.
-          </p>
-          <div className="mt-6 flex flex-col gap-2">
+          <div className={`${styles.list} ${styles.summary}`}>
+            <div className={styles.summaryRow}>
+              <span className={styles.summaryLabel}>Группа</span>
+              <span className={styles.summaryValue} style={{ color: hue }}>
+                {group?.emoji} {sent.groupName}
+              </span>
+            </div>
+            <div className={styles.summaryRow}>
+              <span className={styles.summaryLabel}>Суть</span>
+              <span className={styles.summaryValue}>
+                {sent.description.length > 140
+                  ? `${sent.description.slice(0, 140)}…`
+                  : sent.description}
+              </span>
+            </div>
+          </div>
+
+          <button type="button" className={styles.primaryButton} onClick={startOver}>
+            Новое обращение
+          </button>
+          {env === "telegram" && (
             <button
-              onClick={startOver}
-              className="rounded-xl py-3 text-[15px] font-medium"
-              style={{ background: theme.button, color: theme.buttonText }}
-            >
-              Подать ещё одно
-            </button>
-            <button
+              type="button"
+              className={styles.secondaryButton}
               onClick={() => window.Telegram?.WebApp?.close()}
-              className="py-2 text-[15px]"
-              style={{ color: theme.hint }}
             >
               Закрыть
             </button>
-          </div>
+          )}
         </div>
-      ) : (
-        <div className="space-y-5">
-          <h1 className="text-lg font-semibold">Обращение в поддержку</h1>
+      </main>
+    );
+  }
 
-          <section>
-            <p className="mb-2 text-sm" style={{ color: theme.hint }}>
-              Группа
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {OFFICIAL_GROUPS.map((g) => (
+  return (
+    <main className={styles.root}>
+      {telegramScript}
+
+      <h1 className={styles.title}>Новое обращение</h1>
+      <p className={styles.subtitle}>Дежурный увидит его на доске поддержки</p>
+
+      {env === "browser" && (
+        <p className={styles.notice}>
+          Форма открыта не из Telegram, поэтому не отправится. Откройте её кнопкой
+          «Подать обращение» в боте.
+        </p>
+      )}
+      {env === "script-failed" && (
+        <p className={styles.notice}>
+          Не загрузился модуль Telegram — проверьте интернет. Можно попробовать
+          отправить кнопкой внизу; если не выйдет, закройте форму и откройте её
+          заново из бота.
+        </p>
+      )}
+
+      <section className={styles.section} id={FIELD_IDS.group}>
+        <span className={styles.sectionHeader} id="group-label">
+          Куда отправить
+        </span>
+        <div className={styles.groups} role="group" aria-labelledby="group-label">
+          {OFFICIAL_GROUPS.map((g) => {
+            const selected = groupName === g.name;
+            return (
+              <button
+                key={g.name}
+                type="button"
+                aria-pressed={selected}
+                className={styles.groupTile}
+                style={{ "--hue": GROUP_HUE[g.name] } as CSSProperties}
+                onClick={() => {
+                  if (!selected) haptic("select");
+                  setGroupName(g.name);
+                }}
+              >
+                <span className={styles.groupEmoji} aria-hidden="true">
+                  {g.emoji}
+                </span>
+                <span className={styles.groupName}>{g.name}</span>
+                {selected && (
+                  <span className={styles.groupCheck}>
+                    <CheckIcon size={14} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {isMissing("group") && (
+          <p className={`${styles.footer} ${styles.footerError}`}>Выберите группу</p>
+        )}
+      </section>
+
+      <section className={styles.section}>
+        <label className={styles.sectionHeader} htmlFor={FIELD_IDS.description}>
+          Что случилось
+        </label>
+        <div className={styles.list}>
+          <textarea
+            id={FIELD_IDS.description}
+            className={`${styles.input} ${styles.textarea}`}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Например: у ученика не открывается тест по геометрии, пишет «ошибка 500»"
+            maxLength={4000}
+          />
+        </div>
+        <p
+          className={`${styles.footer} ${isMissing("description") ? styles.footerError : ""}`}
+        >
+          {isMissing("description")
+            ? "Опишите, что случилось"
+            : "Что делал ученик и что увидел — так дежурному не придётся переспрашивать"}
+        </p>
+      </section>
+
+      <section className={styles.section}>
+        <label className={styles.sectionHeader} htmlFor={FIELD_IDS.contact}>
+          Ученик
+        </label>
+        <div className={styles.list}>
+          <input
+            id={FIELD_IDS.contact}
+            className={styles.input}
+            value={studentContact}
+            onChange={(e) => setStudentContact(e.target.value)}
+            placeholder="Почта или телефон"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            inputMode={kind === "phone" ? "tel" : "email"}
+            maxLength={200}
+          />
+        </div>
+        <p
+          className={`${styles.footer} ${
+            isMissing("contact") || kind === "unknown"
+              ? styles.footerError
+              : kind === "email" || kind === "phone"
+                ? styles.footerOk
+                : ""
+          }`}
+        >
+          {isMissing("contact")
+            ? "Нужна почта или телефон ученика"
+            : kind === "email"
+              ? "Почта ученика"
+              : kind === "phone"
+                ? "Телефон ученика"
+                : kind === "unknown"
+                  ? "Не похоже на почту или телефон — проверьте"
+                  : "Без почты или телефона дежурный не найдёт ученика"}
+        </p>
+      </section>
+
+      <section className={styles.section}>
+        <label className={styles.sectionHeader} htmlFor={FIELD_IDS.link}>
+          Урок или задание
+        </label>
+        <div className={styles.list}>
+          <input
+            id={FIELD_IDS.link}
+            className={styles.input}
+            value={lessonLink}
+            onChange={(e) => setLessonLink(e.target.value)}
+            placeholder="Ссылка"
+            inputMode="url"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            maxLength={500}
+          />
+        </div>
+        <p
+          className={`${styles.footer} ${
+            isMissing("link") ? styles.footerError : linkLooksLikeUrl ? styles.footerOk : ""
+          }`}
+        >
+          {isMissing("link")
+            ? "Нужна ссылка на урок или задание"
+            : linkLooksLikeUrl
+              ? "Ссылка на урок"
+              : lessonLink.trim()
+                ? "Если есть ссылка — вставьте её целиком, дежурный откроет урок в один клик"
+                : "Скопируйте из адресной строки урока"}
+        </p>
+      </section>
+
+      <section className={styles.section} id={FIELD_IDS.photo}>
+        <span className={styles.sectionHeader}>Скриншот</span>
+        <div className={styles.list}>
+          {photo && photoPreview ? (
+            <div className={styles.photoFilled}>
+              {/* Локальный blob: из выбранного файла — next/image тут не к месту. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photoPreview} alt="Прикреплённый скриншот" className={styles.thumb} />
+              <div className={styles.photoMeta}>
+                Скриншот прикреплён
+                <div className={styles.photoSize}>{formatSize(photo.size)}</div>
+              </div>
+              <div className={styles.photoActions}>
+                <label className={styles.textButton}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={(e) => {
+                      onPhotoPicked(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                  />
+                  Заменить
+                </label>
                 <button
-                  key={g.name}
                   type="button"
-                  onClick={() => setGroupName(g.name)}
-                  className="rounded-xl px-3 py-2.5 text-left text-sm"
-                  style={
-                    groupName === g.name
-                      ? { background: theme.button, color: theme.buttonText }
-                      : fieldStyle
-                  }
+                  className={`${styles.textButton} ${styles.textButtonDestructive}`}
+                  onClick={removePhoto}
                 >
-                  {g.emoji} {g.name}
+                  Убрать
                 </button>
-              ))}
+              </div>
             </div>
-          </section>
-
-          <label className="block">
-            <span className="mb-2 block text-sm" style={{ color: theme.hint }}>
-              Что случилось
-            </span>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-              placeholder="Например: тест по геометрии не открывается, ошибка 500"
-              className={fieldClass}
-              style={fieldStyle}
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm" style={{ color: theme.hint }}>
-              Почта или телефон ученика
-            </span>
-            <input
-              value={studentContact}
-              onChange={(e) => setStudentContact(e.target.value)}
-              placeholder="student@mail.kz или 87771234567"
-              className={fieldClass}
-              style={fieldStyle}
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm" style={{ color: theme.hint }}>
-              Ссылка на урок или задание
-            </span>
-            <input
-              value={lessonLink}
-              onChange={(e) => setLessonLink(e.target.value)}
-              placeholder="https://juz40-edu.kz/…"
-              inputMode="url"
-              className={fieldClass}
-              style={fieldStyle}
-            />
-          </label>
-
-          <section>
-            <p className="mb-2 text-sm" style={{ color: theme.hint }}>
-              Фото или скриншот
-            </p>
-            <label
-              className="flex cursor-pointer items-center justify-center rounded-xl px-3 py-3 text-sm"
-              style={fieldStyle}
-            >
+          ) : (
+            <label className={styles.photoPick}>
               <input
                 type="file"
                 accept="image/*"
                 className="sr-only"
-                onChange={(e) => onPhotoPicked(e.target.files?.[0])}
+                onChange={(e) => {
+                  onPhotoPicked(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
               />
-              {compressing
-                ? "Сжимаем фото…"
-                : photo
-                  ? `Заменить фото · ${formatSize(photo.size)}`
-                  : "📎 Прикрепить фото"}
+              <CameraIcon />
+              {compressing ? "Сжимаем фото…" : "Прикрепить скриншот"}
             </label>
-            {photoPreview && (
-              // Локальный blob: из выбранного файла — next/image тут не к месту.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={photoPreview}
-                alt="Прикреплённое фото"
-                className="mt-2 max-h-48 rounded-xl"
-              />
-            )}
-          </section>
-
-          {error && (
-            <p className="rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>
-          )}
-
-          <button
-            onClick={submit}
-            disabled={!complete || sending || compressing}
-            className="w-full rounded-xl py-3 text-[15px] font-medium disabled:opacity-40"
-            style={{ background: theme.button, color: theme.buttonText }}
-          >
-            {sending ? "Отправляем…" : "Отправить"}
-          </button>
-          {!complete && (
-            <p className="text-center text-xs" style={{ color: theme.hint }}>
-              Заполните все поля и прикрепите фото
-            </p>
           )}
         </div>
+        <p className={`${styles.footer} ${isMissing("photo") ? styles.footerError : ""}`}>
+          {isMissing("photo")
+            ? "Прикрепите скриншот ошибки"
+            : "Сжимается на телефоне — отправка займёт пару секунд"}
+        </p>
+      </section>
+
+      {error && (
+        <p className={styles.error} role="alert">
+          {error}
+        </p>
+      )}
+
+      {pageButton && (
+        <button
+          type="button"
+          className={styles.primaryButton}
+          onClick={submit}
+          disabled={sending || compressing}
+        >
+          {sending ? "Отправляем…" : "Отправить обращение"}
+        </button>
       )}
     </main>
   );

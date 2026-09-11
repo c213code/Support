@@ -1,0 +1,409 @@
+/* Форма обращения в мини-аппе Telegram. Выглядит как экран настроек самого
+   Telegram, а не как сайт: цвета интерфейса — из темы Telegram (он задаёт
+   --tg-theme-* внутри мини-аппа и меняет их при смене темы сам), шрифт —
+   системный, как у приложения. Свои цвета — только у плиток групп (цвета
+   доски). Запасные значения — для обычного браузера и для старых клиентов
+   Telegram, которые часть переменных (section_*, accent, destructive) не
+   задают. */
+
+.root {
+  --bg: var(--tg-theme-secondary-bg-color, #efeff4);
+  --section: var(--tg-theme-section-bg-color, #ffffff);
+  --text: var(--tg-theme-text-color, #000000);
+  --hint: var(--tg-theme-hint-color, #8e8e93);
+  --section-header: var(--tg-theme-section-header-text-color, #6d6d72);
+  --separator: var(--tg-theme-section-separator-color, rgba(60, 60, 67, 0.18));
+  --accent: var(--tg-theme-accent-text-color, #2481cc);
+  --button: var(--tg-theme-button-color, #2481cc);
+  --button-text: var(--tg-theme-button-text-color, #ffffff);
+  --destructive: var(--tg-theme-destructive-text-color, #e53935);
+
+  min-height: 100dvh;
+  padding: 20px 16px calc(28px + env(safe-area-inset-bottom));
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Helvetica Neue",
+    "Segoe UI", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+  .root {
+    --bg: var(--tg-theme-secondary-bg-color, #000000);
+    --section: var(--tg-theme-section-bg-color, #1c1c1e);
+    --text: var(--tg-theme-text-color, #ffffff);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --section-header: var(--tg-theme-section-header-text-color, #8d8e93);
+    --separator: var(--tg-theme-section-separator-color, rgba(84, 84, 88, 0.6));
+    --accent: var(--tg-theme-accent-text-color, #3e88f7);
+    --button: var(--tg-theme-button-color, #3e88f7);
+    --destructive: var(--tg-theme-destructive-text-color, #ff453a);
+  }
+}
+
+/* --- заголовок --- */
+
+.title {
+  margin: 4px 4px 0;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 2px 4px 0;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--hint);
+}
+
+/* --- секции в духе «сгруппированного списка» Telegram --- */
+
+.section {
+  margin-top: 26px;
+}
+
+.sectionHeader {
+  display: block;
+  padding: 0 12px 7px;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--section-header);
+}
+
+.list {
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--section);
+}
+
+.footer {
+  margin: 0;
+  padding: 7px 12px 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--hint);
+}
+
+.footerOk {
+  color: var(--accent);
+}
+
+.footerError {
+  color: var(--destructive);
+}
+
+.input {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  caret-color: var(--accent);
+  font: inherit;
+  /* 16px — меньше iOS увеличивает страницу при фокусе на поле. */
+  font-size: 16px;
+  line-height: 22px;
+  padding: 12px 16px;
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--hint);
+  opacity: 1;
+}
+
+.textarea {
+  min-height: 118px;
+  resize: none;
+}
+
+/* --- плитки групп: единственный яркий элемент. Цвет плитки — цвет группы
+   на доске поддержки (groupColor в src/lib/groups.ts), чтобы куратор видел
+   тот же знак, которым тикет будет отмечен у дежурного. --- */
+
+.groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.groupTile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 96px;
+  padding: 13px 14px;
+  border: 1.5px solid transparent;
+  border-radius: 16px;
+  background: var(--section);
+  background: color-mix(in srgb, var(--hue) 9%, var(--section));
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.groupTile:active {
+  transform: scale(0.97);
+}
+
+.groupTile[aria-pressed="true"] {
+  border-color: var(--hue);
+  background: color-mix(in srgb, var(--hue) 18%, var(--section));
+}
+
+.groupTile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.groupEmoji {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.groupName {
+  font-size: 15px;
+  line-height: 19px;
+  font-weight: 600;
+}
+
+.groupCheck {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--hue);
+  color: #ffffff;
+}
+
+/* --- скриншот --- */
+
+.photoPick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  color: var(--accent);
+  font-size: 16px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.photoPick:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.photoFilled {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.thumb {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--bg);
+}
+
+.photoMeta {
+  min-width: 0;
+  flex: 1;
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.photoSize {
+  color: var(--hint);
+  font-size: 13px;
+}
+
+.photoActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.textButton {
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 15px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.textButtonDestructive {
+  color: var(--destructive);
+}
+
+.textButton:focus-visible,
+.photoActions label:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* --- сообщения --- */
+
+.notice {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--section);
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.error {
+  margin-top: 22px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--section);
+  background: color-mix(in srgb, var(--destructive) 12%, var(--section));
+  color: var(--destructive);
+  font-size: 15px;
+  line-height: 20px;
+}
+
+/* Основная кнопка страницы. Отправка ею — только там, где нет MainButton
+   (обычный браузер или не загрузился скрипт Telegram); на экране
+   «отправлено» это «Новое обращение» — и внутри Telegram тоже. */
+.primaryButton {
+  display: block;
+  width: 100%;
+  margin-top: 26px;
+  padding: 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--button);
+  color: var(--button-text);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  opacity: 0.5;
+}
+
+.primaryButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- экран «отправлено» --- */
+
+.success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 44px;
+  text-align: center;
+}
+
+.successMark {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: var(--button);
+  color: var(--button-text);
+  animation: pop 420ms cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .successMark {
+    animation: none;
+  }
+  .groupTile {
+    transition: none;
+  }
+}
+
+.successTitle {
+  margin: 18px 0 0;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+}
+
+.successText {
+  max-width: 30ch;
+  margin: 6px 0 0;
+  font-size: 15px;
+  line-height: 21px;
+  color: var(--hint);
+}
+
+.summary {
+  width: 100%;
+  margin-top: 28px;
+  text-align: left;
+}
+
+.summaryRow {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.summaryRow + .summaryRow {
+  border-top: 0.5px solid var(--separator);
+}
+
+.summaryLabel {
+  flex-shrink: 0;
+  width: 72px;
+  color: var(--hint);
+}
+
+.summaryValue {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.secondaryButton {
+  margin-top: 10px;
+  padding: 12px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 16px;
+  color: var(--accent);
+  cursor: pointer;
+}

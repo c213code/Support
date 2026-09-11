@@ -187,7 +187,8 @@ function buildTicketCard(
     botReplies?: string[];
     // Почта/телефон/вложение из исходного сообщения — без них по тикету
     // вроде "Логин пароль жұмыс істемейді" в админке искать нечего.
-    hints?: { emails: string[]; phones: string[]; hasAttachment: boolean };
+    // lessonLink — только у обращений из формы мини-аппа (см. hintsFor).
+    hints?: { emails: string[]; phones: string[]; hasAttachment: boolean; lessonLink?: string };
     // Заметка похожего уже решённого тикета — если такая нашлась, на
     // карточке появляется кнопка "решить так же" (см. solutionLibrary.ts).
     suggestedNote?: string | null;
@@ -212,6 +213,16 @@ function buildTicketCard(
   if (issue.hints?.emails.length) hintParts.push(`✉️ <code>${escapeHtml(issue.hints.emails.join(", "))}</code>`);
   if (issue.hints?.phones.length) hintParts.push(`📞 <code>${escapeHtml(issue.hints.phones.join(", "))}</code>`);
   if (issue.hints?.hasAttachment) hintParts.push("📎 есть вложение — суть может быть в нём");
+  const lessonLink = issue.hints?.lessonLink;
+  if (lessonLink) {
+    // Ссылкой — только настоящий https-адрес: поле формы принимает и просто
+    // текст ("урок 5, задание 3").
+    hintParts.push(
+      /^https?:\/\//i.test(lessonLink)
+        ? `<a href="${escapeHtml(lessonLink)}">🔗 Урок / задание</a>`
+        : `🔗 ${escapeHtml(lessonLink)}`
+    );
+  }
   const hints = hintParts.length > 0 ? `\n\n${hintParts.join("\n")}` : "";
   const text = `Тикет ${position}/${total}\n\n${meta.emoji} ${escapeHtml(issue.groupName)}\n${escapeHtml(issue.description)}${hints}${link}${said}`;
 
@@ -349,18 +360,37 @@ export async function startReviewSession(
 // ссылку на карточку намеренно не добавляют (см. ATTACH_LINK_POLICY в
 // вебхуке) — по одной ссылке они бы не нашлись, и в разборе не было бы
 // видно почты, которую сам же бот и попросил.
+//
+// У обращения из формы мини-аппа сообщений в Telegram нет — контакт ученика
+// и ссылка на урок лежат в заявке (то же делает GET /api/issues для сайта).
+// Скриншот формы — на карточке на сайте, здесь о нём говорит «есть вложение».
 async function hintsFor(issue: { id: string; telegramLink: string | null }) {
-  const sources = await prisma.telegramMessage.findMany({
-    where: {
-      OR: [
-        { usedForIssueId: issue.id },
-        ...(issue.telegramLink ? [{ messageLink: issue.telegramLink }] : []),
-      ],
-    },
-    select: { text: true },
-  });
-  if (sources.length === 0) return undefined;
-  return extractTicketHints(sources.map((s) => s.text));
+  const [sources, submission] = await Promise.all([
+    prisma.telegramMessage.findMany({
+      where: {
+        OR: [
+          { usedForIssueId: issue.id },
+          ...(issue.telegramLink ? [{ messageLink: issue.telegramLink }] : []),
+        ],
+      },
+      select: { text: true },
+    }),
+    prisma.issueSubmission.findUnique({
+      where: { issueId: issue.id },
+      select: { rawText: true, studentContact: true, lessonLink: true },
+    }),
+  ]);
+  const texts = [
+    ...sources.map((s) => s.text),
+    ...(submission ? [submission.rawText, submission.studentContact] : []),
+  ];
+  if (texts.length === 0) return undefined;
+  const hints = extractTicketHints(texts);
+  return {
+    ...hints,
+    hasAttachment: hints.hasAttachment || Boolean(submission),
+    lessonLink: submission?.lessonLink,
+  };
 }
 
 async function botRepliesFor(issueId: string): Promise<string[]> {

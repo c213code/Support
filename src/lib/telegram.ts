@@ -208,9 +208,17 @@ async function callBotApi(
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Telegram объясняет отказ в description ("chat not found", "Only HTTPS
+      // links are allowed") — без этой строки любой сбой здесь неотличим в
+      // логах от успеха. Только метод и ответ: в URL запроса — токен бота.
+      const detail = (await res.json().catch(() => null)) as { description?: string } | null;
+      console.warn(`[telegram] ${method} ${res.status}: ${detail?.description ?? ""}`);
+      return null;
+    }
     return await res.json();
-  } catch {
+  } catch (err) {
+    console.warn(`[telegram] ${method} не выполнен: ${err instanceof Error ? err.name : "ошибка"}`);
     return null;
   } finally {
     clearTimeout(timeout);
@@ -277,18 +285,29 @@ export async function sendTelegramMessage(
 // отдельный вызов. Таймаут длиннее: фото весит больше, чем текст.
 const BOT_UPLOAD_TIMEOUT_MS = 20000;
 
+// Результат загрузки фото. Причина отказа нужна вызывающему коду, чтобы
+// сказать правду: "канал настроен неверно" (config) куратор не исправит —
+// это к тому, кто настраивал форму; "Telegram не принял фото" (photo) — к
+// выбору другого фото; "не дозвонились" (network) — к повтору. Без этого
+// разделения неверный TELEGRAM_STORAGE_CHAT_ID выглядел для куратора как
+// "плохое фото", а для команды — как тишина.
+export type PhotoUpload =
+  | { ok: true; fileId: string }
+  | { ok: false; kind: "config" | "photo" | "network"; description: string };
+
+// Ошибки, которые значат "бот не может писать в этот чат", а не "плохое фото".
+const CHAT_CONFIG_ERROR = /chat not found|not enough rights|not a member|CHAT_WRITE_FORBIDDEN|bot was kicked/i;
+
 // Кладёт фото в чат (для формы мини-аппа — в закрытый служебный канал) и
 // возвращает file_id самой крупной версии: по нему фото потом достаётся через
-// getFile, сами байты у нас не хранятся. null — не получилось (нет токена,
-// сеть, Telegram отказал): вызывающий код должен сказать об этом человеку, а
-// не заводить тикет без фото.
+// getFile, сами байты у нас не хранятся.
 export async function uploadPhoto(
   chatId: string,
   photo: Blob,
   caption?: string
-): Promise<string | null> {
+): Promise<PhotoUpload> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return null;
+  if (!token) return { ok: false, kind: "config", description: "TELEGRAM_BOT_TOKEN не задан" };
 
   const form = new FormData();
   form.append("chat_id", chatId);
@@ -311,14 +330,25 @@ export async function uploadPhoto(
     if (!res.ok || !data?.ok) {
       // description у Telegram без секретов ("chat not found", "not enough
       // rights") — ровно то, что нужно, чтобы понять, почему форма не работает.
-      console.warn(`[telegram] sendPhoto ${res.status}: ${data?.description ?? ""}`);
-      return null;
+      const description = `${res.status}: ${data?.description ?? ""}`;
+      console.warn(`[telegram] sendPhoto ${description}`);
+      const config =
+        res.status === 401 || res.status === 403 || CHAT_CONFIG_ERROR.test(data?.description ?? "");
+      return { ok: false, kind: config ? "config" : "photo", description };
     }
     const sizes = data.result?.photo ?? [];
-    return sizes[sizes.length - 1]?.file_id ?? null;
+    const fileId = sizes[sizes.length - 1]?.file_id;
+    if (!fileId) {
+      console.error("[telegram] sendPhoto ответил ok, но без photo[] — file_id взять неоткуда");
+      return { ok: false, kind: "photo", description: "ответ без photo[]" };
+    }
+    return { ok: true, fileId };
   } catch (err) {
-    console.warn(`[telegram] sendPhoto упал: ${String(err).slice(0, 200)}`);
-    return null;
+    // Только имя ошибки: в причине сетевой ошибки fetch может оказаться URL,
+    // а в нём — токен бота.
+    const name = err instanceof Error ? err.name : "ошибка";
+    console.warn(`[telegram] sendPhoto не выполнен: ${name}`);
+    return { ok: false, kind: "network", description: name };
   } finally {
     clearTimeout(timeout);
   }
@@ -342,17 +372,20 @@ export async function getFileDownloadUrl(fileId: string): Promise<string | null>
 // там клавиатура — только callback-кнопки, и разбор нажатий (webhook/
 // callbacks.ts) рассчитывает, что у каждой кнопки есть callback_data.
 // web_app-кнопки Telegram показывает только в личке — это и есть наш случай.
+// false — Telegram кнопку не принял (причина — в логе callBotApi): вызывающий
+// код должен ответить человеку иначе, а не оставить его без ответа.
 export async function sendWebAppButton(
   chatId: number | string,
   text: string,
   buttonText: string,
   url: string
-): Promise<void> {
-  await callBotApi("sendMessage", {
+): Promise<boolean> {
+  const data = await callBotApi("sendMessage", {
     chat_id: chatId,
     text,
     reply_markup: { inline_keyboard: [[{ text: buttonText, web_app: { url } }]] },
   });
+  return data !== null;
 }
 
 // Удаляет сообщение бота. Telegram разрешает это только в течение 48 часов

@@ -16,21 +16,46 @@ export function submissionFormEnabled(): boolean {
   );
 }
 
-// Адрес мини-аппа для кнопки в боте — Telegram открывает web_app только по
-// https. VERCEL_PROJECT_PRODUCTION_URL Vercel задаёт сам (без схемы, и даже
-// в превью указывает на прод); PUBLIC_APP_URL — ручное переопределение
-// (свой домен или туннель для локальной проверки).
+// Адрес мини-аппа для кнопки в боте. VERCEL_PROJECT_PRODUCTION_URL Vercel
+// задаёт сам (без схемы, и даже в превью указывает на прод); PUBLIC_APP_URL —
+// ручное переопределение (свой домен или туннель для проверки).
+//
+// Telegram принимает web_app-кнопку только с https: адрес без схемы или с
+// http:// он молча отвергнет, и куратор не получит на /start вообще ничего.
+// Поэтому неверный адрес ловим здесь и пишем в лог ошибкой, а не надеемся на
+// Telegram. Вызывается только при включённой форме.
 export function miniAppUrl(): string | null {
-  const override = process.env.PUBLIC_APP_URL?.replace(/\/+$/, "");
+  const override = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
   const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL;
   const base = override || (vercel ? `https://${vercel}` : null);
-  return base ? `${base}/miniapp` : null;
+  if (!base) {
+    console.error(
+      "[miniapp] форма включена, но адреса для кнопки нет: задайте PUBLIC_APP_URL (на Vercel он берётся из VERCEL_PROJECT_PRODUCTION_URL)"
+    );
+    return null;
+  }
+  try {
+    const url = new URL(`${base}/miniapp`);
+    if (url.protocol !== "https:") throw new Error("не https");
+    return url.toString();
+  } catch {
+    console.error(`[miniapp] неверный адрес мини-аппа "${base}" — нужен полный адрес с https://`);
+    return null;
+  }
 }
 
 export type MiniAppUser = { id: bigint; name: string };
 
-// initData живёт, пока открыт мини-апп. Сутки с запасом покрывают "открыл,
-// начал заполнять, отвлёкся", но не дают переиспользовать старую подпись.
+// Почему initData не принята. Маршрут пишет причину в лог и по ней выбирает
+// текст для куратора: "открыто слишком давно" он исправит сам (переоткроет
+// форму), а "подпись не сошлась" — нет, это чаще настройка, чем подделка.
+export type InitDataCheck =
+  | { ok: true; user: MiniAppUser }
+  | { ok: false; reason: "no_token" | "no_hash" | "bad_hash" | "expired" | "bad_user" };
+
+// Сутки — компромисс: хватает на "открыл, отвлёкся, дописал", а подпись
+// старше суток не примем. В пределах суток повтор той же initData возможен —
+// его сдерживает лимит попыток в час (POST /api/miniapp/submit).
 const MAX_AGE_SECONDS = 24 * 60 * 60;
 
 // Проверка initData по алгоритму Telegram (core.telegram.org/bots/webapps):
@@ -39,13 +64,13 @@ const MAX_AGE_SECONDS = 24 * 60 * 60;
 // data_check_string — все поля, кроме hash, отсортированные по ключу, в виде
 // "key=value" через перевод строки. Поле signature (подпись для сторонней
 // проверки) в строку входит — исключается только hash.
-export function verifyInitData(initData: string): MiniAppUser | null {
+export function verifyInitData(initData: string): InitDataCheck {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token || !initData) return null;
+  if (!token) return { ok: false, reason: "no_token" };
 
   const params = new URLSearchParams(initData);
   const hash = params.get("hash");
-  if (!hash) return null;
+  if (!hash) return { ok: false, reason: "no_hash" };
   params.delete("hash");
 
   // Сортируем по ключу, а не строки "key=value" целиком: "=" в ASCII стоит
@@ -61,25 +86,25 @@ export function verifyInitData(initData: string): MiniAppUser | null {
   const expectedBuf = Buffer.from(expected);
   const hashBuf = Buffer.from(hash);
   if (expectedBuf.length !== hashBuf.length || !timingSafeEqual(expectedBuf, hashBuf)) {
-    return null;
+    return { ok: false, reason: "bad_hash" };
   }
 
   const authDate = Number(params.get("auth_date"));
   if (!Number.isFinite(authDate) || Date.now() / 1000 - authDate > MAX_AGE_SECONDS) {
-    return null;
+    return { ok: false, reason: "expired" };
   }
 
   try {
     const user = JSON.parse(params.get("user") ?? "") as Record<string, unknown>;
-    if (typeof user.id !== "number") return null;
+    if (typeof user.id !== "number") return { ok: false, reason: "bad_user" };
     const fullName = [user.first_name, user.last_name]
       .filter((part): part is string => typeof part === "string" && part.length > 0)
       .join(" ")
       .trim();
     const name =
       fullName || (typeof user.username === "string" ? `@${user.username}` : `id${user.id}`);
-    return { id: BigInt(user.id), name: name.slice(0, 80) };
+    return { ok: true, user: { id: BigInt(user.id), name: name.slice(0, 80) } };
   } catch {
-    return null;
+    return { ok: false, reason: "bad_user" };
   }
 }

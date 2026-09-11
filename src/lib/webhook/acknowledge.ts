@@ -48,7 +48,11 @@ export async function insertSentIssue(
   groupName: string,
   groupEmoji: string | null,
   description: string,
-  telegramLink: string | null
+  telegramLink: string | null,
+  // Поля формы мини-аппа — пишутся тем же запросом, что и тикет: тикет без
+  // заявки (без контакта ученика и фото) не должен появиться на доске даже
+  // на мгновение, а откатывать его вручную после сбоя — ненадёжно.
+  submission?: SubmissionFields
 ) {
   const reportDate = todayDateString();
   const last = await prisma.issue.findFirst({
@@ -65,9 +69,20 @@ export async function insertSentIssue(
       telegramLink,
       status: "SENT",
       createdBy: AUTO_ISSUE_CREATOR,
+      submission: submission ? { create: submission } : undefined,
     },
   });
 }
+
+export type SubmissionFields = {
+  clientSubmissionId: string | null;
+  telegramUserId: bigint;
+  authorName: string;
+  rawText: string;
+  studentContact: string;
+  lessonLink: string;
+  photoFileId: string;
+};
 
 // regex (hasIdentifier) уже решил "просить почту/ссылку" или "не просить" —
 // ИИ, если включён тоглом, может это уточнить (см. classifyAckAsk в
