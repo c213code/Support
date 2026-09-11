@@ -33,22 +33,35 @@ export async function createAutoIssue(
   telegramLink: string,
   skipAutoCreate = false
 ) {
-  const reportDate = todayDateString();
-  const [last, cleaned] = await Promise.all([
-    prisma.issue.findFirst({
-      where: { reportDate, groupName },
-      orderBy: { position: "desc" },
-    }),
-    buildDescription(own, contextual, skipAutoCreate),
-  ]);
+  const cleaned = await buildDescription(own, contextual, skipAutoCreate);
   if (cleaned === null) return null;
+  return insertSentIssue(groupName, groupEmoji, cleaned, telegramLink);
+}
+
+// Сама запись тикета "Отправлено" в конец группы за сегодня. Отдельно от
+// createAutoIssue ради формы мини-аппа (POST /api/miniapp/submit): там
+// описание нужно получить ДО загрузки фото — иначе обращение, отклонённое как
+// мусор, оставило бы фото в служебном канале, а повторный buildDescription
+// потратил бы ещё один запрос к Groq. telegramLink у формы — null: сообщения
+// в группе, на которое ссылаться, нет.
+export async function insertSentIssue(
+  groupName: string,
+  groupEmoji: string | null,
+  description: string,
+  telegramLink: string | null
+) {
+  const reportDate = todayDateString();
+  const last = await prisma.issue.findFirst({
+    where: { reportDate, groupName },
+    orderBy: { position: "desc" },
+  });
   return prisma.issue.create({
     data: {
       reportDate,
       groupName,
       groupEmoji,
       position: (last?.position ?? 0) + 1,
-      description: cleaned,
+      description,
       telegramLink,
       status: "SENT",
       createdBy: AUTO_ISSUE_CREATOR,

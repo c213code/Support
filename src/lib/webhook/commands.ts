@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessage, sendWebAppButton } from "@/lib/telegram";
+import { miniAppUrl, submissionFormEnabled } from "@/lib/miniapp";
 import { buildReviewSummary, startReviewSession } from "@/lib/dailyReview";
 import { startDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, describeSendFailure } from "@/lib/reportSend";
@@ -61,6 +62,33 @@ export async function handleBotCommand(
   text: string
 ): Promise<void> {
   const actorName = telegramIdToAgent(fromId);
+
+  const [rawCommand, dateArg] = text.trim().split(/\s+/);
+  // "@BotName" в конце команды — Telegram сам дописывает его в группах,
+  // где бот один из нескольких; в личке не встречается, но парсим на
+  // всякий случай тем же кодом.
+  const command = rawCommand.split("@")[0].toLowerCase();
+
+  // /start — единственная команда не только для агентов: куратор, открывший
+  // бота по ссылке, получает кнопку формы обращения (мини-апп, /miniapp), а
+  // не "не узнал тебя". Агенту — та же кнопка плюс обычная справка.
+  if (command === "/start") {
+    const url = submissionFormEnabled() ? miniAppUrl() : null;
+    if (url) {
+      await sendWebAppButton(
+        chatId,
+        "Опишите проблему ученика — обращение попадёт дежурному на доску поддержки.",
+        "📝 Подать обращение",
+        url
+      );
+    }
+    if (actorName) {
+      await sendTelegramMessage(chatId, HELP_TEXT);
+      return;
+    }
+    if (url) return;
+  }
+
   if (!actorName) {
     await sendTelegramMessage(
       chatId,
@@ -69,15 +97,9 @@ export async function handleBotCommand(
     return;
   }
 
-  const [rawCommand, dateArg] = text.trim().split(/\s+/);
-  // "@BotName" в конце команды — Telegram сам дописывает его в группах,
-  // где бот один из нескольких; в личке не встречается, но парсим на
-  // всякий случай тем же кодом.
-  const command = rawCommand.split("@")[0].toLowerCase();
   const reportDate = dateArg && DATE_RE.test(dateArg) ? dateArg : todayDateString();
 
   switch (command) {
-    case "/start":
     case "/help": {
       await sendTelegramMessage(chatId, HELP_TEXT);
       return;

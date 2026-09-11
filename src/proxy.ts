@@ -18,6 +18,9 @@ export const config = {
     // api/cron/* — свои эндпоинты Vercel Cron, аутентифицируются
     // отдельным CRON_SECRET-заголовком (см. api/cron/evening-report), у
     // них нет и не может быть сессионной куки агента.
-    "/((?!login|api/auth/login|api/telegram/webhook|api/cron|_next/static|_next/image|favicon.ico).*)",
+    // miniapp и api/miniapp/* — форма обращения для кураторов внутри
+    // Telegram: у них нет куки агента, автор проверяется по подписи
+    // Telegram (initData, см. src/lib/miniapp.ts) в самом маршруте.
+    "/((?!login|api/auth/login|api/telegram/webhook|api/cron|miniapp|api/miniapp|_next/static|_next/image|favicon.ico).*)",
   ],
 };

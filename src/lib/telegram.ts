@@ -273,6 +273,88 @@ export async function sendTelegramMessage(
     : null;
 }
 
+// Загрузка файла требует multipart/form-data, а callBotApi шлёт JSON — отсюда
+// отдельный вызов. Таймаут длиннее: фото весит больше, чем текст.
+const BOT_UPLOAD_TIMEOUT_MS = 20000;
+
+// Кладёт фото в чат (для формы мини-аппа — в закрытый служебный канал) и
+// возвращает file_id самой крупной версии: по нему фото потом достаётся через
+// getFile, сами байты у нас не хранятся. null — не получилось (нет токена,
+// сеть, Telegram отказал): вызывающий код должен сказать об этом человеку, а
+// не заводить тикет без фото.
+export async function uploadPhoto(
+  chatId: string,
+  photo: Blob,
+  caption?: string
+): Promise<string | null> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append("photo", photo, "photo.jpg");
+  if (caption) form.append("caption", caption.slice(0, 1024));
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BOT_UPLOAD_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+    const data = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      description?: string;
+      result?: { photo?: Array<{ file_id?: string }> };
+    } | null;
+    if (!res.ok || !data?.ok) {
+      // description у Telegram без секретов ("chat not found", "not enough
+      // rights") — ровно то, что нужно, чтобы понять, почему форма не работает.
+      console.warn(`[telegram] sendPhoto ${res.status}: ${data?.description ?? ""}`);
+      return null;
+    }
+    const sizes = data.result?.photo ?? [];
+    return sizes[sizes.length - 1]?.file_id ?? null;
+  } catch (err) {
+    console.warn(`[telegram] sendPhoto упал: ${String(err).slice(0, 200)}`);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Ссылка на скачивание файла по file_id. Действует минимум час; ботам
+// отдаются файлы до 20 МБ (фото из формы сжаты на телефоне задолго до этого).
+// В ссылке зашит токен бота — отдавать её в браузер нельзя, только качать
+// сервером (см. GET /api/issues/[id]/photo).
+export async function getFileDownloadUrl(fileId: string): Promise<string | null> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+  const data = (await callBotApi("getFile", { file_id: fileId })) as {
+    result?: { file_path?: string };
+  } | null;
+  const path = data?.result?.file_path;
+  return path ? `https://api.telegram.org/file/bot${token}/${path}` : null;
+}
+
+// Сообщение с кнопкой, открывающей мини-апп. Отдельно от sendTelegramMessage:
+// там клавиатура — только callback-кнопки, и разбор нажатий (webhook/
+// callbacks.ts) рассчитывает, что у каждой кнопки есть callback_data.
+// web_app-кнопки Telegram показывает только в личке — это и есть наш случай.
+export async function sendWebAppButton(
+  chatId: number | string,
+  text: string,
+  buttonText: string,
+  url: string
+): Promise<void> {
+  await callBotApi("sendMessage", {
+    chat_id: chatId,
+    text,
+    reply_markup: { inline_keyboard: [[{ text: buttonText, web_app: { url } }]] },
+  });
+}
+
 // Удаляет сообщение бота. Telegram разрешает это только в течение 48 часов
 // после отправки — позже вернёт ошибку, и вызывающий код должен честно
 // сказать об этом человеку, а не молчать (см. src/lib/botReply.ts).

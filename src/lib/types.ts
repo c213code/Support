@@ -49,6 +49,13 @@ export type IssueDTO = {
   // только когда инструмент включён (заданы PLATFORM_* env), см. GET
   // /api/issues и src/lib/untResetRequest.ts.
   untReset?: boolean;
+  // Тикет подан формой мини-аппа: кто подал, контакт ученика, ссылка на урок.
+  // Фото отдаёт GET /api/issues/[id]/photo. null — обычный тикет из группы.
+  submission?: {
+    authorName: string;
+    studentContact: string;
+    lessonLink: string;
+  } | null;
 };
 
 export type GroupPresetDTO = {

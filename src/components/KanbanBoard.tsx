@@ -400,6 +400,49 @@ export function KanbanBoard({
                         </a>
                       </div>
                     )}
+                    {/* Обращение из формы мини-аппа: в группе его нет, поэтому
+                        всё, что агенту нужно для работы, — здесь. Контакт
+                        ученика показываем, только если он не распознался
+                        подсказкой выше (почта/телефон уже есть чипом). */}
+                    {issue.submission && (
+                      <div className="mt-1.5 space-y-1 rounded-md bg-slate-50 p-1.5 text-[11px] text-slate-600">
+                        <p>📝 Из формы · {issue.submission.authorName}</p>
+                        {!issue.hints?.emails.length && !issue.hints?.phones.length && (
+                          <p className="break-words">👤 {issue.submission.studentContact}</p>
+                        )}
+                        {/^https?:\/\//i.test(issue.submission.lessonLink) ? (
+                          <a
+                            href={issue.submission.lessonLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="block truncate text-accent-600 hover:underline"
+                          >
+                            🔗 Урок / задание
+                          </a>
+                        ) : (
+                          <p className="break-words">🔗 {issue.submission.lessonLink}</p>
+                        )}
+                        <a
+                          href={`/api/issues/${issue.id}/photo`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Открыть фото целиком"
+                        >
+                          {/* Не next/image: фото отдаёт маршрут за сессией
+                              агента, а оптимизатор Next ходит за картинкой
+                              без куки и получил бы 401. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={`/api/issues/${issue.id}/photo`}
+                            alt="Фото из обращения"
+                            loading="lazy"
+                            className="mt-1 max-h-28 rounded border border-slate-200"
+                          />
+                        </a>
+                      </div>
+                    )}
                     {onBotRepliesChanged && onBotReplyError && (
                       <BotReplies
                         issueId={issue.id}

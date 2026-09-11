@@ -75,15 +75,34 @@ export async function GET(request: NextRequest) {
   // иначе кнопка на карточке вела бы в никуда (см. platformEnabled).
   const platformOn = platformEnabled();
 
+  // Обращения из формы мини-аппа: у них нет сообщения в Telegram, и сырой
+  // текст с контактом ученика лежит в заявке — без неё карточка осталась бы
+  // без почты/телефона, а кнопки «Логи»/«Обнулить ДТ» не появились бы.
+  const submissions = await prisma.issueSubmission.findMany({
+    where: { issueId: { in: issueIds } },
+    select: {
+      issueId: true,
+      authorName: true,
+      rawText: true,
+      studentContact: true,
+      lessonLink: true,
+    },
+  });
+  const submissionByIssue = new Map(submissions.map((s) => [s.issueId, s]));
+
   return NextResponse.json({
     issues: issues.map((issue) => {
+      const submission = submissionByIssue.get(issue.id);
       // Исходные (сырые) тексты обращения: и в hints, и в распознавании смены
       // почты нужен именно сырой текст — в description почты уже вычищены.
+      // Ссылку на урок из формы сюда намеренно не кладём: длинный числовой id
+      // в ней регулярка подсказок приняла бы за номер телефона.
       const rawTexts = [
         ...(textsByIssue.get(issue.id) ?? []),
         ...[issue.telegramLink, ...issue.extraLinks].map((l) =>
           l ? (textByLink.get(l) ?? null) : null
         ),
+        ...(submission ? [submission.rawText, submission.studentContact] : []),
       ];
       return {
         ...issue,
@@ -96,6 +115,13 @@ export async function GET(request: NextRequest) {
           ? detectEmailChangeRequest(rawTexts.filter(Boolean).join("\n"))
           : null,
         untReset: platformOn && mentionsUntTest(rawTexts.filter(Boolean).join("\n")),
+        submission: submission
+          ? {
+              authorName: submission.authorName,
+              studentContact: submission.studentContact,
+              lessonLink: submission.lessonLink,
+            }
+          : null,
       };
     }),
   });

@@ -360,12 +360,41 @@ model Issue {
   notePrompts    PendingNotePrompt[]
   sourceMessages TelegramMessage[]   @relation("issueSource")
   agentReplies   TelegramMessage[]   @relation("issueAgentReply")
+  // Тикет подан формой из мини-аппа Telegram, а не сообщением в рабочей
+  // группе — поля формы лежат отдельно, см. IssueSubmission.
+  submission     IssueSubmission?
 
   @@index([reportDate])
   // Библиотека решений (src/lib/solutionLibrary.ts) на каждой карточке
   // разбора ищет закрытые тикеты за последний месяц — без этого индекса
   // это скан всей таблицы, и он растёт вместе с историей.
   @@index([status, reportDate])
+}
+
+// Обращение, поданное куратором через форму мини-аппа (/miniapp). Отдельной
+// таблицей, а не колонками в Issue: такие поля есть у малой доли тикетов, а
+// Issue читают все — доска, репорт, бот. Удаляется вместе с тикетом, как
+// BotReply и IssueEvent.
+model IssueSubmission {
+  id             String   @id @default(cuid())
+  issueId        String   @unique
+  issue          Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  // Кто подал — из initData, которую подписывает Telegram (src/lib/miniapp.ts),
+  // а не из полей формы: подделать автора нельзя.
+  telegramUserId BigInt
+  authorName     String
+  // Текст как его ввёл куратор. Описание тикета проходит чистку/ИИ, а здесь
+  // то, что написано на самом деле — из него же считаются подсказки карточки.
+  rawText        String
+  studentContact String
+  lessonLink     String
+  // Само фото хранит Telegram (закрытый канал TELEGRAM_STORAGE_CHAT_ID), у
+  // нас только file_id — агенту его отдаёт GET /api/issues/[id]/photo.
+  photoFileId    String
+  createdAt      DateTime @default(now())
+
+  // Лимит подач на человека в час (POST /api/miniapp/submit).
+  @@index([telegramUserId, createdAt])
 }
 
 // Журнал смен почты ученикам в основной платформе JUZ40
