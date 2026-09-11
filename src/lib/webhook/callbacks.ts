@@ -22,6 +22,7 @@ import {
   describeBotReplyFailure,
 } from "@/lib/botReply";
 import { isAutoReplyEnabled } from "@/lib/settings";
+import { handleBotMessageDeleteCallback } from "@/lib/botMessageDelete";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -147,6 +148,10 @@ async function notifyResolvedInChat(issueId: string): Promise<boolean> {
 // группу прямо из Telegram, без захода на сайт.
 export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
   const data = query.data ?? "";
+
+  // «🗑 Удалить» / «Оставить» после /delete <ссылка> — вся логика, включая
+  // проверку, что нажал агент, в src/lib/botMessageDelete.ts.
+  if (await handleBotMessageDeleteCallback(query)) return;
 
   if (data.startsWith(ISSUE_STATUS_PREFIX)) {
     const [issueId, status] = data.slice(ISSUE_STATUS_PREFIX.length).split(":");

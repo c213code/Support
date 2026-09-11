@@ -206,6 +206,33 @@
   outline-offset: -2px;
 }
 
+/* Зона вставки скриншота из буфера. На телефоне картинку можно вставить
+   только в редактируемое поле (зажать → «Вставить»), а кнопка выбора файла
+   буфер не видит. Поле остаётся пустым: вставленное изображение забирает
+   обработчик paste, случайно набранный текст стирается. */
+.pasteZone {
+  display: block;
+  min-height: 44px;
+  padding: 11px 16px 12px;
+  border-top: 0.5px solid var(--separator);
+  font-size: 15px;
+  line-height: 20px;
+  outline: none;
+  caret-color: transparent;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.pasteZone:empty::before {
+  content: attr(data-placeholder);
+  color: var(--hint);
+}
+
+.pasteZone:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
 .photoFilled {
   display: flex;
   align-items: center;

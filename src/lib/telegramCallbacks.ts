@@ -58,6 +58,11 @@ export const BROADCAST_CANCEL_PREFIX = "bcast_cancel:";
 // неудачный ответ надо уметь оттуда же.
 export const BOT_REPLIES_PREFIX = "bot_replies:";
 export const BOT_REPLY_DELETE_PREFIX = "br_del:";
+// Удаление любого сообщения бота по ссылке (/delete в личке, см.
+// src/lib/botMessageDelete.ts): "bm_del:<chat_id>:<message_id>" — chat_id
+// вида -100… или @username, в 64 байта callback_data помещается с запасом.
+export const BOT_MESSAGE_DELETE_PREFIX = "bm_del:";
+export const BOT_MESSAGE_KEEP_PREFIX = "bm_keep";
 // Подтверждение "да, это решено" на догадку бота по реплике агента в
 // группе (см. detectAgentIntent) — ведёт в тот же запрос заметки.
 export const CONFIRM_RESOLVED_PREFIX = "confirm_resolved:";

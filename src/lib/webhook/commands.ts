@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { sendTelegramMessage, sendWebAppButton } from "@/lib/telegram";
+import { startBotMessageDelete } from "@/lib/botMessageDelete";
 import { miniAppUrl, submissionFormEnabled } from "@/lib/miniapp";
 import { buildReviewSummary, startReviewSession } from "@/lib/dailyReview";
 import { startDedupeReview } from "@/lib/dedupeReview";
@@ -37,6 +38,7 @@ const HELP_TEXT = [
   "/autoreply [on|off] — автоответы бота в рабочих группах; без аргумента покажет состояние",
   "/readchat [on|off] — бот читает твои реплики в группе и сам ставит статусы",
   "/broadcast <текст> — разослать объявление во все рабочие группы (спросит подтверждение)",
+  "/delete <ссылка> — удалить сообщение бота в группе (покажет его и спросит подтверждение; только первые 48 часов)",
   "",
   "Без даты — за сегодня. Дата — в формате YYYY-MM-DD.",
 ].join("\n");
@@ -79,8 +81,10 @@ export async function handleBotCommand(
     const buttonSent = url
       ? await sendWebAppButton(
           chatId,
-          "Опишите проблему ученика — обращение попадёт дежурному на доску поддержки.",
-          "📝 Подать обращение",
+          // Кураторы пишут по-казахски — и форма, и приглашение к ней на
+          // казахском (справка для агентов ниже остаётся русской).
+          "Оқушының мәселесін сипаттаңыз — өтініш кезекшіге қолдау тақтасына түседі.",
+          "📝 Өтініш жіберу",
           url
         )
       : false;
@@ -100,7 +104,7 @@ export async function handleBotCommand(
       // тебя в AGENT_TELEGRAM_IDS" — это не про него.
       await sendTelegramMessage(
         chatId,
-        "Форма обращений сейчас недоступна — напишите, пожалуйста, в рабочую группу."
+        "Өтініш формасы қазір қолжетімсіз — жұмыс тобына жазыңыз."
       );
       return;
     }
@@ -227,6 +231,12 @@ export async function handleBotCommand(
     // Отдельно от /autoreply намеренно: там бот пишет коллегам, тут молча
     // меняет статусы, которые уйдут в репорт боссам. Риски разные, и
     // выключать одно, не трогая другое, надо уметь.
+    case "/delete": {
+      // Ссылка — всё после команды: dateArg выше берёт только первое слово.
+      await startBotMessageDelete(chatId, text.trim().slice(rawCommand.length).trim());
+      return;
+    }
+
     case "/readchat": {
       const arg = (dateArg ?? "").toLowerCase();
       if (arg !== "on" && arg !== "off") {

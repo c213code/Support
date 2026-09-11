@@ -21,8 +21,30 @@ const MAX_REQUEST_BYTES = 4.5 * 1024 * 1024;
 // удачные подачи: иначе отклонённые как мусор тексты (каждый — запрос к ИИ)
 // шли бы без предела и могли выжечь дневную квоту Groq всем ИИ-функциям.
 const MAX_ATTEMPTS_PER_HOUR = 20;
-// Сколько дней держать журнал попыток — лимиту нужен только последний час.
+// Сколько держать журнал попыток — лимиту нужен только последний час.
 const ATTEMPT_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+// Тексты для куратора — на казахском, как и вся форма: их показывает она
+// (SubmissionForm.tsx). Логи — по-русски, их читает команда.
+const T = {
+  disabled: "Форма әзірге өшірулі",
+  photoTooBig: "Фото тым үлкен — экранның скриншотын жасап, соны тіркеңіз",
+  unreadable: "Форманы оқу мүмкін болмады",
+  expired: "Форма бір тәуліктен бұрын ашылған — оны жауып, боттан қайта ашыңыз",
+  reopen: "Форманы боттан қайта ашыңыз",
+  tooManyAttempts: "Бір сағатта тым көп әрекет — кейінірек қайталаңыз",
+  noGroup: "Топты таңдаңыз",
+  noDescription: "Мәселені сипаттаңыз",
+  noContact: "Оқушының поштасын немесе телефонын көрсетіңіз",
+  noLink: "Сабақтың немесе тапсырманың сілтемесін көрсетіңіз",
+  noPhoto: "Фото тіркеңіз",
+  notImage: "Тек фото тіркеуге болады",
+  noise: "Мәселені толығырақ жазыңыз — мұндай мәтін бойынша өтініш ашылмайды",
+  misconfigured: "Форма дұрыс бапталмаған — кезекшіге хабарлаңыз, өтінішті әзірге топқа жазыңыз",
+  photoRejected: "Telegram бұл фотоны қабылдамады — экранның скриншотын жасап, соны тіркеңіз",
+  photoNetwork: "Фотоны жіберу мүмкін болмады — байланысты тексеріп, қайта жіберіңіз",
+  saveFailed: "Өтінішті сақтау мүмкін болмады — қайталап көріңіз",
+};
 
 function field(form: FormData, name: string, max: number): string {
   const value = form.get(name);
@@ -43,14 +65,14 @@ function isUniqueViolation(err: unknown): boolean {
 // Обращение попадает только на сайт: в рабочую группу ничего не пишется,
 // поэтому реакций и ответов бота при смене статуса у таких тикетов нет.
 export async function POST(request: NextRequest) {
-  if (!submissionFormEnabled()) return reply(503, "Форма пока выключена");
+  if (!submissionFormEnabled()) return reply(503, T.disabled);
 
   if (Number(request.headers.get("content-length")) > MAX_REQUEST_BYTES) {
-    return reply(413, "Фото слишком большое — сделайте скриншот экрана и прикрепите его");
+    return reply(413, T.photoTooBig);
   }
 
   const form = await request.formData().catch(() => null);
-  if (!form) return reply(400, "Не удалось прочитать форму");
+  if (!form) return reply(400, T.unreadable);
 
   const check = verifyInitData(field(form, "initData", 8192));
   if (!check.ok) {
@@ -62,12 +84,7 @@ export async function POST(request: NextRequest) {
     } else {
       console.warn(`[miniapp] initData отклонена: ${check.reason}`);
     }
-    return reply(
-      401,
-      check.reason === "expired"
-        ? "Форма открыта больше суток назад — закройте её и откройте заново из бота"
-        : "Откройте форму заново из бота в Telegram"
-    );
+    return reply(401, check.reason === "expired" ? T.expired : T.reopen);
   }
   const user = check.user;
 
@@ -90,7 +107,7 @@ export async function POST(request: NextRequest) {
   });
   if (attempts > MAX_ATTEMPTS_PER_HOUR) {
     console.warn(`[miniapp] лимит попыток: user=${user.id}, ${attempts} за час`);
-    return reply(429, "Слишком много попыток за час — попробуйте позже");
+    return reply(429, T.tooManyAttempts);
   }
   await prisma.miniAppAttempt.deleteMany({
     where: { createdAt: { lt: new Date(now - ATTEMPT_RETENTION_MS) } },
@@ -102,15 +119,13 @@ export async function POST(request: NextRequest) {
   const lessonLink = field(form, "lessonLink", 500);
   const photo = form.get("photo");
 
-  if (!group) return reply(400, "Выберите группу");
-  if (!description) return reply(400, "Опишите проблему");
-  if (!studentContact) return reply(400, "Укажите почту или телефон ученика");
-  if (!lessonLink) return reply(400, "Укажите ссылку на урок или задание");
-  if (!(photo instanceof File) || photo.size === 0) return reply(400, "Прикрепите фото");
-  if (!photo.type.startsWith("image/")) return reply(400, "Прикрепить можно только фото");
-  if (photo.size > MAX_PHOTO_BYTES) {
-    return reply(413, "Фото слишком большое — сделайте скриншот экрана и прикрепите его");
-  }
+  if (!group) return reply(400, T.noGroup);
+  if (!description) return reply(400, T.noDescription);
+  if (!studentContact) return reply(400, T.noContact);
+  if (!lessonLink) return reply(400, T.noLink);
+  if (!(photo instanceof File) || photo.size === 0) return reply(400, T.noPhoto);
+  if (!photo.type.startsWith("image/")) return reply(400, T.notImage);
+  if (photo.size > MAX_PHOTO_BYTES) return reply(413, T.photoTooBig);
 
   // Порядок: описание → фото → тикет. Описание первым: обращение-мусор не
   // должно оставлять фото в служебном канале. own и contextual совпадают —
@@ -119,7 +134,7 @@ export async function POST(request: NextRequest) {
   if (cleaned === null) {
     if (isNoiseOnly(description)) {
       console.warn(`[miniapp] отклонено как мусор: user=${user.id}, ${description.length} симв.`);
-      return reply(400, "Опишите проблему подробнее — по такому тексту тикет не заводится");
+      return reply(400, T.noise);
     }
     // ИИ ответил SKIP: его промпт настроен на переписку в группе, где SKIP —
     // "это разговор коллег, а не обращение". Обращение из формы — явный
@@ -143,14 +158,9 @@ export async function POST(request: NextRequest) {
       console.error(
         `[miniapp] TELEGRAM_STORAGE_CHAT_ID=${storageChatId} не годится (${upload.description}) — проверьте, что бот админ канала с правом публиковать`
       );
-      return reply(503, "Форма настроена неверно — сообщите дежурному, обращение пока отправьте в группу");
+      return reply(503, T.misconfigured);
     }
-    return reply(
-      502,
-      upload.kind === "photo"
-        ? "Telegram не принял это фото — сделайте скриншот экрана и прикрепите его"
-        : "Не получилось отправить фото — проверьте связь и отправьте ещё раз"
-    );
+    return reply(502, upload.kind === "photo" ? T.photoRejected : T.photoNetwork);
   }
 
   const preset = await prisma.groupPreset.findUnique({
@@ -180,7 +190,7 @@ export async function POST(request: NextRequest) {
     // в служебном канале останется, это не страшно.
     const code = typeof err === "object" && err !== null && "code" in err ? String(err.code) : "";
     console.error(`[miniapp] обращение не записалось (${code}): ${String(err).slice(0, 300)}`);
-    return reply(500, "Не удалось сохранить обращение — попробуйте ещё раз");
+    return reply(500, T.saveFailed);
   }
 }
 

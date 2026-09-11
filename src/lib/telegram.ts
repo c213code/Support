@@ -404,6 +404,39 @@ export async function deleteTelegramMessage(
   return data?.result === true;
 }
 
+// Пересылает сообщение (для /delete — агенту в личку, чтобы он видел, что
+// удаляет) и говорит, чьё оно: в пересланной копии Telegram указывает
+// настоящего автора (forward_origin). Другого способа узнать автора
+// сообщения по ссылке в Bot API нет — getMessage у ботов нет, а бот-админ
+// группы может удалить и чужое сообщение, так что проверять автора надо.
+// null — переслать не вышло (неверная ссылка, бота нет в группе, в группе
+// запрещена пересылка); причина — в логе callBotApi.
+export async function forwardAndIdentify(
+  toChatId: number,
+  fromChatId: string,
+  messageId: number
+): Promise<{ copyId: number; fromThisBot: boolean } | null> {
+  const data = (await callBotApi("forwardMessage", {
+    chat_id: toChatId,
+    from_chat_id: fromChatId,
+    message_id: messageId,
+  })) as {
+    result?: {
+      message_id?: number;
+      forward_origin?: { type?: string; sender_user?: { id?: number } };
+    };
+  } | null;
+  const copyId = data?.result?.message_id;
+  if (typeof copyId !== "number") return null;
+  // id бота — часть его токена до двоеточия: лишний getMe не нужен.
+  const botId = Number(process.env.TELEGRAM_BOT_TOKEN?.split(":")[0]);
+  const origin = data?.result?.forward_origin;
+  return {
+    copyId,
+    fromThisBot: origin?.type === "user" && origin.sender_user?.id === botId,
+  };
+}
+
 // Переписывает текст и клавиатуру уже отправленного сообщения на месте —
 // для кнопки "🔁 Обновить список" (см. dailyReview.ts): без этого пришлось
 // бы слать новое сообщение каждый раз и плодить те же бабблы, от которых

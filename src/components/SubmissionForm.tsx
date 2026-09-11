@@ -5,6 +5,9 @@ import Script from "next/script";
 import { OFFICIAL_GROUPS } from "@/lib/groups";
 import styles from "./SubmissionForm.module.css";
 
+// Интерфейс формы — на казахском: кураторы, для которых она сделана, пишут
+// по-казахски. Комментарии в коде — по-русски, как во всём проекте.
+
 // Минимум Telegram WebApp API, которым пользуется форма
 // (core.telegram.org/bots/webapps). Версии — в isVersionAtLeast ниже:
 // старые клиенты Telegram части методов не знают.
@@ -94,7 +97,7 @@ const SUBMIT_TIMEOUT_MS = 60_000;
 // Сколько ждать скрипт Telegram, прежде чем признать, что он не загрузился.
 const SCRIPT_TIMEOUT_MS = 10_000;
 
-const PHOTO_TOO_BIG = "Фото слишком большое — сделайте скриншот экрана и прикрепите его";
+const PHOTO_TOO_BIG = "Фото тым үлкен — экранның скриншотын жасап, соны тіркеңіз";
 
 type Draft = {
   groupName: string;
@@ -135,7 +138,7 @@ function writeStorage(key: string, value: string | null) {
 // — сотни килобайт, и текст ошибки на нём остаётся читаемым. JPEG, а не
 // WebP: sendPhoto в Telegram гарантированно принимает JPEG. Любой сбой —
 // исключение, а не тихая подмена: решение о запасном пути принимает
-// onPhotoPicked.
+// pickPhoto.
 async function compressImage(file: File): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
@@ -175,6 +178,13 @@ function contactKind(value: string): "empty" | "email" | "phone" | "unknown" {
   const digits = v.replace(/[\s()+-]/g, "");
   if (/^\d{10,12}$/.test(digits)) return "phone";
   return "unknown";
+}
+
+// Картинка из буфера обмена, если она там есть.
+function imageFromClipboard(event: ClipboardEvent): File | null {
+  const items = Array.from(event.clipboardData?.items ?? []);
+  const item = items.find((i) => i.kind === "file" && i.type.startsWith("image/"));
+  return item?.getAsFile() ?? null;
 }
 
 const FIELD_IDS = {
@@ -237,7 +247,11 @@ export function SubmissionForm() {
   const [showErrors, setShowErrors] = useState(false);
   const [sent, setSent] = useState<{ groupName: string; description: string } | null>(null);
 
+  // Свежие версии обработчиков для подписок, которые живут дольше одного
+  // рендера (MainButton, вставка из буфера), — иначе они звали бы функцию
+  // со старым состоянием формы.
   const submitRef = useRef<() => void>(() => {});
+  const pickPhotoRef = useRef<(file: File) => void>(() => {});
   // Синхронный замок отправки. sending из состояния не годится: нажатия
   // MainButton приходят событиями Telegram, React не успевает перерисовать
   // между двумя быстрыми тапами, и без замка ушли бы два запроса.
@@ -324,7 +338,7 @@ export function SubmissionForm() {
       return;
     }
     button.setParams({
-      text: sending ? "Отправляем…" : "Отправить обращение",
+      text: sending ? "Жіберілуде…" : "Өтінішті жіберу",
       is_visible: true,
       is_active: !sending && !compressing,
     });
@@ -340,8 +354,23 @@ export function SubmissionForm() {
     return () => button.offClick(onClick);
   }, [env]);
 
+  // Скриншот из буфера обмена: Ctrl+V / ⌘V где угодно на форме (компьютер)
+  // или «Қою» в зоне вставки (телефон). Если в буфере ещё и текст — его
+  // вставку в поле не трогаем, забираем только картинку.
+  useEffect(() => {
+    function onPaste(event: ClipboardEvent) {
+      const file = imageFromClipboard(event);
+      if (!file) return;
+      if (!event.clipboardData?.types.includes("text/plain")) event.preventDefault();
+      pickPhotoRef.current(file);
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
+
   useEffect(() => {
     submitRef.current = submit;
+    pickPhotoRef.current = pickPhoto;
   });
 
   useEffect(() => {
@@ -350,8 +379,8 @@ export function SubmissionForm() {
     };
   }, [photoPreview]);
 
-  async function onPhotoPicked(file: File | undefined) {
-    if (!file) return;
+  async function pickPhoto(file: File | undefined) {
+    if (!file || sent) return;
     setError(null);
     setCompressing(true);
     // Не каждый браузер умеет открыть любой формат (HEIC на Android, например)
@@ -373,7 +402,7 @@ export function SubmissionForm() {
       setError(
         file.size > MAX_PHOTO_BYTES
           ? PHOTO_TOO_BIG
-          : "Не удалось открыть это фото — сделайте скриншот или выберите другое"
+          : "Бұл фотоны ашу мүмкін болмады — скриншот жасаңыз немесе басқа фото таңдаңыз"
       );
       haptic("error");
     }
@@ -438,7 +467,7 @@ export function SubmissionForm() {
       // (например, редирект на страницу входа) — это не отправка, и стирать
       // черновик нельзя.
       if (!res.ok || data?.ok !== true) {
-        setError(data?.error ?? `Не отправилось (ошибка ${res.status}) — попробуйте ещё раз`);
+        setError(data?.error ?? `Жіберілмеді (қате ${res.status}) — қайталап көріңіз`);
         haptic("error");
         return;
       }
@@ -451,8 +480,8 @@ export function SubmissionForm() {
       const timedOut = err instanceof DOMException && err.name === "TimeoutError";
       setError(
         timedOut
-          ? "Сервер не ответил за минуту — отправьте ещё раз, второго обращения не появится"
-          : "Нет связи — проверьте интернет и отправьте ещё раз"
+          ? "Сервер бір минут ішінде жауап бермеді — қайта жіберіңіз, екінші өтініш пайда болмайды"
+          : "Байланыс жоқ — интернетті тексеріп, қайта жіберіңіз"
       );
       haptic("error");
     } finally {
@@ -491,24 +520,24 @@ export function SubmissionForm() {
     const hue = GROUP_HUE[sent.groupName];
     const group = OFFICIAL_GROUPS.find((g) => g.name === sent.groupName);
     return (
-      <main className={styles.root}>
+      <main className={styles.root} lang="kk">
         {telegramScript}
         <div className={styles.success} role="status">
           <div className={styles.successMark}>
             <CheckIcon size={38} />
           </div>
-          <h1 className={styles.successTitle}>Обращение отправлено</h1>
-          <p className={styles.successText}>Дежурный увидит его на доске поддержки.</p>
+          <h1 className={styles.successTitle}>Өтініш жіберілді</h1>
+          <p className={styles.successText}>Кезекші оны қолдау тақтасынан көреді.</p>
 
           <div className={`${styles.list} ${styles.summary}`}>
             <div className={styles.summaryRow}>
-              <span className={styles.summaryLabel}>Группа</span>
+              <span className={styles.summaryLabel}>Топ</span>
               <span className={styles.summaryValue} style={{ color: hue }}>
                 {group?.emoji} {sent.groupName}
               </span>
             </div>
             <div className={styles.summaryRow}>
-              <span className={styles.summaryLabel}>Суть</span>
+              <span className={styles.summaryLabel}>Мәні</span>
               <span className={styles.summaryValue}>
                 {sent.description.length > 140
                   ? `${sent.description.slice(0, 140)}…`
@@ -518,7 +547,7 @@ export function SubmissionForm() {
           </div>
 
           <button type="button" className={styles.primaryButton} onClick={startOver}>
-            Новое обращение
+            Жаңа өтініш
           </button>
           {env === "telegram" && (
             <button
@@ -526,7 +555,7 @@ export function SubmissionForm() {
               className={styles.secondaryButton}
               onClick={() => window.Telegram?.WebApp?.close()}
             >
-              Закрыть
+              Жабу
             </button>
           )}
         </div>
@@ -535,29 +564,28 @@ export function SubmissionForm() {
   }
 
   return (
-    <main className={styles.root}>
+    <main className={styles.root} lang="kk">
       {telegramScript}
 
-      <h1 className={styles.title}>Новое обращение</h1>
-      <p className={styles.subtitle}>Дежурный увидит его на доске поддержки</p>
+      <h1 className={styles.title}>Жаңа өтініш</h1>
+      <p className={styles.subtitle}>Кезекші оны қолдау тақтасынан көреді</p>
 
       {env === "browser" && (
         <p className={styles.notice}>
-          Форма открыта не из Telegram, поэтому не отправится. Откройте её кнопкой
-          «Подать обращение» в боте.
+          Форма Telegram-нан ашылмаған, сондықтан жіберілмейді. Оны боттағы
+          «Өтініш жіберу» батырмасы арқылы ашыңыз.
         </p>
       )}
       {env === "script-failed" && (
         <p className={styles.notice}>
-          Не загрузился модуль Telegram — проверьте интернет. Можно попробовать
-          отправить кнопкой внизу; если не выйдет, закройте форму и откройте её
-          заново из бота.
+          Telegram модулі жүктелмеді — интернетті тексеріңіз. Төмендегі батырмамен
+          жіберіп көруге болады; болмаса, форманы жауып, боттан қайта ашыңыз.
         </p>
       )}
 
       <section className={styles.section} id={FIELD_IDS.group}>
         <span className={styles.sectionHeader} id="group-label">
-          Куда отправить
+          Қай топқа жіберу
         </span>
         <div className={styles.groups} role="group" aria-labelledby="group-label">
           {OFFICIAL_GROUPS.map((g) => {
@@ -588,13 +616,13 @@ export function SubmissionForm() {
           })}
         </div>
         {isMissing("group") && (
-          <p className={`${styles.footer} ${styles.footerError}`}>Выберите группу</p>
+          <p className={`${styles.footer} ${styles.footerError}`}>Топты таңдаңыз</p>
         )}
       </section>
 
       <section className={styles.section}>
         <label className={styles.sectionHeader} htmlFor={FIELD_IDS.description}>
-          Что случилось
+          Не болды
         </label>
         <div className={styles.list}>
           <textarea
@@ -602,7 +630,7 @@ export function SubmissionForm() {
             className={`${styles.input} ${styles.textarea}`}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Например: у ученика не открывается тест по геометрии, пишет «ошибка 500»"
+            placeholder="Мысалы: оқушыда геометриядан тест ашылмайды, «500 қатесі» шығады"
             maxLength={4000}
           />
         </div>
@@ -610,14 +638,14 @@ export function SubmissionForm() {
           className={`${styles.footer} ${isMissing("description") ? styles.footerError : ""}`}
         >
           {isMissing("description")
-            ? "Опишите, что случилось"
-            : "Что делал ученик и что увидел — так дежурному не придётся переспрашивать"}
+            ? "Не болғанын жазыңыз"
+            : "Оқушы не істеді және не көрді — сонда кезекшіге қайта сұраудың қажеті болмайды"}
         </p>
       </section>
 
       <section className={styles.section}>
         <label className={styles.sectionHeader} htmlFor={FIELD_IDS.contact}>
-          Ученик
+          Оқушы
         </label>
         <div className={styles.list}>
           <input
@@ -625,7 +653,7 @@ export function SubmissionForm() {
             className={styles.input}
             value={studentContact}
             onChange={(e) => setStudentContact(e.target.value)}
-            placeholder="Почта или телефон"
+            placeholder="Поштасы немесе телефоны"
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
@@ -643,20 +671,20 @@ export function SubmissionForm() {
           }`}
         >
           {isMissing("contact")
-            ? "Нужна почта или телефон ученика"
+            ? "Оқушының поштасы немесе телефоны керек"
             : kind === "email"
-              ? "Почта ученика"
+              ? "Оқушының поштасы"
               : kind === "phone"
-                ? "Телефон ученика"
+                ? "Оқушының телефоны"
                 : kind === "unknown"
-                  ? "Не похоже на почту или телефон — проверьте"
-                  : "Без почты или телефона дежурный не найдёт ученика"}
+                  ? "Пошта немесе телефонға ұқсамайды — тексеріңіз"
+                  : "Поштасыз немесе телефонсыз кезекші оқушыны таба алмайды"}
         </p>
       </section>
 
       <section className={styles.section}>
         <label className={styles.sectionHeader} htmlFor={FIELD_IDS.link}>
-          Урок или задание
+          Сабақ немесе тапсырма
         </label>
         <div className={styles.list}>
           <input
@@ -664,7 +692,7 @@ export function SubmissionForm() {
             className={styles.input}
             value={lessonLink}
             onChange={(e) => setLessonLink(e.target.value)}
-            placeholder="Ссылка"
+            placeholder="Сілтеме"
             inputMode="url"
             autoComplete="off"
             autoCapitalize="none"
@@ -678,12 +706,12 @@ export function SubmissionForm() {
           }`}
         >
           {isMissing("link")
-            ? "Нужна ссылка на урок или задание"
+            ? "Сабақтың немесе тапсырманың сілтемесі керек"
             : linkLooksLikeUrl
-              ? "Ссылка на урок"
+              ? "Сабақтың сілтемесі"
               : lessonLink.trim()
-                ? "Если есть ссылка — вставьте её целиком, дежурный откроет урок в один клик"
-                : "Скопируйте из адресной строки урока"}
+                ? "Сілтеме болса — толық қойыңыз, кезекші сабақты бір рет басып ашады"
+                : "Сабақтың мекенжай жолынан көшіріп алыңыз"}
         </p>
       </section>
 
@@ -694,9 +722,9 @@ export function SubmissionForm() {
             <div className={styles.photoFilled}>
               {/* Локальный blob: из выбранного файла — next/image тут не к месту. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={photoPreview} alt="Прикреплённый скриншот" className={styles.thumb} />
+              <img src={photoPreview} alt="Тіркелген скриншот" className={styles.thumb} />
               <div className={styles.photoMeta}>
-                Скриншот прикреплён
+                Скриншот тіркелді
                 <div className={styles.photoSize}>{formatSize(photo.size)}</div>
               </div>
               <div className={styles.photoActions}>
@@ -706,41 +734,57 @@ export function SubmissionForm() {
                     accept="image/*"
                     className="sr-only"
                     onChange={(e) => {
-                      onPhotoPicked(e.target.files?.[0]);
+                      pickPhoto(e.target.files?.[0]);
                       e.target.value = "";
                     }}
                   />
-                  Заменить
+                  Ауыстыру
                 </label>
                 <button
                   type="button"
                   className={`${styles.textButton} ${styles.textButtonDestructive}`}
                   onClick={removePhoto}
                 >
-                  Убрать
+                  Өшіру
                 </button>
               </div>
             </div>
           ) : (
-            <label className={styles.photoPick}>
-              <input
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                onChange={(e) => {
-                  onPhotoPicked(e.target.files?.[0]);
-                  e.target.value = "";
+            <>
+              <label className={styles.photoPick}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(e) => {
+                    pickPhoto(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <CameraIcon />
+                {compressing ? "Фото сығылуда…" : "Скриншот тіркеу"}
+              </label>
+              {/* Вставку ловит общий обработчик paste выше; здесь — только
+                  место, где телефон покажет «Қою» по долгому нажатию. */}
+              <div
+                className={styles.pasteZone}
+                contentEditable
+                suppressContentEditableWarning
+                role="textbox"
+                aria-label="Көшірілген скриншотты осында қойыңыз"
+                inputMode="none"
+                data-placeholder="Көшірілген скриншотты осында қойыңыз: басып тұрып → «Қою»"
+                onInput={(e) => {
+                  e.currentTarget.textContent = "";
                 }}
               />
-              <CameraIcon />
-              {compressing ? "Сжимаем фото…" : "Прикрепить скриншот"}
-            </label>
+            </>
           )}
         </div>
         <p className={`${styles.footer} ${isMissing("photo") ? styles.footerError : ""}`}>
           {isMissing("photo")
-            ? "Прикрепите скриншот ошибки"
-            : "Сжимается на телефоне — отправка займёт пару секунд"}
+            ? "Қатенің скриншотын тіркеңіз"
+            : "Телефонда сығылады — жіберу бірнеше секунд алады"}
         </p>
       </section>
 
@@ -757,7 +801,7 @@ export function SubmissionForm() {
           onClick={submit}
           disabled={sending || compressing}
         >
-          {sending ? "Отправляем…" : "Отправить обращение"}
+          {sending ? "Жіберілуде…" : "Өтінішті жіберу"}
         </button>
       )}
     </main>
