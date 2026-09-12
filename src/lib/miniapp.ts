@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
+import { setWebAppMenuButton } from "@/lib/telegram";
 
 // Мини-апп Telegram для кураторов: подать обращение формой, а не сообщением
 // в рабочую группу (страница /miniapp, приём — POST /api/miniapp/submit).
@@ -42,6 +43,22 @@ export function miniAppUrl(): string | null {
     console.error(`[miniapp] неверный адрес мини-аппа "${base}" — нужен полный адрес с https://`);
     return null;
   }
+}
+
+// Подпись кнопки меню бота. Коротко: Telegram показывает её в узкой кнопке
+// слева от поля ввода.
+export const MINI_APP_BUTTON_TEXT = "Өтініш";
+
+// Кнопка меню должна открывать форму всегда, а не только сразу после /start.
+// Telegram возвращает на её место меню команд (например, когда у бота есть
+// команды для этого чата), и вернуть кнопку потом некому — куратор просто
+// перестаёт её видеть. Поэтому переставляем на каждое сообщение боту в личке:
+// один дешёвый вызов, зато кнопка не исчезает.
+export async function ensureMiniAppMenuButton(chatId: number): Promise<void> {
+  if (!submissionFormEnabled()) return;
+  const url = miniAppUrl();
+  if (!url) return;
+  await setWebAppMenuButton(chatId, MINI_APP_BUTTON_TEXT, url);
 }
 
 export type MiniAppUser = { id: bigint; name: string };

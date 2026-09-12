@@ -8,7 +8,7 @@ import {
   setWebAppMenuButton,
 } from "@/lib/telegram";
 import { startBotMessageDelete } from "@/lib/botMessageDelete";
-import { miniAppUrl, submissionFormEnabled } from "@/lib/miniapp";
+import { MINI_APP_BUTTON_TEXT, miniAppUrl, submissionFormEnabled } from "@/lib/miniapp";
 import { buildReviewSummary, startReviewSession } from "@/lib/dailyReview";
 import { startDedupeReview } from "@/lib/dedupeReview";
 import { sendReportToGroup, describeSendFailure } from "@/lib/reportSend";
@@ -113,17 +113,23 @@ export async function handleBotCommand(
       // [telegram] sendMessage.
       console.error(`[miniapp] кнопка формы не отправилась (url=${url})`);
     }
-    if (url) {
-      // Кнопка меню (слева от поля ввода) — самый короткий путь к форме:
-      // видна всегда, искать сообщение с кнопкой не надо. Ставим и значением
-      // по умолчанию для всех чатов, и этому чату сразу.
-      await setWebAppMenuButton(null, "Өтініш", url);
-      await setWebAppMenuButton(chatId, "Өтініш", url);
-    }
     if (actorName) {
       // Список команд занимал бы место кнопки меню — отдаём его в
       // автодополнение по "/", иначе агент потеряет /report и остальные.
+      // Ставим ДО кнопки: клиент показывает последнее, что мы записали, и
+      // после регистрации команд кнопка меню сменялась на меню команд.
       await setChatCommands(chatId, AGENT_COMMANDS);
+    }
+    if (url) {
+      // Кнопка меню (слева от поля ввода) — самый короткий путь к форме:
+      // видна всегда, искать сообщение с кнопкой не надо. Ставим и значением
+      // по умолчанию для всех чатов, и этому чату сразу. Дальше её
+      // переставляет вебхук на каждое сообщение в личке
+      // (ensureMiniAppMenuButton) — иначе она пропадает.
+      await setWebAppMenuButton(null, MINI_APP_BUTTON_TEXT, url);
+      await setWebAppMenuButton(chatId, MINI_APP_BUTTON_TEXT, url);
+    }
+    if (actorName) {
       await sendTelegramMessage(chatId, HELP_TEXT);
       return;
     }

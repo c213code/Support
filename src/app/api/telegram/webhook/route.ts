@@ -7,6 +7,7 @@ import { changeIssueStatus } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { advanceReviewSession } from "@/lib/dailyReview";
 import { handleBotCommand } from "@/lib/webhook/commands";
+import { ensureMiniAppMenuButton } from "@/lib/miniapp";
 import { handleCallbackQuery } from "@/lib/webhook/callbacks";
 import { createAutoIssue, sendAcknowledgement } from "@/lib/webhook/acknowledge";
 import {
@@ -84,6 +85,14 @@ export async function POST(request: NextRequest) {
   const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
 
   const chatId = String(message.chat.id);
+
+  // Кнопка меню с формой обращения должна стоять всегда, а не только сразу
+  // после /start: Telegram подменяет её меню команд, и вернуть её потом
+  // некому. Переставляем на каждое сообщение в личке — дешевле, чем
+  // объяснять кураторам, куда делась кнопка.
+  if (message.chat.type === "private") {
+    await ensureMiniAppMenuButton(message.chat.id);
+  }
 
   // Слэш-команды — только в личке с ботом, чтобы ответы с внутренними
   // данными (репорт, разбор тикетов) не улетали в группы поддержки, где их
