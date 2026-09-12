@@ -1,7 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { todayDateString } from "@/lib/date";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
-import { sendTelegramMessage, sendWebAppButton } from "@/lib/telegram";
+import {
+  sendTelegramMessage,
+  sendWebAppButton,
+  setChatCommands,
+  setWebAppMenuButton,
+} from "@/lib/telegram";
 import { startBotMessageDelete } from "@/lib/botMessageDelete";
 import { miniAppUrl, submissionFormEnabled } from "@/lib/miniapp";
 import { buildReviewSummary, startReviewSession } from "@/lib/dailyReview";
@@ -59,6 +64,21 @@ const AUTOREPLY_HELP = [
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Кнопка меню бота отдана мини-аппу (см. setWebAppMenuButton), поэтому
+// команды агент видит по вводу "/" — этот список Telegram и показывает.
+// Только в чатах агентов: кураторам внутренние команды подсказывать незачем.
+const AGENT_COMMANDS = [
+  { command: "report", description: "Репорт за день" },
+  { command: "send", description: "Отправить репорт в рабочую группу" },
+  { command: "review", description: "Разбор тикетов по одному" },
+  { command: "dedupe", description: "Разбор похожих тикетов" },
+  { command: "broadcast", description: "Объявление во все группы" },
+  { command: "delete", description: "Удалить сообщение бота по ссылке" },
+  { command: "autoreply", description: "Автоответы бота в группах" },
+  { command: "readchat", description: "Бот читает реплики и ставит статусы" },
+  { command: "help", description: "Что умеет бот" },
+];
+
 export async function handleBotCommand(
   chatId: number,
   fromId: number,
@@ -93,7 +113,17 @@ export async function handleBotCommand(
       // [telegram] sendMessage.
       console.error(`[miniapp] кнопка формы не отправилась (url=${url})`);
     }
+    if (url) {
+      // Кнопка меню (слева от поля ввода) — самый короткий путь к форме:
+      // видна всегда, искать сообщение с кнопкой не надо. Ставим и значением
+      // по умолчанию для всех чатов, и этому чату сразу.
+      await setWebAppMenuButton(null, "Өтініш", url);
+      await setWebAppMenuButton(chatId, "Өтініш", url);
+    }
     if (actorName) {
+      // Список команд занимал бы место кнопки меню — отдаём его в
+      // автодополнение по "/", иначе агент потеряет /report и остальные.
+      await setChatCommands(chatId, AGENT_COMMANDS);
       await sendTelegramMessage(chatId, HELP_TEXT);
       return;
     }

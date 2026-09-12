@@ -388,6 +388,41 @@ export async function sendWebAppButton(
   return data !== null;
 }
 
+// Кнопка меню бота (синяя слева от поля ввода) открывает мини-апп в одно
+// касание — без /start и без поиска старого сообщения с кнопкой.
+//
+// chatId = null — значение по умолчанию для всех чатов бота, в том числе тех,
+// кто ему ещё не писал. С chatId — тому же человеку сразу, не дожидаясь, пока
+// Telegram подхватит новое значение по умолчанию.
+//
+// Эта кнопка занимает место списка команд, поэтому агентам команды отдаём
+// через setChatCommands ниже — они остаются доступны по вводу "/".
+export async function setWebAppMenuButton(
+  chatId: number | null,
+  text: string,
+  url: string
+): Promise<boolean> {
+  const data = await callBotApi("setChatMenuButton", {
+    chat_id: chatId ?? undefined,
+    menu_button: { type: "web_app", text, web_app: { url } },
+  });
+  return data !== null;
+}
+
+// Список команд для конкретного чата: Telegram показывает его при вводе "/".
+// Только для агентов (scope = их чат), чтобы кураторам не подсказывать
+// внутренние команды.
+export async function setChatCommands(
+  chatId: number,
+  commands: Array<{ command: string; description: string }>
+): Promise<boolean> {
+  const data = await callBotApi("setMyCommands", {
+    commands,
+    scope: { type: "chat", chat_id: chatId },
+  });
+  return data !== null;
+}
+
 // Удаляет сообщение бота. Telegram разрешает это только в течение 48 часов
 // после отправки — позже вернёт ошибку, и вызывающий код должен честно
 // сказать об этом человеку, а не молчать (см. src/lib/botReply.ts).
