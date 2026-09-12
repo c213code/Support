@@ -5,6 +5,12 @@ import { useEffect, useRef } from "react";
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
+// Стопка открытых модалок. Модалка в модалке уже бывает (просмотр фото
+// поверх формы тикета), и без стопки Escape закрывал бы обе разом: обработчик
+// висит на window у каждой, и одно нажатие доходило до всех. Escape слушает
+// только верхняя.
+const openModals: symbol[] = [];
+
 // Общая обёртка для всех модалок. Раньше каждая (ResolveDialog,
 // EscalateDialog, объединение дублей, форма тикета) заново городила свой
 // оверлей — и все одинаково не умели три вещи, которые для модалки не
@@ -23,8 +29,12 @@ export function Modal({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  // Метка этой модалки в стопке — по ней понимаем, верхняя ли она.
+  const idRef = useRef<symbol>(Symbol("modal"));
 
   useEffect(() => {
+    const id = idRef.current;
+    openModals.push(id);
     restoreFocusRef.current = document.activeElement as HTMLElement | null;
 
     // Скролл фона под открытой модалкой — классический баг «прокрутил
@@ -38,6 +48,8 @@ export function Modal({
     if (scrollBarWidth > 0) body.style.paddingRight = `${scrollBarWidth}px`;
 
     return () => {
+      const index = openModals.lastIndexOf(id);
+      if (index >= 0) openModals.splice(index, 1);
       body.style.overflow = prevOverflow;
       body.style.paddingRight = prevPadding;
       restoreFocusRef.current?.focus?.();
@@ -46,6 +58,10 @@ export function Modal({
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      // Клавиши слушает только верхняя модалка: иначе Escape в просмотре фото
+      // закрыл бы и форму тикета под ним вместе с набранным текстом, а
+      // ловушка таба нижней утаскивала бы фокус из верхней.
+      if (openModals[openModals.length - 1] !== idRef.current) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose();

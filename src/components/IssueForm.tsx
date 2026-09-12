@@ -7,6 +7,7 @@ import { ISSUE_STATUSES, STATUS_META, type IssueStatus } from "@/lib/status";
 import { ESCALATION_TEAMS, type EscalationTeam } from "@/lib/escalation";
 import { useAiCleaningEnabled } from "@/lib/useAiCleaningEnabled";
 import { IconRefresh } from "@/components/Icons";
+import { SubmissionPhoto } from "@/components/SubmissionPhoto";
 
 export type IssueFormValues = {
   groupName: string;
@@ -31,6 +32,14 @@ export type IssueFormInitial = Partial<{
   escalatedTeam: string | null;
   escalatedAssignee: string | null;
   createdBy: string;
+  // Обращение из формы мини-аппа: скриншот и то, что куратор указал. В
+  // форме тикета это нужно ровно затем же, зачем на карточке, — открыть
+  // фото, не уходя со страницы (см. GET /api/issues).
+  submission: {
+    authorName: string;
+    studentContact: string;
+    lessonLink: string;
+  } | null;
 }>;
 
 type Props = {
@@ -315,6 +324,25 @@ export function IssueForm({
           className={`${inputClass} resize-y`}
           placeholder="Оқушы аккаунтына кіре алмай жатыр..."
         />
+        {initial?.submission && initial.id && (
+          <div className="space-y-1.5 rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600">
+            <p>📝 Из формы · {initial.submission.authorName}</p>
+            <p className="break-words">👤 {initial.submission.studentContact}</p>
+            {/^https?:\/\//i.test(initial.submission.lessonLink) ? (
+              <a
+                href={initial.submission.lessonLink}
+                target="_blank"
+                rel="noreferrer"
+                className="block truncate text-accent-600 hover:underline"
+              >
+                🔗 Урок / задание
+              </a>
+            ) : (
+              <p className="break-words">🔗 {initial.submission.lessonLink}</p>
+            )}
+            <SubmissionPhoto issueId={initial.id} />
+          </div>
+        )}
         {showSource && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs">
             {sourceState === "loading" ? (
