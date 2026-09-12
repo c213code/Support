@@ -150,14 +150,20 @@ export function EscalateDialog({
               setNote(e.target.value);
             }}
             onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault();
-                e.currentTarget.form?.requestSubmit();
-              }
+              // Так же, как в окне "Решено": Enter сохраняет, Shift+Enter —
+              // перенос строки. Пока клавиатура набирает слово с подсказками,
+              // Enter принадлежит ей, а не форме.
+              if (e.key !== "Enter" || e.shiftKey) return;
+              if (e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
             }}
             rows={2}
             className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
+          <p className="text-[11px] text-slate-400">
+            Enter — передать, Shift+Enter — новая строка
+          </p>
         </div>
 
         <div className="flex justify-end gap-2">

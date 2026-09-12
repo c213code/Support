@@ -274,17 +274,25 @@ export function ResolveDialog({
               setNote(e.target.value);
             }}
             onKeyDown={(e) => {
-              // Ctrl/Cmd+Enter — привычный "отправить" для однострочных
-              // заметок, чтобы не тянуться мышкой к кнопке.
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault();
-                e.currentTarget.form?.requestSubmit();
-              }
+              // Enter сохраняет: заметка почти всегда в одну строку, а
+              // тикетов за день десятки — тянуться мышкой к кнопке после
+              // каждого лишнее. Перенос строки остаётся на Shift+Enter,
+              // Ctrl/Cmd+Enter тоже сохраняет (привычка из других форм).
+              if (e.key !== "Enter" || e.shiftKey) return;
+              // Пока клавиатура набирает слово с подсказками (казахская
+              // раскладка, автодополнение), Enter подтверждает ввод в самой
+              // клавиатуре — отправлять форму в этот момент нельзя.
+              if (e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
             }}
             rows={3}
             placeholder="Например: Алпа шешті, тест қайта ашылды"
             className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
+          <p className="text-[11px] text-slate-400">
+            Enter — сохранить, Shift+Enter — новая строка
+          </p>
         </div>
 
         <div className="flex justify-end gap-2">
