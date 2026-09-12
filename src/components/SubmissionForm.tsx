@@ -180,6 +180,17 @@ function contactKind(value: string): "empty" | "email" | "phone" | "unknown" {
   return "unknown";
 }
 
+// Урок можно указать двумя способами, и оба одинаково годятся: ссылкой или
+// «ай-аптой» — привязкой к программе (3-ай 2-апта), по которой дежурный сам
+// найдёт нужное занятие. Ссылка есть не всегда, а ай-апта — почти всегда.
+function lessonKind(value: string): "empty" | "url" | "week" | "text" {
+  const v = value.trim();
+  if (!v) return "empty";
+  if (/^https?:\/\/\S+$/i.test(v)) return "url";
+  if (/\d\s*-?\s*(ай|апта)/i.test(v)) return "week";
+  return "text";
+}
+
 // Картинка из буфера обмена, если она там есть.
 function imageFromClipboard(event: ClipboardEvent): File | null {
   const items = Array.from(event.clipboardData?.items ?? []);
@@ -504,7 +515,7 @@ export function SubmissionForm() {
   }
 
   const kind = contactKind(studentContact);
-  const linkLooksLikeUrl = /^https?:\/\/\S+$/i.test(lessonLink.trim());
+  const lesson = lessonKind(lessonLink);
   // Кнопка на странице — там, где нет MainButton Telegram.
   const pageButton = env === "browser" || env === "script-failed";
 
@@ -692,8 +703,7 @@ export function SubmissionForm() {
             className={styles.input}
             value={lessonLink}
             onChange={(e) => setLessonLink(e.target.value)}
-            placeholder="Сілтеме"
-            inputMode="url"
+            placeholder="Сілтеме немесе ай-апта (3-ай 2-апта)"
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
@@ -702,16 +712,22 @@ export function SubmissionForm() {
         </div>
         <p
           className={`${styles.footer} ${
-            isMissing("link") ? styles.footerError : linkLooksLikeUrl ? styles.footerOk : ""
+            isMissing("link")
+              ? styles.footerError
+              : lesson === "url" || lesson === "week"
+                ? styles.footerOk
+                : ""
           }`}
         >
           {isMissing("link")
-            ? "Сабақтың немесе тапсырманың сілтемесі керек"
-            : linkLooksLikeUrl
+            ? "Сабақтың сілтемесі немесе ай-аптасы керек"
+            : lesson === "url"
               ? "Сабақтың сілтемесі"
-              : lessonLink.trim()
-                ? "Сілтеме болса — толық қойыңыз, кезекші сабақты бір рет басып ашады"
-                : "Сабақтың мекенжай жолынан көшіріп алыңыз"}
+              : lesson === "week"
+                ? "Ай-апта көрсетілді"
+                : lesson === "text"
+                  ? "Сілтеме де, ай-апта да жарайды — мысалы: 3-ай 2-апта"
+                  : "Сілтемені қойыңыз немесе ай-аптаны жазыңыз (3-ай 2-апта)"}
         </p>
       </section>
 
