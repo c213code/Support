@@ -54,6 +54,11 @@ const SHORTCUTS: Shortcut[] = [
 
 const POLL_INTERVAL_MS = 15000;
 
+// Пустые списки — одни и те же объекты: `?? []` в рендере давал бы новый
+// массив каждый раз и пересчитывал все useMemo, завязанные на список.
+const NO_MESSAGES: TelegramMessageDTO[] = [];
+const NO_ISSUES: IssueDTO[] = [];
+
 // Форматтер создаётся один раз: toLocaleString строит его заново на каждый
 // вызов, а вызовов тут — по одному на сообщение на каждый рендер, и лента
 // перерисовывается каждые 15 сек после опроса.
@@ -71,10 +76,19 @@ function formatTime(iso: string) {
 
 export function Inbox() {
   const [date, setDate] = useState(todayDateString());
-  const [messages, setMessages] = useState<TelegramMessageDTO[]>([]);
+  // Сообщения и тикеты хранятся по дням, а на экран берётся день из `date`.
+  // Так ответ за другой день ложится в свою ячейку и не затирает доску: при
+  // быстром листании ответ за 13-е мог прийти позже ответа за 14-е, и дата
+  // сверху была одна, а карточки — от другой. Заодно вернуться на уже
+  // открытый день можно без пустого экрана.
+  const [messagesByDate, setMessagesByDate] = useState<
+    Record<string, TelegramMessageDTO[]>
+  >({});
   const [groups, setGroups] = useState<GroupPresetDTO[]>([]);
-  const [issues, setIssues] = useState<IssueDTO[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [issuesByDate, setIssuesByDate] = useState<Record<string, IssueDTO[]>>({});
+  const messages = messagesByDate[date] ?? NO_MESSAGES;
+  const issues = issuesByDate[date] ?? NO_ISSUES;
+  const loading = !(date in messagesByDate);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
   const [attachingFromId, setAttachingFromId] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("");
@@ -110,25 +124,53 @@ export function Inbox() {
   const { confirm, element: confirmElement } = useConfirm();
   const toast = useToast();
   const isToday = date === todayDateString();
+  // Сессия истекла: proxy.ts отвечает на запрос к API редиректом на вход, и
+  // без этого флага доска молча застывала — дежурный смотрел на старые
+  // карточки и думал, что новых обращений нет.
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // JSON ответа или null, если его нет. Причину сбоя пишем в консоль, а
+  // данные на экране не трогаем: следующий опрос попробует снова.
+  const getJson = useCallback(async (url: string) => {
+    try {
+      const res = await fetch(url);
+      if (res.redirected || res.status === 401) {
+        setSessionExpired(true);
+        return null;
+      }
+      if (!res.ok) {
+        console.warn(`[inbox] ${url} → ${res.status}`);
+        return null;
+      }
+      const data = await res.json();
+      setSessionExpired(false);
+      return data;
+    } catch (err) {
+      console.warn(`[inbox] ${url} не загрузился:`, err);
+      return null;
+    }
+  }, []);
 
   const loadGroups = useCallback(async () => {
-    const res = await fetch("/api/groups");
-    const data = await res.json();
-    setGroups(data.groups ?? []);
-  }, []);
+    const data = await getJson("/api/groups");
+    if (data) setGroups(data.groups ?? []);
+  }, [getJson]);
 
-  const loadMessages = useCallback(async (d: string) => {
-    const res = await fetch(`/api/telegram/messages?archived=false&date=${d}`);
-    const data = await res.json();
-    setMessages(data.messages ?? []);
-    setLoading(false);
-  }, []);
+  const loadMessages = useCallback(
+    async (d: string) => {
+      const data = await getJson(`/api/telegram/messages?archived=false&date=${d}`);
+      if (data) setMessagesByDate((prev) => ({ ...prev, [d]: data.messages ?? [] }));
+    },
+    [getJson]
+  );
 
-  const loadIssues = useCallback(async (d: string) => {
-    const res = await fetch(`/api/issues?date=${d}`);
-    const data = await res.json();
-    setIssues(data.issues ?? []);
-  }, []);
+  const loadIssues = useCallback(
+    async (d: string) => {
+      const data = await getJson(`/api/issues?date=${d}`);
+      if (data) setIssuesByDate((prev) => ({ ...prev, [d]: data.issues ?? [] }));
+    },
+    [getJson]
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load on mount
@@ -138,7 +180,6 @@ export function Inbox() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- data load on date change
-    setLoading(true);
     loadMessages(date);
     loadIssues(date);
 
@@ -189,14 +230,21 @@ export function Inbox() {
         body: JSON.stringify({ ids: unviewedIds }),
       }).then(() => {
         const marked = new Set(unviewedIds);
-        setMessages((prev) =>
-          prev.map((m) => (marked.has(m.id) ? { ...m, viewed: true } : m))
+        setMessagesByDate((prev) =>
+          prev[date]
+            ? {
+                ...prev,
+                [date]: prev[date].map((m) =>
+                  marked.has(m.id) ? { ...m, viewed: true } : m
+                ),
+              }
+            : prev
         );
       });
     }, 2000);
 
     return () => clearTimeout(timeout);
-  }, [filteredMessages]);
+  }, [filteredMessages, date]);
 
   async function handleAssignGroup(id: string, groupName: string) {
     if (!groupName) return;
@@ -760,6 +808,20 @@ export function Inbox() {
       className={`mx-auto px-4 py-6 sm:px-6 ${tab === "board" ? "max-w-[1500px]" : "max-w-3xl"}`}
     >
       {confirmElement}
+      {sessionExpired && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          <span>Сессия истекла — доска не обновляется.</span>
+          <a
+            href="/login"
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-700"
+          >
+            Войти снова
+          </a>
+        </div>
+      )}
       <CommandPalette
         issues={issues}
         actions={paletteActions}
@@ -1434,7 +1496,7 @@ export function Inbox() {
                       handleAssignGroup(message.id, e.target.value)
                     }
                     title="Перевыбрать группу для этого чата"
-                    className={`rounded-full border-0 px-2 py-0.5 font-medium outline-none ${
+                    className={`rounded-full border-0 px-2 py-0.5 font-medium outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
                       message.groupName
                         ? `${groupColor(message.groupName).bg} ${groupColor(message.groupName).text}`
                         : "bg-amber-50 text-amber-700 ring-1 ring-amber-300"

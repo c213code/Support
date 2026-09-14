@@ -25,6 +25,9 @@
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Helvetica Neue",
     "Segoe UI", sans-serif;
   -webkit-tap-highlight-color: transparent;
+  /* Без этого WebView ждёт ~300 мс после тапа — не двойной ли это тап для
+     увеличения, — и кнопки ощущаются заторможенными. */
+  touch-action: manipulation;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -678,6 +681,10 @@
   gap: 14px;
   padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
   background: rgba(0, 0, 0, 0.88);
+  /* Жесты на просмотре не прокручивают список под ним; увеличить скриншот
+     пальцами можно. */
+  overscroll-behavior: contain;
+  touch-action: pinch-zoom;
 }
 
 .viewerImage {

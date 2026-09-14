@@ -312,14 +312,22 @@ function SubmissionPhotos({ submissionId, count }: { submissionId: string; count
     };
   }, [submissionId, count]);
 
-  // Просмотр закрывается и кнопкой «Назад» на клавиатуре (Esc).
+  // Просмотр закрывается и кнопкой «Назад» на клавиатуре (Esc). Пока он
+  // открыт, страница под ним не прокручивается: на iOS свайп по фото
+  // уводил список, и после закрытия куратор оказывался в другом месте.
   useEffect(() => {
     if (!viewer) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setViewer(null);
     };
+    const root = document.documentElement;
+    const previousOverflow = root.style.overflow;
+    root.style.overflow = "hidden";
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      root.style.overflow = previousOverflow;
+    };
   }, [viewer]);
 
   return (

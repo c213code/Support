@@ -72,6 +72,20 @@ const COLUMNS: Column[] = [
 // "Бота" на живого агента — и счётчик обнулялся, хотя статус не двигался.
 const STALL_HOURS = 3;
 
+// Куда передвинуть карточку без перетаскивания — для телефона: HTML5
+// drag-and-drop на тач-экранах не работает, а колонки на узком экране
+// показываются по одной. Без этих кнопок тикет из «Отправлено» можно было
+// сдвинуть только через окно редактирования. На широком экране их нет —
+// там тащат мышью, и лишние кнопки на каждой карточке только шумят.
+const MOBILE_MOVES: Record<Column["key"], ReadonlyArray<{ status: IssueStatus; label: string }>> = {
+  sent: [
+    { status: "IN_PROGRESS", label: "В работу" },
+    { status: "RESOLVED", label: "Решено" },
+  ],
+  active: [{ status: "RESOLVED", label: "Решено" }],
+  resolved: [{ status: "IN_PROGRESS", label: "Вернуть в работу" }],
+};
+
 function stalledHours(issue: IssueDTO): number | null {
   if (issue.status !== "IN_PROGRESS" && issue.status !== "PENDING") return null;
   const hours = Math.floor(
@@ -258,6 +272,7 @@ export function KanbanBoard({
                           <button
                             onClick={() => onMerge(issue)}
                             title="Это дубль — объединить с другим тикетом"
+                            aria-label="Это дубль — объединить с другим тикетом"
                             className="text-slate-300 transition hover:text-accent-600"
                           >
                             <IconLink className="h-3.5 w-3.5" />
@@ -267,6 +282,7 @@ export function KanbanBoard({
                           <button
                             onClick={() => onEdit(issue)}
                             title="Изменить тикет"
+                            aria-label="Изменить тикет"
                             className="text-slate-300 transition hover:text-slate-600"
                           >
                             <IconEdit className="h-3.5 w-3.5" />
@@ -276,6 +292,7 @@ export function KanbanBoard({
                           <button
                             onClick={() => onDelete(issue)}
                             title="Удалить тикет"
+                            aria-label="Удалить тикет"
                             className="text-slate-300 transition hover:text-red-500"
                           >
                             <IconTrash className="h-3.5 w-3.5" />
@@ -506,6 +523,18 @@ export function KanbanBoard({
                         </span>
                       )}
                       <Avatar name={issue.createdBy} size="sm" />
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5 sm:hidden">
+                      {MOBILE_MOVES[column.key].map((move) => (
+                        <button
+                          key={move.status}
+                          type="button"
+                          onClick={() => onStatusChange(issue, move.status)}
+                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition active:bg-slate-100"
+                        >
+                          {STATUS_META[move.status].emoji} {move.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
                   );
