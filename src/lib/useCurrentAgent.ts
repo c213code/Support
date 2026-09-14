@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { fetchApiJson } from "@/lib/fetchApiJson";
 
 // Возвращает отображаемое имя текущего пользователя (для именных аккаунтов —
 // сам аккаунт, для "Дежурный" — введённое имя вроде "Тикош").
@@ -9,11 +10,9 @@ export function useCurrentAgent(): string | null {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/auth/me")
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled) setName(data.name ?? null);
-      });
+    fetchApiJson<{ name?: string }>("/api/auth/me").then((result) => {
+      if (!cancelled && result.ok) setName(result.data.name ?? null);
+    });
     return () => {
       cancelled = true;
     };

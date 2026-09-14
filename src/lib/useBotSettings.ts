@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
+import { fetchApiJson, isSessionLost } from "@/lib/fetchApiJson";
 
 // Шесть командных тумблеров бота (общие на всё приложение, не по агенту):
 // загрузка при монтировании + переключение с оптимистичным обновлением и
@@ -30,27 +31,19 @@ export function useBotSettings() {
   const [submitterNotify, setSubmitterNotify] = useState<boolean | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings/ai-cleaning")
-      .then((res) => res.json())
-      .then((data) => setAiCleaningEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/auto-reply")
-      .then((res) => res.json())
-      .then((data) => setAutoReplyEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/chat-intent")
-      .then((res) => res.json())
-      .then((data) => setChatIntentEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/ai-ask")
-      .then((res) => res.json())
-      .then((data) => setAiAskEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/auto-reply-confirm")
-      .then((res) => res.json())
-      .then((data) => setAutoReplyConfirm(Boolean(data.enabled)));
-    fetch("/api/settings/status-reply")
-      .then((res) => res.json())
-      .then((data) => setStatusReplyEnabled(Boolean(data.enabled)));
-    fetch("/api/settings/submitter-notify")
-      .then((res) => res.json())
-      .then((data) => setSubmitterNotify(Boolean(data.enabled)));
+    // Не загрузилось (например, сессия истекла) — тумблер остаётся в
+    // состоянии «неизвестно» (null), а не показывает выдуманное значение.
+    const load = (url: string, set: (value: boolean) => void) =>
+      fetchApiJson<{ enabled?: boolean }>(url).then((result) => {
+        if (result.ok) set(Boolean(result.data.enabled));
+      });
+    load("/api/settings/ai-cleaning", setAiCleaningEnabled);
+    load("/api/settings/auto-reply", setAutoReplyEnabled);
+    load("/api/settings/chat-intent", setChatIntentEnabled);
+    load("/api/settings/ai-ask", setAiAskEnabled);
+    load("/api/settings/auto-reply-confirm", setAutoReplyConfirm);
+    load("/api/settings/status-reply", setStatusReplyEnabled);
+    load("/api/settings/submitter-notify", setSubmitterNotify);
   }, []);
 
   async function toggleAiCleaning() {
@@ -61,7 +54,7 @@ export function useBotSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: next }),
     });
-    if (!res.ok) {
+    if (!res.ok || isSessionLost(res)) {
       setAiCleaningEnabled(!next);
       toast("Не удалось переключить ИИ-описания", "error");
       return;
@@ -85,7 +78,7 @@ export function useBotSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: next }),
     });
-    if (!res.ok) {
+    if (!res.ok || isSessionLost(res)) {
       setAutoReplyEnabled(!next);
       toast("Не удалось переключить автоответы", "error");
       return;
@@ -104,7 +97,7 @@ export function useBotSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: next }),
     });
-    if (!res.ok) {
+    if (!res.ok || isSessionLost(res)) {
       setChatIntentEnabled(!next);
       toast("Не удалось переключить чтение реплик", "error");
       return;
@@ -133,7 +126,7 @@ export function useBotSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: next }),
     });
-    if (!res.ok) {
+    if (!res.ok || isSessionLost(res)) {
       setAutoReplyConfirm(!next);
       toast("Не удалось переключить подтверждение", "error");
       return;
@@ -154,7 +147,7 @@ export function useBotSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: next }),
     });
-    if (!res.ok) {
+    if (!res.ok || isSessionLost(res)) {
       setStatusReplyEnabled(!next);
       toast("Не удалось переключить ответы о статусе", "error");
       return;
@@ -175,7 +168,7 @@ export function useBotSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: next }),
     });
-    if (!res.ok) {
+    if (!res.ok || isSessionLost(res)) {
       setSubmitterNotify(!next);
       toast("Не удалось переключить ответы автору обращения", "error");
       return;
@@ -196,7 +189,7 @@ export function useBotSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: next }),
     });
-    if (!res.ok) {
+    if (!res.ok || isSessionLost(res)) {
       setAiAskEnabled(!next);
       toast("Не удалось переключить ИИ-запрос данных", "error");
       return;

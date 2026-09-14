@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
+import { fetchApiJson } from "@/lib/fetchApiJson";
 import {
   IconReport,
   IconInbox,
@@ -41,10 +42,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     async function loadCount() {
-      const res = await fetch("/api/telegram/messages?archived=false&count=true");
-      if (cancelled) return;
-      const data = await res.json();
-      setInboxCount(data.count ?? 0);
+      const result = await fetchApiJson<{ count?: number }>(
+        "/api/telegram/messages?archived=false&count=true"
+      );
+      // Не загрузилось — оставляем прежний счётчик, следующий опрос повторит.
+      if (cancelled || !result.ok) return;
+      setInboxCount(result.data.count ?? 0);
     }
     // В фоновой вкладке не опрашиваем; при возврате обновляемся сразу.
     function refreshIfVisible() {
@@ -53,14 +56,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
 
     loadCount();
-    fetch("/api/auth/me")
-      .then((res) => res.json())
-      .then((data) => {
-        if (cancelled) return;
-        setPlatformTool(Boolean(data.platformToolEnabled));
-        setLogsTool(Boolean(data.logsToolEnabled));
-      })
-      .catch(() => {});
+    fetchApiJson<{ platformToolEnabled?: boolean; logsToolEnabled?: boolean }>(
+      "/api/auth/me"
+    ).then((result) => {
+      if (cancelled || !result.ok) return;
+      setPlatformTool(Boolean(result.data.platformToolEnabled));
+      setLogsTool(Boolean(result.data.logsToolEnabled));
+    });
 
     const interval = setInterval(refreshIfVisible, 20000);
     document.addEventListener("visibilitychange", refreshIfVisible);

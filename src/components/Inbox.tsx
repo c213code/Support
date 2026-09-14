@@ -19,6 +19,7 @@ import { useToast } from "@/components/Toast";
 import { useHotkeys } from "@/lib/useHotkeys";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import { useBotSettings } from "@/lib/useBotSettings";
+import { fetchApiJson } from "@/lib/fetchApiJson";
 import type { IssueStatus } from "@/lib/status";
 import {
   formatDateHuman,
@@ -129,36 +130,25 @@ export function Inbox() {
   // карточки и думал, что новых обращений нет.
   const [sessionExpired, setSessionExpired] = useState(false);
 
-  // JSON ответа или null, если его нет. Причину сбоя пишем в консоль, а
-  // данные на экране не трогаем: следующий опрос попробует снова.
-  const getJson = useCallback(async (url: string) => {
-    try {
-      const res = await fetch(url);
-      if (res.redirected || res.status === 401) {
-        setSessionExpired(true);
-        return null;
-      }
-      if (!res.ok) {
-        console.warn(`[inbox] ${url} → ${res.status}`);
-        return null;
-      }
-      const data = await res.json();
-      setSessionExpired(false);
-      return data;
-    } catch (err) {
-      console.warn(`[inbox] ${url} не загрузился:`, err);
-      return null;
-    }
+  // Данные или null. При сбое данные на экране не трогаем: следующий опрос
+  // попробует снова (причину сбоя fetchApiJson уже написал в консоль).
+  const getJson = useCallback(async <T,>(url: string): Promise<T | null> => {
+    const result = await fetchApiJson<T>(url);
+    if (result.ok) setSessionExpired(false);
+    else if (result.reason === "session") setSessionExpired(true);
+    return result.ok ? result.data : null;
   }, []);
 
   const loadGroups = useCallback(async () => {
-    const data = await getJson("/api/groups");
+    const data = await getJson<{ groups?: GroupPresetDTO[] }>("/api/groups");
     if (data) setGroups(data.groups ?? []);
   }, [getJson]);
 
   const loadMessages = useCallback(
     async (d: string) => {
-      const data = await getJson(`/api/telegram/messages?archived=false&date=${d}`);
+      const data = await getJson<{ messages?: TelegramMessageDTO[] }>(
+        `/api/telegram/messages?archived=false&date=${d}`
+      );
       if (data) setMessagesByDate((prev) => ({ ...prev, [d]: data.messages ?? [] }));
     },
     [getJson]
@@ -166,7 +156,7 @@ export function Inbox() {
 
   const loadIssues = useCallback(
     async (d: string) => {
-      const data = await getJson(`/api/issues?date=${d}`);
+      const data = await getJson<{ issues?: IssueDTO[] }>(`/api/issues?date=${d}`);
       if (data) setIssuesByDate((prev) => ({ ...prev, [d]: data.issues ?? [] }));
     },
     [getJson]
@@ -851,7 +841,9 @@ export function Inbox() {
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-slate-900">Входящие</h1>
-        <div className="flex items-center gap-3">
+        {/* flex-wrap: на телефоне кнопки не помещаются в строку, и
+            переключатель «Сообщения / Доска» уезжал за край экрана. */}
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => setShowGlossary(true)}
