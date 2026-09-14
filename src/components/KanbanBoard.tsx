@@ -424,7 +424,10 @@ export function KanbanBoard({
                         ) : (
                           <p className="break-words">🔗 {issue.submission.lessonLink}</p>
                         )}
-                        <SubmissionPhoto issueId={issue.id} />
+                        <SubmissionPhoto
+                          issueId={issue.id}
+                          count={issue.submission.photoCount}
+                        />
                       </div>
                     )}
                     {onBotRepliesChanged && onBotReplyError && (

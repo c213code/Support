@@ -86,6 +86,7 @@ export async function GET(request: NextRequest) {
       rawText: true,
       studentContact: true,
       lessonLink: true,
+      photoFileIds: true,
     },
   });
   const submissionByIssue = new Map(submissions.map((s) => [s.issueId, s]));
@@ -120,6 +121,9 @@ export async function GET(request: NextRequest) {
               authorName: submission.authorName,
               studentContact: submission.studentContact,
               lessonLink: submission.lessonLink,
+              // У обращений, поданных до появления нескольких фото,
+              // photoFileIds пуст, а фото ровно одно (в photoFileId).
+              photoCount: submission.photoFileIds.length || 1,
             }
           : null,
       };

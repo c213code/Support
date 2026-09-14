@@ -81,7 +81,9 @@ export type SubmissionFields = {
   rawText: string;
   studentContact: string;
   lessonLink: string;
+  // photoFileId — первое фото, photoFileIds — все (их может быть до пяти).
   photoFileId: string;
+  photoFileIds: string[];
 };
 
 // regex (hasIdentifier) уже решил "просить почту/ссылку" или "не просить" —

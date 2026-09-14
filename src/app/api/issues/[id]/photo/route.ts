@@ -9,14 +9,17 @@ type Params = { params: Promise<{ id: string }> };
 // Сколько ждать файл от Telegram. Фото из формы сжаты до сотен КБ.
 const FILE_TIMEOUT_MS = 10_000;
 
-// Фото из обращения, поданного формой мини-аппа. Само фото лежит в Telegram
-// (у нас только file_id), и ссылка на него содержит токен бота — поэтому
-// байты качает сервер и отдаёт агенту, а не редиректит браузер в Telegram.
+// Фото из обращения, поданного формой мини-аппа. Их может быть несколько —
+// какое отдать, говорит ?i=N (нумерация с нуля, по умолчанию первое).
+//
+// Сами фото лежат в Telegram (у нас только file_id), и ссылка на них
+// содержит токен бота — поэтому байты качает сервер и отдаёт агенту, а не
+// редиректит браузер в Telegram.
 //
 // Каждый отказ пишем в лог с номером тикета: агент видит на карточке только
 // «фото не загрузилось», и понять причину можно лишь отсюда. Саму ссылку и
 // текст сетевой ошибки не логируем — в них может оказаться токен бота.
-export async function GET(_request: NextRequest, { params }: Params) {
+export async function GET(request: NextRequest, { params }: Params) {
   const identity = await getCurrentIdentity();
   if (!identity) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -25,10 +28,20 @@ export async function GET(_request: NextRequest, { params }: Params) {
   const { id } = await params;
   const submission = await prisma.issueSubmission.findUnique({
     where: { issueId: id },
-    select: { photoFileId: true },
+    select: { photoFileId: true, photoFileIds: true },
   });
   if (!submission) {
     return NextResponse.json({ error: "У тикета нет фото" }, { status: 404 });
+  }
+
+  // photoFileIds пуст у обращений, поданных до того, как фото стало
+  // несколько, — там всё лежит в photoFileId.
+  const fileIds =
+    submission.photoFileIds.length > 0 ? submission.photoFileIds : [submission.photoFileId];
+  const index = Number(request.nextUrl.searchParams.get("i") ?? "0");
+  const fileId = Number.isInteger(index) ? fileIds[index] : undefined;
+  if (!fileId) {
+    return NextResponse.json({ error: "Такого фото у тикета нет" }, { status: 404 });
   }
 
   const unavailable = () =>
@@ -36,9 +49,9 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
   // Причину отказа getFile (например, file_id от другого бота) уже написал
   // в лог callBotApi строкой [telegram] getFile.
-  const url = await getFileDownloadUrl(submission.photoFileId);
+  const url = await getFileDownloadUrl(fileId);
   if (!url) {
-    console.warn(`[photo] тикет ${id}: getFile не дал ссылку на файл`);
+    console.warn(`[photo] тикет ${id}: getFile не дал ссылку на файл ${index}`);
     return unavailable();
   }
 
@@ -46,7 +59,9 @@ export async function GET(_request: NextRequest, { params }: Params) {
   try {
     file = await fetch(url, { signal: AbortSignal.timeout(FILE_TIMEOUT_MS) });
   } catch (err) {
-    console.warn(`[photo] тикет ${id}: файл не скачался: ${err instanceof Error ? err.name : "ошибка"}`);
+    console.warn(
+      `[photo] тикет ${id}: файл ${index} не скачался: ${err instanceof Error ? err.name : "ошибка"}`
+    );
     return unavailable();
   }
   if (!file.ok || !file.body) {

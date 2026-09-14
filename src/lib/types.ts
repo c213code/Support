@@ -55,6 +55,9 @@ export type IssueDTO = {
     authorName: string;
     studentContact: string;
     lessonLink: string;
+    // Сколько фото приложил куратор — по одному их отдаёт
+    // GET /api/issues/[id]/photo?i=N.
+    photoCount: number;
   } | null;
 };
 

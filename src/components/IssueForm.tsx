@@ -39,6 +39,7 @@ export type IssueFormInitial = Partial<{
     authorName: string;
     studentContact: string;
     lessonLink: string;
+    photoCount: number;
   } | null;
 }>;
 
@@ -340,7 +341,10 @@ export function IssueForm({
             ) : (
               <p className="break-words">🔗 {initial.submission.lessonLink}</p>
             )}
-            <SubmissionPhoto issueId={initial.id} />
+            <SubmissionPhoto
+              issueId={initial.id}
+              count={initial.submission.photoCount}
+            />
           </div>
         )}
         {showSource && (

@@ -388,9 +388,14 @@ model IssueSubmission {
   rawText            String
   studentContact     String
   lessonLink         String
-  // Само фото хранит Telegram (закрытый канал TELEGRAM_STORAGE_CHAT_ID), у
-  // нас только file_id — агенту его отдаёт GET /api/issues/[id]/photo.
+  // Сами фото хранит Telegram (закрытый канал TELEGRAM_STORAGE_CHAT_ID), у
+  // нас только file_id — агенту их отдаёт GET /api/issues/[id]/photo?i=N.
+  //
+  // photoFileId — первое фото. Осталось от времён, когда фото было ровно
+  // одно: так миграция не переписывает уже поданные обращения, и старые
+  // заявки (у них photoFileIds пуст) продолжают открываться.
   photoFileId        String
+  photoFileIds       String[] @default([])
   // id отправки из формы: повтор той же отправки (ответ потерялся, куратор
   // нажал ещё раз) находит уже заведённый тикет, а не заводит второй.
   clientSubmissionId String?  @unique

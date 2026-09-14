@@ -81,23 +81,31 @@ const GROUP_HUE: Record<string, string> = {
 };
 
 // Черновик живёт на телефоне: закрыл форму случайно — текст на месте.
-// Фото в черновик не кладём (десятки-сотни КБ, localStorage не для этого).
+// Фото в черновик не кладём (сотни КБ каждое, localStorage не для этого).
 const DRAFT_KEY = "support-form-draft-v1";
 // Куратор обычно пишет в одну и ту же группу — подставляем её сразу.
 const LAST_GROUP_KEY = "support-form-last-group";
 
-// Потолок фото. Не 10 МБ Telegram, а меньше лимита Vercel на тело запроса
-// (4.5 МБ): больший файл платформа отбросит ещё до нашего маршрута. Сжатое
-// фото весит сотни КБ — лимит касается только оригинала, который браузер
-// не смог сжать. Тот же лимит проверяет сервер (POST /api/miniapp/submit).
-const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+// Сколько фото можно приложить. Больше пяти — это уже выгрузка галереи, а не
+// «покажи, что на экране».
+const MAX_PHOTOS = 5;
+// Потолок на ВСЕ фото вместе. Не 10 МБ Telegram, а меньше лимита Vercel на
+// тело запроса (4.5 МБ): больший запрос платформа отбросит ещё до нашего
+// маршрута. Сжатое фото весит сотни КБ — в лимит упрётся только тот, чьи
+// оригиналы браузер не смог сжать. Те же числа проверяет сервер.
+const MAX_PHOTOS_BYTES = 4 * 1024 * 1024;
 // Сколько ждать ответа сервера. Самый долгий путь там — ИИ-описание плюс
-// загрузка фото в Telegram (до 20 с); минута — с большим запасом.
+// загрузка фото в Telegram; минута — с запасом даже на пять штук.
 const SUBMIT_TIMEOUT_MS = 60_000;
 // Сколько ждать скрипт Telegram, прежде чем признать, что он не загрузился.
 const SCRIPT_TIMEOUT_MS = 10_000;
 
 const PHOTO_TOO_BIG = "Фото тым үлкен — экранның скриншотын жасап, соны тіркеңіз";
+const PHOTOS_TOO_BIG = "Фотолардың жалпы көлемі тым үлкен — біреуін өшіріңіз";
+const TOO_MANY_PHOTOS = `${MAX_PHOTOS} суретке дейін тіркеуге болады`;
+const PHOTO_UNREADABLE = "Бұл фотоны ашу мүмкін болмады — скриншот жасаңыз немесе басқасын таңдаңыз";
+
+type Photo = { blob: Blob; url: string };
 
 type Draft = {
   groupName: string;
@@ -138,7 +146,7 @@ function writeStorage(key: string, value: string | null) {
 // — сотни килобайт, и текст ошибки на нём остаётся читаемым. JPEG, а не
 // WebP: sendPhoto в Telegram гарантированно принимает JPEG. Любой сбой —
 // исключение, а не тихая подмена: решение о запасном пути принимает
-// pickPhoto.
+// pickPhotos.
 async function compressImage(file: File): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
@@ -191,11 +199,12 @@ function lessonKind(value: string): "empty" | "url" | "week" | "text" {
   return "text";
 }
 
-// Картинка из буфера обмена, если она там есть.
-function imageFromClipboard(event: ClipboardEvent): File | null {
-  const items = Array.from(event.clipboardData?.items ?? []);
-  const item = items.find((i) => i.kind === "file" && i.type.startsWith("image/"));
-  return item?.getAsFile() ?? null;
+// Картинки из буфера обмена, если они там есть.
+function imagesFromClipboard(event: ClipboardEvent): File[] {
+  return Array.from(event.clipboardData?.items ?? [])
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
 }
 
 const FIELD_IDS = {
@@ -246,8 +255,7 @@ export function SubmissionForm() {
   const [description, setDescription] = useState("");
   const [studentContact, setStudentContact] = useState("");
   const [lessonLink, setLessonLink] = useState("");
-  const [photo, setPhoto] = useState<Blob | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<Photo[]>([]);
   const [compressing, setCompressing] = useState(false);
   const [submissionId, setSubmissionId] = useState(newSubmissionId);
 
@@ -258,15 +266,17 @@ export function SubmissionForm() {
   const [showErrors, setShowErrors] = useState(false);
   const [sent, setSent] = useState<{ groupName: string; description: string } | null>(null);
 
-  // Свежие версии обработчиков для подписок, которые живут дольше одного
-  // рендера (MainButton, вставка из буфера), — иначе они звали бы функцию
-  // со старым состоянием формы.
+  // Свежие версии обработчиков и данных для подписок, которые живут дольше
+  // одного рендера (MainButton, вставка из буфера, уборка ссылок на фото).
   const submitRef = useRef<() => void>(() => {});
-  const pickPhotoRef = useRef<(file: File) => void>(() => {});
+  const pickPhotosRef = useRef<(files: File[]) => void>(() => {});
+  const photosRef = useRef<Photo[]>([]);
   // Синхронный замок отправки. sending из состояния не годится: нажатия
   // MainButton приходят событиями Telegram, React не успевает перерисовать
   // между двумя быстрыми тапами, и без замка ушли бы два запроса.
   const inFlightRef = useRef(false);
+
+  const totalBytes = photos.reduce((sum, photo) => sum + photo.blob.size, 0);
 
   function onTelegramReady() {
     const app = window.Telegram?.WebApp;
@@ -327,7 +337,7 @@ export function SubmissionForm() {
     writeStorage(DRAFT_KEY, empty ? null : JSON.stringify(draft));
   }, [restored, sent, groupName, description, studentContact, lessonLink, submissionId]);
 
-  const dirty = Boolean(description || studentContact || lessonLink || photo);
+  const dirty = Boolean(description || studentContact || lessonLink || photos.length);
 
   // Закрыть начатую форму — спросить. Текст переживёт закрытие в черновике,
   // фото — нет; различать это в одном системном вопросе Telegram нельзя,
@@ -367,13 +377,13 @@ export function SubmissionForm() {
 
   // Скриншот из буфера обмена: Ctrl+V / ⌘V где угодно на форме (компьютер)
   // или «Қою» в зоне вставки (телефон). Если в буфере ещё и текст — его
-  // вставку в поле не трогаем, забираем только картинку.
+  // вставку в поле не трогаем, забираем только картинки.
   useEffect(() => {
     function onPaste(event: ClipboardEvent) {
-      const file = imageFromClipboard(event);
-      if (!file) return;
+      const files = imagesFromClipboard(event);
+      if (files.length === 0) return;
       if (!event.clipboardData?.types.includes("text/plain")) event.preventDefault();
-      pickPhotoRef.current(file);
+      pickPhotosRef.current(files);
     }
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
@@ -381,48 +391,76 @@ export function SubmissionForm() {
 
   useEffect(() => {
     submitRef.current = submit;
-    pickPhotoRef.current = pickPhoto;
+    pickPhotosRef.current = pickPhotos;
+    photosRef.current = photos;
   });
 
+  // Ссылки на выбранные фото живут, пока открыта форма; отпускаем их при
+  // закрытии, чтобы не держать картинки в памяти телефона.
   useEffect(() => {
-    return () => {
-      if (photoPreview) URL.revokeObjectURL(photoPreview);
-    };
-  }, [photoPreview]);
+    return () => photosRef.current.forEach((photo) => URL.revokeObjectURL(photo.url));
+  }, []);
 
-  async function pickPhoto(file: File | undefined) {
-    if (!file || sent) return;
+  async function pickPhotos(files: File[]) {
+    if (files.length === 0 || sent) return;
     setError(null);
     setCompressing(true);
-    // Не каждый браузер умеет открыть любой формат (HEIC на Android, например)
-    // — тогда пробуем отправить оригинал, если он в лимите. Telegram может
-    // его не принять (тот же HEIC) — тогда сервер попросит скриншот.
-    let chosen: Blob | null = null;
-    try {
-      chosen = await compressImage(file);
-    } catch (err) {
-      // Причина — для отладки в WebView, если куратор пожалуется.
-      console.warn("[miniapp] фото не сжалось, пробую оригинал:", err);
-      if (file.type.startsWith("image/") && file.size <= MAX_PHOTO_BYTES) chosen = file;
+
+    const added: Photo[] = [];
+    let rejected: string | null = null;
+    let bytes = totalBytes;
+    for (const file of files) {
+      if (photos.length + added.length >= MAX_PHOTOS) {
+        rejected = TOO_MANY_PHOTOS;
+        break;
+      }
+      // Не каждый браузер умеет открыть любой формат (HEIC на Android,
+      // например) — тогда пробуем отправить оригинал, если он в лимите.
+      // Telegram может его не принять (тот же HEIC) — тогда сервер попросит
+      // скриншот.
+      let chosen: Blob | null = null;
+      try {
+        chosen = await compressImage(file);
+      } catch (err) {
+        // Причина — для отладки в WebView, если куратор пожалуется.
+        console.warn("[miniapp] фото не сжалось, пробую оригинал:", err);
+        if (file.type.startsWith("image/") && file.size <= MAX_PHOTOS_BYTES) chosen = file;
+      }
+      if (!chosen) {
+        rejected = file.size > MAX_PHOTOS_BYTES ? PHOTO_TOO_BIG : PHOTO_UNREADABLE;
+        continue;
+      }
+      if (bytes + chosen.size > MAX_PHOTOS_BYTES) {
+        rejected = PHOTOS_TOO_BIG;
+        continue;
+      }
+      bytes += chosen.size;
+      added.push({ blob: chosen, url: URL.createObjectURL(chosen) });
     }
-    if (chosen) {
-      setPhoto(chosen);
-      setPhotoPreview(URL.createObjectURL(chosen));
+
+    if (added.length > 0) {
+      setPhotos((prev) => [...prev, ...added]);
       haptic("tap");
-    } else {
-      setError(
-        file.size > MAX_PHOTO_BYTES
-          ? PHOTO_TOO_BIG
-          : "Бұл фотоны ашу мүмкін болмады — скриншот жасаңыз немесе басқа фото таңдаңыз"
-      );
+    }
+    if (rejected) {
+      setError(rejected);
       haptic("error");
     }
     setCompressing(false);
   }
 
-  function removePhoto() {
-    setPhoto(null);
-    setPhotoPreview(null);
+  function removePhoto(index: number) {
+    setPhotos((prev) => {
+      const photo = prev[index];
+      if (photo) URL.revokeObjectURL(photo.url);
+      return prev.filter((_, i) => i !== index);
+    });
+    setError(null);
+  }
+
+  function clearPhotos() {
+    photos.forEach((photo) => URL.revokeObjectURL(photo.url));
+    setPhotos([]);
   }
 
   const missing: Field[] = [
@@ -430,7 +468,7 @@ export function SubmissionForm() {
     ...(!description.trim() ? (["description"] as const) : []),
     ...(!studentContact.trim() ? (["contact"] as const) : []),
     ...(!lessonLink.trim() ? (["link"] as const) : []),
-    ...(!photo ? (["photo"] as const) : []),
+    ...(photos.length === 0 ? (["photo"] as const) : []),
   ];
   const isMissing = (field: Field) => showErrors && missing.includes(field);
 
@@ -445,7 +483,6 @@ export function SubmissionForm() {
         ?.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
       return;
     }
-    if (!photo) return;
 
     inFlightRef.current = true;
     setSending(true);
@@ -458,7 +495,7 @@ export function SubmissionForm() {
       form.append("description", description);
       form.append("studentContact", studentContact);
       form.append("lessonLink", lessonLink);
-      form.append("photo", photo, "photo.jpg");
+      photos.forEach((photo, index) => form.append("photo", photo.blob, `photo-${index + 1}.jpg`));
       const res = await fetch("/api/miniapp/submit", {
         method: "POST",
         body: form,
@@ -470,7 +507,7 @@ export function SubmissionForm() {
       const data = await res.json().catch(() => null);
       // 413 может прийти и от самой платформы (Vercel) — уже не нашим JSON.
       if (res.status === 413) {
-        setError(PHOTO_TOO_BIG);
+        setError(data?.error ?? PHOTOS_TOO_BIG);
         haptic("error");
         return;
       }
@@ -506,7 +543,7 @@ export function SubmissionForm() {
     setDescription("");
     setStudentContact("");
     setLessonLink("");
-    removePhoto();
+    clearPhotos();
     setSubmissionId(newSubmissionId());
     setShowErrors(false);
     setError(null);
@@ -525,6 +562,23 @@ export function SubmissionForm() {
       onReady={onTelegramReady}
       onError={() => setEnv("script-failed")}
     />
+  );
+
+  const photoInput = (label: string) => (
+    <label className={styles.photoPick}>
+      <input
+        type="file"
+        accept="image/*"
+        multiple
+        className="sr-only"
+        onChange={(e) => {
+          pickPhotos(Array.from(e.target.files ?? []));
+          e.target.value = "";
+        }}
+      />
+      <CameraIcon />
+      {compressing ? "Фото сығылуда…" : label}
+    </label>
   );
 
   if (sent) {
@@ -734,73 +788,54 @@ export function SubmissionForm() {
       <section className={styles.section} id={FIELD_IDS.photo}>
         <span className={styles.sectionHeader}>Скриншот</span>
         <div className={styles.list}>
-          {photo && photoPreview ? (
-            <div className={styles.photoFilled}>
-              {/* Локальный blob: из выбранного файла — next/image тут не к месту. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={photoPreview} alt="Тіркелген скриншот" className={styles.thumb} />
-              <div className={styles.photoMeta}>
-                Скриншот тіркелді
-                <div className={styles.photoSize}>{formatSize(photo.size)}</div>
-              </div>
-              <div className={styles.photoActions}>
-                <label className={styles.textButton}>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    onChange={(e) => {
-                      pickPhoto(e.target.files?.[0]);
-                      e.target.value = "";
-                    }}
+          {photos.length > 0 && (
+            <div className={styles.photoGrid}>
+              {photos.map((photo, index) => (
+                <div key={photo.url} className={styles.photoItem}>
+                  {/* Локальный blob: из выбранного файла — next/image тут не
+                      к месту. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={photo.url}
+                    alt={`Тіркелген скриншот ${index + 1}`}
+                    className={styles.photoThumb}
                   />
-                  Ауыстыру
-                </label>
-                <button
-                  type="button"
-                  className={`${styles.textButton} ${styles.textButtonDestructive}`}
-                  onClick={removePhoto}
-                >
-                  Өшіру
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    className={styles.photoRemove}
+                    onClick={() => removePhoto(index)}
+                    aria-label={`${index + 1}-суретті өшіру`}
+                    title="Өшіру"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
             </div>
-          ) : (
-            <>
-              <label className={styles.photoPick}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={(e) => {
-                    pickPhoto(e.target.files?.[0]);
-                    e.target.value = "";
-                  }}
-                />
-                <CameraIcon />
-                {compressing ? "Фото сығылуда…" : "Скриншот тіркеу"}
-              </label>
-              {/* Вставку ловит общий обработчик paste выше; здесь — только
-                  место, где телефон покажет «Қою» по долгому нажатию. */}
-              <div
-                className={styles.pasteZone}
-                contentEditable
-                suppressContentEditableWarning
-                role="textbox"
-                aria-label="Көшірілген скриншотты осында қойыңыз"
-                inputMode="none"
-                data-placeholder="Көшірілген скриншотты осында қойыңыз: басып тұрып → «Қою»"
-                onInput={(e) => {
-                  e.currentTarget.textContent = "";
-                }}
-              />
-            </>
           )}
+          {photos.length < MAX_PHOTOS &&
+            photoInput(photos.length === 0 ? "Скриншот тіркеу" : "Тағы скриншот қосу")}
+          {/* Вставку ловит общий обработчик paste выше; здесь — только
+              место, где телефон покажет «Қою» по долгому нажатию. */}
+          <div
+            className={styles.pasteZone}
+            contentEditable
+            suppressContentEditableWarning
+            role="textbox"
+            aria-label="Көшірілген скриншотты осында қойыңыз"
+            inputMode="none"
+            data-placeholder="Көшірілген скриншотты осында қойыңыз: басып тұрып → «Қою»"
+            onInput={(e) => {
+              e.currentTarget.textContent = "";
+            }}
+          />
         </div>
         <p className={`${styles.footer} ${isMissing("photo") ? styles.footerError : ""}`}>
           {isMissing("photo")
             ? "Қатенің скриншотын тіркеңіз"
-            : "Телефонда сығылады — жіберу бірнеше секунд алады"}
+            : photos.length > 0
+              ? `${photos.length} сурет · ${formatSize(totalBytes)} · ${MAX_PHOTOS} суретке дейін`
+              : "Телефонда сығылады — бірнеше сурет тіркеуге болады"}
         </p>
       </section>
 

@@ -8,11 +8,15 @@ import { insertSentIssue } from "@/lib/webhook/acknowledge";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
 import { uploadPhoto } from "@/lib/telegram";
 
-// Потолок фото — не 10 МБ Telegram, а меньше лимита Vercel на тело запроса
-// (4.5 МБ): больший запрос платформа отбросит ещё до этого маршрута своим
-// 413. Сжатое на телефоне фото весит сотни КБ; лимит касается только
-// оригинала, который браузер не смог сжать. Тот же лимит — в форме.
-const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+// Сколько фото можно приложить к одному обращению. Больше пяти — это уже не
+// «покажи, что на экране», а выгрузка галереи, и в лимит запроса она не
+// влезет.
+const MAX_PHOTOS = 5;
+// Потолок на ВСЕ фото вместе — не 10 МБ Telegram, а меньше лимита Vercel на
+// тело запроса (4.5 МБ): больший запрос платформа отбросит ещё до этого
+// маршрута своим 413. Сжатые на телефоне фото весят сотни КБ, так что пять
+// штук укладываются с запасом; лимит бьёт только по несжатым оригиналам.
+const MAX_PHOTOS_BYTES = 4 * 1024 * 1024;
 // Проверка по Content-Length отсекает честно объявленный большой запрос до
 // чтения формы. Без заголовка (chunked) тело всё равно прочитается — от этого
 // на Vercel спасает лимит платформы, а не этот код.
@@ -29,6 +33,7 @@ const ATTEMPT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const T = {
   disabled: "Форма әзірге өшірулі",
   photoTooBig: "Фото тым үлкен — экранның скриншотын жасап, соны тіркеңіз",
+  tooManyPhotos: `Фото тым көп — ${MAX_PHOTOS} суретке дейін тіркеуге болады`,
   unreadable: "Форманы оқу мүмкін болмады",
   expired: "Форма бір тәуліктен бұрын ашылған — оны жауып, боттан қайта ашыңыз",
   reopen: "Форманы боттан қайта ашыңыз",
@@ -119,15 +124,18 @@ export async function POST(request: NextRequest) {
   const description = field(form, "description", 4000);
   const studentContact = field(form, "studentContact", 200);
   const lessonLink = field(form, "lessonLink", 500);
-  const photo = form.get("photo");
+  const photos = form.getAll("photo").filter((p): p is File => p instanceof File && p.size > 0);
 
   if (!group) return reply(400, T.noGroup);
   if (!description) return reply(400, T.noDescription);
   if (!studentContact) return reply(400, T.noContact);
   if (!lessonLink) return reply(400, T.noLink);
-  if (!(photo instanceof File) || photo.size === 0) return reply(400, T.noPhoto);
-  if (!photo.type.startsWith("image/")) return reply(400, T.notImage);
-  if (photo.size > MAX_PHOTO_BYTES) return reply(413, T.photoTooBig);
+  if (photos.length === 0) return reply(400, T.noPhoto);
+  if (photos.length > MAX_PHOTOS) return reply(400, T.tooManyPhotos);
+  if (photos.some((photo) => !photo.type.startsWith("image/"))) return reply(400, T.notImage);
+  if (photos.reduce((sum, photo) => sum + photo.size, 0) > MAX_PHOTOS_BYTES) {
+    return reply(413, T.photoTooBig);
+  }
 
   // Порядок: описание → фото → тикет. Описание первым: обращение-мусор не
   // должно оставлять фото в служебном канале. own и contextual совпадают —
@@ -145,24 +153,28 @@ export async function POST(request: NextRequest) {
     cleaned = cleanTicketDescription(description);
   }
 
-  // Фото до тикета: если Telegram его не принял, тикета без обязательного
-  // вложения быть не должно.
+  // Фото до тикета: если Telegram хоть одно не принял, тикета без полного
+  // набора вложений быть не должно — куратор повторит отправку целиком.
   const storageChatId = process.env.TELEGRAM_STORAGE_CHAT_ID!;
-  const upload = await uploadPhoto(
-    storageChatId,
-    photo,
-    `${user.name} · ${group.name}\n${description.slice(0, 200)}`
-  );
-  if (!upload.ok) {
-    if (upload.kind === "config") {
-      // Форма мертва для всех, пока это не исправят, — ошибка, а не
-      // предупреждение, и с тем, что именно проверить.
-      console.error(
-        `[miniapp] TELEGRAM_STORAGE_CHAT_ID=${storageChatId} не годится (${upload.description}) — проверьте, что бот админ канала с правом публиковать`
-      );
-      return reply(503, T.misconfigured);
+  const photoFileIds: string[] = [];
+  for (const [index, photo] of photos.entries()) {
+    const caption =
+      index === 0
+        ? `${user.name} · ${group.name}\n${description.slice(0, 200)}`
+        : `${user.name} · ${group.name} · фото ${index + 1}`;
+    const upload = await uploadPhoto(storageChatId, photo, caption);
+    if (!upload.ok) {
+      if (upload.kind === "config") {
+        // Форма мертва для всех, пока это не исправят, — ошибка, а не
+        // предупреждение, и с тем, что именно проверить.
+        console.error(
+          `[miniapp] TELEGRAM_STORAGE_CHAT_ID=${storageChatId} не годится (${upload.description}) — проверьте, что бот админ канала с правом публиковать`
+        );
+        return reply(503, T.misconfigured);
+      }
+      return reply(502, upload.kind === "photo" ? T.photoRejected : T.photoNetwork);
     }
-    return reply(502, upload.kind === "photo" ? T.photoRejected : T.photoNetwork);
+    photoFileIds.push(upload.fileId);
   }
 
   const preset = await prisma.groupPreset.findUnique({
@@ -178,7 +190,8 @@ export async function POST(request: NextRequest) {
       rawText: description,
       studentContact,
       lessonLink,
-      photoFileId: upload.fileId,
+      photoFileId: photoFileIds[0],
+      photoFileIds,
     });
     return NextResponse.json({ ok: true, issueId: issue.id });
   } catch (err) {
@@ -189,7 +202,7 @@ export async function POST(request: NextRequest) {
       if (existing) return NextResponse.json({ ok: true, issueId: existing, repeated: true });
     }
     // Тикет и заявка пишутся одним запросом — полутикета на доске нет. Фото
-    // в служебном канале останется, это не страшно.
+    // в служебном канале останутся, это не страшно.
     const code = typeof err === "object" && err !== null && "code" in err ? String(err.code) : "";
     console.error(`[miniapp] обращение не записалось (${code}): ${String(err).slice(0, 300)}`);
     return reply(500, T.saveFailed);
