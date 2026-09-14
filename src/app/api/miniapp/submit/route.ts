@@ -6,7 +6,7 @@ import { buildDescription } from "@/lib/ticketDescription";
 import { cleanTicketDescription, isNoiseOnly } from "@/lib/textClean";
 import { insertSentIssue } from "@/lib/webhook/acknowledge";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
-import { uploadPhoto } from "@/lib/telegram";
+import { uploadPhotos } from "@/lib/telegram";
 
 // Сколько фото можно приложить к одному обращению. Больше пяти — это уже не
 // «покажи, что на экране», а выгрузка галереи, и в лимит запроса она не
@@ -153,29 +153,27 @@ export async function POST(request: NextRequest) {
     cleaned = cleanTicketDescription(description);
   }
 
-  // Фото до тикета: если Telegram хоть одно не принял, тикета без полного
-  // набора вложений быть не должно — куратор повторит отправку целиком.
+  // Фото до тикета: если Telegram их не принял, тикета без вложений быть не
+  // должно — куратор повторит отправку целиком. Все фото уходят одним
+  // альбомом, поэтому в служебном канале это одно сообщение с подписью.
   const storageChatId = process.env.TELEGRAM_STORAGE_CHAT_ID!;
-  const photoFileIds: string[] = [];
-  for (const [index, photo] of photos.entries()) {
-    const caption =
-      index === 0
-        ? `${user.name} · ${group.name}\n${description.slice(0, 200)}`
-        : `${user.name} · ${group.name} · фото ${index + 1}`;
-    const upload = await uploadPhoto(storageChatId, photo, caption);
-    if (!upload.ok) {
-      if (upload.kind === "config") {
-        // Форма мертва для всех, пока это не исправят, — ошибка, а не
-        // предупреждение, и с тем, что именно проверить.
-        console.error(
-          `[miniapp] TELEGRAM_STORAGE_CHAT_ID=${storageChatId} не годится (${upload.description}) — проверьте, что бот админ канала с правом публиковать`
-        );
-        return reply(503, T.misconfigured);
-      }
-      return reply(502, upload.kind === "photo" ? T.photoRejected : T.photoNetwork);
+  const upload = await uploadPhotos(
+    storageChatId,
+    photos,
+    `${user.name} · ${group.name}\n${description.slice(0, 200)}`
+  );
+  if (!upload.ok) {
+    if (upload.kind === "config") {
+      // Форма мертва для всех, пока это не исправят, — ошибка, а не
+      // предупреждение, и с тем, что именно проверить.
+      console.error(
+        `[miniapp] TELEGRAM_STORAGE_CHAT_ID=${storageChatId} не годится (${upload.description}) — проверьте, что бот админ канала с правом публиковать`
+      );
+      return reply(503, T.misconfigured);
     }
-    photoFileIds.push(upload.fileId);
+    return reply(502, upload.kind === "photo" ? T.photoRejected : T.photoNetwork);
   }
+  const photoFileIds = upload.fileIds;
 
   const preset = await prisma.groupPreset.findUnique({
     where: { name: group.name },

@@ -292,32 +292,67 @@ const BOT_UPLOAD_TIMEOUT_MS = 20000;
 // разделения неверный TELEGRAM_STORAGE_CHAT_ID выглядел для куратора как
 // "плохое фото", а для команды — как тишина.
 export type PhotoUpload =
-  | { ok: true; fileId: string }
+  | { ok: true; fileIds: string[] }
   | { ok: false; kind: "config" | "photo" | "network"; description: string };
+
+type SentPhoto = { photo?: Array<{ file_id?: string }> };
+
+// Telegram отдаёт несколько размеров одного фото — нужен самый крупный.
+function largestFileId(message: SentPhoto): string | undefined {
+  const sizes = message.photo ?? [];
+  return sizes[sizes.length - 1]?.file_id;
+}
 
 // Ошибки, которые значат "бот не может писать в этот чат", а не "плохое фото".
 const CHAT_CONFIG_ERROR = /chat not found|not enough rights|not a member|CHAT_WRITE_FORBIDDEN|bot was kicked/i;
 
-// Кладёт фото в чат (для формы мини-аппа — в закрытый служебный канал) и
-// возвращает file_id самой крупной версии: по нему фото потом достаётся через
+// Кладёт фото обращения в чат (для формы мини-аппа — в закрытый служебный
+// канал) и возвращает file_id каждого: по ним фото потом достаются через
 // getFile, сами байты у нас не хранятся.
-export async function uploadPhoto(
+//
+// Несколько фото уходят ОДНИМ альбомом (sendMediaGroup) — в канале это одно
+// сообщение с одной подписью, а не пять подряд с «фото 2», «фото 3».
+// Альбом Telegram принимает от двух фото, поэтому одно отправляется обычным
+// sendPhoto.
+export async function uploadPhotos(
   chatId: string,
-  photo: Blob,
+  photos: Blob[],
   caption?: string
 ): Promise<PhotoUpload> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return { ok: false, kind: "config", description: "TELEGRAM_BOT_TOKEN не задан" };
+  if (photos.length === 0) return { ok: false, kind: "photo", description: "нет фото" };
 
+  const single = photos.length === 1;
+  const method = single ? "sendPhoto" : "sendMediaGroup";
   const form = new FormData();
   form.append("chat_id", chatId);
-  form.append("photo", photo, "photo.jpg");
-  if (caption) form.append("caption", caption.slice(0, 1024));
+  if (single) {
+    form.append("photo", photos[0], "photo.jpg");
+    if (caption) form.append("caption", caption.slice(0, 1024));
+  } else {
+    // У альбома подпись одна — на первом фото; Telegram показывает её под
+    // всей группой. Сами файлы прикладываются отдельными частями и
+    // связываются с описанием через attach://.
+    form.append(
+      "media",
+      JSON.stringify(
+        photos.map((_, index) => ({
+          type: "photo",
+          media: `attach://photo${index}`,
+          ...(index === 0 && caption ? { caption: caption.slice(0, 1024) } : {}),
+        }))
+      )
+    );
+    photos.forEach((photo, index) =>
+      form.append(`photo${index}`, photo, `photo-${index + 1}.jpg`)
+    );
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BOT_UPLOAD_TIMEOUT_MS);
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
       method: "POST",
       body: form,
       signal: controller.signal,
@@ -325,29 +360,35 @@ export async function uploadPhoto(
     const data = (await res.json().catch(() => null)) as {
       ok?: boolean;
       description?: string;
-      result?: { photo?: Array<{ file_id?: string }> };
+      result?: SentPhoto | SentPhoto[];
     } | null;
     if (!res.ok || !data?.ok) {
       // description у Telegram без секретов ("chat not found", "not enough
       // rights") — ровно то, что нужно, чтобы понять, почему форма не работает.
       const description = `${res.status}: ${data?.description ?? ""}`;
-      console.warn(`[telegram] sendPhoto ${description}`);
+      console.warn(`[telegram] ${method} ${description}`);
       const config =
         res.status === 401 || res.status === 403 || CHAT_CONFIG_ERROR.test(data?.description ?? "");
       return { ok: false, kind: config ? "config" : "photo", description };
     }
-    const sizes = data.result?.photo ?? [];
-    const fileId = sizes[sizes.length - 1]?.file_id;
-    if (!fileId) {
-      console.error("[telegram] sendPhoto ответил ok, но без photo[] — file_id взять неоткуда");
-      return { ok: false, kind: "photo", description: "ответ без photo[]" };
+    const sent = Array.isArray(data.result) ? data.result : data.result ? [data.result] : [];
+    const fileIds = sent
+      .map(largestFileId)
+      .filter((fileId): fileId is string => Boolean(fileId));
+    if (fileIds.length !== photos.length) {
+      // Частичный ответ хуже отказа: часть фото осталась бы без file_id, и
+      // агент открыл бы обращение с дырой вместо скриншота.
+      console.error(
+        `[telegram] ${method} ответил ok, но file_id пришло ${fileIds.length} из ${photos.length}`
+      );
+      return { ok: false, kind: "photo", description: "ответ без file_id" };
     }
-    return { ok: true, fileId };
+    return { ok: true, fileIds };
   } catch (err) {
     // Только имя ошибки: в причине сетевой ошибки fetch может оказаться URL,
     // а в нём — токен бота.
     const name = err instanceof Error ? err.name : "ошибка";
-    console.warn(`[telegram] sendPhoto не выполнен: ${name}`);
+    console.warn(`[telegram] ${method} не выполнен: ${name}`);
     return { ok: false, kind: "network", description: name };
   } finally {
     clearTimeout(timeout);
