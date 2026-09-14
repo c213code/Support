@@ -27,6 +27,7 @@ export function useBotSettings() {
   const [statusReplyEnabled, setStatusReplyEnabled] = useState<boolean | null>(
     null
   );
+  const [submitterNotify, setSubmitterNotify] = useState<boolean | null>(null);
 
   useEffect(() => {
     fetch("/api/settings/ai-cleaning")
@@ -47,6 +48,9 @@ export function useBotSettings() {
     fetch("/api/settings/status-reply")
       .then((res) => res.json())
       .then((data) => setStatusReplyEnabled(Boolean(data.enabled)));
+    fetch("/api/settings/submitter-notify")
+      .then((res) => res.json())
+      .then((data) => setSubmitterNotify(Boolean(data.enabled)));
   }, []);
 
   async function toggleAiCleaning() {
@@ -163,6 +167,27 @@ export function useBotSettings() {
     );
   }
 
+  async function toggleSubmitterNotify() {
+    const next = !submitterNotify;
+    setSubmitterNotify(next);
+    const res = await fetch("/api/settings/submitter-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok) {
+      setSubmitterNotify(!next);
+      toast("Не удалось переключить ответы автору обращения", "error");
+      return;
+    }
+    toast(
+      next
+        ? "Автор обращения из формы узнает о смене статуса"
+        : "Автору обращения из формы бот больше не пишет",
+      next ? "success" : "info"
+    );
+  }
+
   async function toggleAiAsk() {
     const next = !aiAskEnabled;
     setAiAskEnabled(next);
@@ -189,11 +214,13 @@ export function useBotSettings() {
     aiAskEnabled,
     autoReplyConfirm,
     statusReplyEnabled,
+    submitterNotify,
     toggleAiCleaning,
     toggleAutoReply,
     toggleChatIntent,
     toggleAiAsk,
     toggleAutoReplyConfirm,
     toggleStatusReply,
+    toggleSubmitterNotify,
   };
 }

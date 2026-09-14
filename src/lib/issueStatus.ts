@@ -8,6 +8,7 @@ import {
 } from "@/lib/autoReply";
 import { summarizeIssueTopic } from "@/lib/ai";
 import { isStatusReplyEnabled } from "@/lib/settings";
+import { notifySubmitter } from "@/lib/submitterNotify";
 import {
   deleteBotReply,
   editBotReply,
@@ -236,6 +237,10 @@ export async function changeIssueStatus(params: {
     source,
     issueId
   );
+
+  // Обращение из формы мини-аппа: в группе по нему сообщения нет, поэтому
+  // reactToStatusChange выше промолчал — автору пишем в личку.
+  await notifySubmitter(issueId, status, params.note);
 
   return { ok: true, previous: existing.status, changed: true };
 }

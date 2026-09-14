@@ -72,6 +72,25 @@ export async function setStatusReplyEnabled(enabled: boolean): Promise<void> {
   });
 }
 
+// Ответ автору обращения из мини-аппа в личку при смене статуса. Включено по
+// умолчанию: у таких тикетов нет сообщения в группе, и без этого куратор не
+// узнаёт о своей заявке ничего (см. src/lib/submitterNotify.ts).
+export async function isSubmitterNotifyEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { submitterNotify: true },
+  });
+  return row?.submitterNotify ?? true;
+}
+
+export async function setSubmitterNotifyEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { submitterNotify: enabled },
+    create: { id: SETTINGS_ID, submitterNotify: enabled },
+  });
+}
+
 export async function setAutoReplyEnabled(enabled: boolean): Promise<void> {
   await prisma.appSetting.upsert({
     where: { id: SETTINGS_ID },

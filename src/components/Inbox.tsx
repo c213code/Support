@@ -845,6 +845,14 @@ export function Inbox() {
                 note: bot.autoReplyEnabled ? null : "Не действует: автоответы выключены",
               },
               {
+                key: "submitternotify",
+                label: "📨 Отвечать автору формы",
+                hint: "Куратор, подавший обращение через мини-апп, узнаёт в личке о смене статуса — в группе такого тикета нет",
+                enabled: bot.submitterNotify,
+                onToggle: bot.toggleSubmitterNotify,
+                color: "bg-teal-600",
+              },
+              {
                 key: "chatintent",
                 label: "👂 Читать мои ответы",
                 hint: "Статус ставится сам по твоей реплике в группе",
