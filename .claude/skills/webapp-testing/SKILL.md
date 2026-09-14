@@ -54,13 +54,15 @@ To create an automation script, include only Playwright logic (servers are manag
 from playwright.sync_api import sync_playwright
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True) # Always launch chromium in headless mode
+    browser = p.chromium.launch(channel="chrome", headless=True) # Always launch chromium in headless mode
     page = browser.new_page()
     page.goto('http://localhost:5173') # Server already running and ready
     page.wait_for_load_state('networkidle') # CRITICAL: Wait for JS to execute
     # ... your automation logic
     browser.close()
 ```
+
+**Support project:** Chromium from Playwright is not downloaded here — always launch the installed Google Chrome with `channel="chrome"`. For the Telegram Mini App use the `miniapp-ui-test` skill instead (it stubs `window.Telegram.WebApp`).
 
 ## Reconnaissance-Then-Action Pattern
 

@@ -7,7 +7,7 @@ html_file_path = os.path.abspath('path/to/your/file.html')
 file_url = f'file://{html_file_path}'
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
+    browser = p.chromium.launch(channel="chrome", headless=True)
     page = browser.new_page(viewport={'width': 1920, 'height': 1080})
 
     # Navigate to local HTML file

@@ -7,7 +7,7 @@ url = 'http://localhost:5173'  # Replace with your URL
 console_logs = []
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
+    browser = p.chromium.launch(channel="chrome", headless=True)
     page = browser.new_page(viewport={'width': 1920, 'height': 1080})
 
     # Set up console log capture
