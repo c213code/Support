@@ -1,73 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import Script from "next/script";
 import { OFFICIAL_GROUPS } from "@/lib/groups";
+import { currentInitData, haptic, telegramApp, type MiniAppEnv } from "@/lib/miniappClient";
 import styles from "./SubmissionForm.module.css";
 
 // Интерфейс формы — на казахском: кураторы, для которых она сделана, пишут
 // по-казахски. Комментарии в коде — по-русски, как во всём проекте.
-
-// Минимум Telegram WebApp API, которым пользуется форма
-// (core.telegram.org/bots/webapps). Версии — в isVersionAtLeast ниже:
-// старые клиенты Telegram части методов не знают.
-type BottomButton = {
-  setParams: (params: { text?: string; is_active?: boolean; is_visible?: boolean }) => void;
-  showProgress: (leaveActive?: boolean) => void;
-  hideProgress: () => void;
-  hide: () => void;
-  onClick: (callback: () => void) => void;
-  offClick: (callback: () => void) => void;
-};
-
-type TelegramWebApp = {
-  initData: string;
-  ready: () => void;
-  expand: () => void;
-  close: () => void;
-  isVersionAtLeast: (version: string) => boolean;
-  setHeaderColor: (color: string) => void;
-  setBackgroundColor: (color: string) => void;
-  enableClosingConfirmation: () => void;
-  disableClosingConfirmation: () => void;
-  disableVerticalSwipes: () => void;
-  HapticFeedback: {
-    selectionChanged: () => void;
-    impactOccurred: (style: "light" | "medium" | "heavy" | "rigid" | "soft") => void;
-    notificationOccurred: (type: "error" | "success" | "warning") => void;
-  };
-  MainButton: BottomButton;
-};
-
-declare global {
-  interface Window {
-    Telegram?: { WebApp?: TelegramWebApp };
-  }
-}
-
-// Форма открыта из Telegram, только если есть подписанная initData: сам
-// скрипт telegram-web-app.js создаёт WebApp и в обычном браузере.
-function telegramApp(): TelegramWebApp | null {
-  const app = window.Telegram?.WebApp;
-  return app?.initData ? app : null;
-}
-
-// Подпись Telegram для сервера. Основной источник — скрипт Telegram; если он
-// не загрузился, Telegram всё равно передаёт те же данные в адресе страницы
-// (#tgWebAppData=…) — с ними отправка работает и без скрипта.
-function currentInitData(): string {
-  const fromScript = window.Telegram?.WebApp?.initData;
-  if (fromScript) return fromScript;
-  return new URLSearchParams(window.location.hash.slice(1)).get("tgWebAppData") ?? "";
-}
-
-function haptic(kind: "select" | "tap" | "success" | "warning" | "error") {
-  const app = telegramApp();
-  if (!app?.isVersionAtLeast("6.1")) return;
-  if (kind === "select") app.HapticFeedback.selectionChanged();
-  else if (kind === "tap") app.HapticFeedback.impactOccurred("light");
-  else app.HapticFeedback.notificationOccurred(kind);
-}
 
 // Цвет плитки — цвет группы на доске поддержки (groupColor в
 // src/lib/groups.ts), чтобы куратор видел тот же знак, которым тикет будет
@@ -97,8 +36,6 @@ const MAX_PHOTOS_BYTES = 4 * 1024 * 1024;
 // Сколько ждать ответа сервера. Самый долгий путь там — ИИ-описание плюс
 // загрузка фото в Telegram; минута — с запасом даже на пять штук.
 const SUBMIT_TIMEOUT_MS = 60_000;
-// Сколько ждать скрипт Telegram, прежде чем признать, что он не загрузился.
-const SCRIPT_TIMEOUT_MS = 10_000;
 
 const PHOTO_TOO_BIG = "Фото тым үлкен — экранның скриншотын жасап, соны тіркеңіз";
 const PHOTOS_TOO_BIG = "Фотолардың жалпы көлемі тым үлкен — біреуін өшіріңіз";
@@ -244,11 +181,18 @@ function CameraIcon() {
   );
 }
 
-export function SubmissionForm() {
-  // loading — скрипт Telegram ещё грузится; telegram — открыто из Telegram;
-  // browser — скрипт есть, а подписи нет: открыто не из Telegram;
-  // script-failed — скрипт не загрузился (бывает и внутри Telegram).
-  const [env, setEnv] = useState<"loading" | "telegram" | "browser" | "script-failed">("loading");
+// Вкладка «Жаңа өтініш» мини-аппа. Скрипт Telegram и переключение вкладок —
+// в оболочке (MiniApp.tsx); active — открыта ли сейчас эта вкладка: MainButton
+// и вставка скриншота из буфера работают только на ней.
+export function SubmissionForm({
+  env,
+  active,
+  onShowMine,
+}: {
+  env: MiniAppEnv;
+  active: boolean;
+  onShowMine: () => void;
+}) {
   const [restored, setRestored] = useState(false);
 
   const [groupName, setGroupName] = useState("");
@@ -277,35 +221,6 @@ export function SubmissionForm() {
   const inFlightRef = useRef(false);
 
   const totalBytes = photos.reduce((sum, photo) => sum + photo.blob.size, 0);
-
-  function onTelegramReady() {
-    const app = window.Telegram?.WebApp;
-    if (!app?.initData) {
-      setEnv("browser");
-      return;
-    }
-    app.ready();
-    app.expand();
-    if (app.isVersionAtLeast("6.1")) {
-      // Шапка и фон вокруг страницы — того же цвета, что страница: без
-      // полосы другого цвета над формой.
-      app.setHeaderColor("secondary_bg_color");
-      app.setBackgroundColor("secondary_bg_color");
-    }
-    // Иначе свайп вниз при прокрутке длинной формы закрывает мини-апп.
-    if (app.isVersionAtLeast("7.7")) app.disableVerticalSwipes();
-    setEnv("telegram");
-  }
-
-  // Скрипт может зависнуть так, что не сработает ни onReady, ни onError, —
-  // тогда не было бы ни MainButton, ни кнопки на странице.
-  useEffect(() => {
-    const t = setTimeout(
-      () => setEnv((current) => (current === "loading" ? "script-failed" : current)),
-      SCRIPT_TIMEOUT_MS
-    );
-    return () => clearTimeout(t);
-  }, []);
 
   // Черновик и последняя группа — с телефона. setState — вне синхронного
   // тела эффекта (как и в других формах проекта), иначе линтер ругается на
@@ -354,7 +269,7 @@ export function SubmissionForm() {
   useEffect(() => {
     const button = telegramApp()?.MainButton;
     if (!button) return;
-    if (sent) {
+    if (sent || !active) {
       button.hide();
       return;
     }
@@ -365,7 +280,7 @@ export function SubmissionForm() {
     });
     if (sending) button.showProgress(false);
     else button.hideProgress();
-  }, [env, sent, sending, compressing]);
+  }, [env, active, sent, sending, compressing]);
 
   useEffect(() => {
     const button = telegramApp()?.MainButton;
@@ -377,8 +292,10 @@ export function SubmissionForm() {
 
   // Скриншот из буфера обмена: Ctrl+V / ⌘V где угодно на форме (компьютер)
   // или «Қою» в зоне вставки (телефон). Если в буфере ещё и текст — его
-  // вставку в поле не трогаем, забираем только картинки.
+  // вставку в поле не трогаем, забираем только картинки. На другой вкладке
+  // вставка форму не трогает.
   useEffect(() => {
+    if (!active) return;
     function onPaste(event: ClipboardEvent) {
       const files = imagesFromClipboard(event);
       if (files.length === 0) return;
@@ -387,7 +304,7 @@ export function SubmissionForm() {
     }
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
-  }, []);
+  }, [active]);
 
   useEffect(() => {
     submitRef.current = submit;
@@ -556,14 +473,6 @@ export function SubmissionForm() {
   // Кнопка на странице — там, где нет MainButton Telegram.
   const pageButton = env === "browser" || env === "script-failed";
 
-  const telegramScript = (
-    <Script
-      src="https://telegram.org/js/telegram-web-app.js"
-      onReady={onTelegramReady}
-      onError={() => setEnv("script-failed")}
-    />
-  );
-
   const photoInput = (label: string) => (
     <label className={styles.photoPick}>
       <input
@@ -585,54 +494,52 @@ export function SubmissionForm() {
     const hue = GROUP_HUE[sent.groupName];
     const group = OFFICIAL_GROUPS.find((g) => g.name === sent.groupName);
     return (
-      <main className={styles.root} lang="kk">
-        {telegramScript}
-        <div className={styles.success} role="status">
-          <div className={styles.successMark}>
-            <CheckIcon size={38} />
-          </div>
-          <h1 className={styles.successTitle}>Өтініш жіберілді</h1>
-          <p className={styles.successText}>Кезекші оны қолдау тақтасынан көреді.</p>
-
-          <div className={`${styles.list} ${styles.summary}`}>
-            <div className={styles.summaryRow}>
-              <span className={styles.summaryLabel}>Топ</span>
-              <span className={styles.summaryValue} style={{ color: hue }}>
-                {group?.emoji} {sent.groupName}
-              </span>
-            </div>
-            <div className={styles.summaryRow}>
-              <span className={styles.summaryLabel}>Мәні</span>
-              <span className={styles.summaryValue}>
-                {sent.description.length > 140
-                  ? `${sent.description.slice(0, 140)}…`
-                  : sent.description}
-              </span>
-            </div>
-          </div>
-
-          <button type="button" className={styles.primaryButton} onClick={startOver}>
-            Жаңа өтініш
-          </button>
-          {env === "telegram" && (
-            <button
-              type="button"
-              className={styles.secondaryButton}
-              onClick={() => window.Telegram?.WebApp?.close()}
-            >
-              Жабу
-            </button>
-          )}
+      <div className={styles.success} role="status">
+        <div className={styles.successMark}>
+          <CheckIcon size={38} />
         </div>
-      </main>
+        <h1 className={styles.successTitle}>Өтініш жіберілді</h1>
+        <p className={styles.successText}>
+          Кезекші оны қолдау тақтасынан көреді. Күйі өзгергенде бот хабарлайды.
+        </p>
+
+        <div className={`${styles.list} ${styles.summary}`}>
+          <div className={styles.summaryRow}>
+            <span className={styles.summaryLabel}>Топ</span>
+            <span className={styles.summaryValue} style={{ color: hue }}>
+              {group?.emoji} {sent.groupName}
+            </span>
+          </div>
+          <div className={styles.summaryRow}>
+            <span className={styles.summaryLabel}>Мәні</span>
+            <span className={styles.summaryValue}>
+              {sent.description.length > 140
+                ? `${sent.description.slice(0, 140)}…`
+                : sent.description}
+            </span>
+          </div>
+        </div>
+
+        <button type="button" className={styles.primaryButton} onClick={startOver}>
+          Жаңа өтініш
+        </button>
+        <button
+          type="button"
+          className={styles.secondaryButton}
+          onClick={() => {
+            // Следующий заход на вкладку — уже с чистой формой.
+            startOver();
+            onShowMine();
+          }}
+        >
+          Күйін бақылау
+        </button>
+      </div>
     );
   }
 
   return (
-    <main className={styles.root} lang="kk">
-      {telegramScript}
-
-      <h1 className={styles.title}>Жаңа өтініш</h1>
+    <>
       <p className={styles.subtitle}>Кезекші оны қолдау тақтасынан көреді</p>
 
       {env === "browser" && (
@@ -855,6 +762,6 @@ export function SubmissionForm() {
           {sending ? "Жіберілуде…" : "Өтінішті жіберу"}
         </button>
       )}
-    </main>
+    </>
   );
 }

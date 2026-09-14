@@ -69,7 +69,7 @@ export async function insertSentIssue(
       telegramLink,
       status: "SENT",
       createdBy: AUTO_ISSUE_CREATOR,
-      submission: submission ? { create: submission } : undefined,
+      submissions: submission ? { create: submission } : undefined,
     },
   });
 }

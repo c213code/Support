@@ -368,8 +368,9 @@ model Issue {
   sourceMessages TelegramMessage[]   @relation("issueSource")
   agentReplies   TelegramMessage[]   @relation("issueAgentReply")
   // Тикет подан формой из мини-аппа Telegram, а не сообщением в рабочей
-  // группе — поля формы лежат отдельно, см. IssueSubmission.
-  submission     IssueSubmission?
+  // группе — поля формы лежат отдельно, см. IssueSubmission. Заявок может
+  // быть несколько: при склейке тикетов они переезжают на основной.
+  submissions    IssueSubmission[]
 
   @@index([reportDate])
   // Библиотека решений (src/lib/solutionLibrary.ts) на каждой карточке
@@ -382,9 +383,13 @@ model Issue {
 // таблицей, а не колонками в Issue: такие поля есть у малой доли тикетов, а
 // Issue читают все — доска, репорт, бот. Удаляется вместе с тикетом, как
 // BotReply и IssueEvent.
+//
+// Не @unique по issueId: при склейке тикетов (src/lib/mergeIssue.ts) заявка
+// переезжает на основной тикет, а не удаляется каскадом — иначе куратор
+// потерял бы своё обращение из списка «Менің өтініштерім».
 model IssueSubmission {
   id                 String   @id @default(cuid())
-  issueId            String   @unique
+  issueId            String
   issue              Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
   // Кто подал — из initData, которую подписывает Telegram (src/lib/miniapp.ts),
   // а не из полей формы: подделать автора нельзя.
@@ -408,6 +413,7 @@ model IssueSubmission {
   clientSubmissionId String?  @unique
   createdAt          DateTime @default(now())
 
+  @@index([issueId])
   @@index([telegramUserId, createdAt])
 }
 

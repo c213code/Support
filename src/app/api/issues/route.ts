@@ -88,12 +88,19 @@ export async function GET(request: NextRequest) {
       lessonLink: true,
       photoFileIds: true,
     },
+    orderBy: { createdAt: "asc" },
   });
-  const submissionByIssue = new Map(submissions.map((s) => [s.issueId, s]));
+  // После склейки у тикета может быть несколько заявок: контакты для
+  // подсказок берём из всех, а на карточке показываем первую (самую раннюю).
+  const submissionsByIssue = new Map<string, typeof submissions>();
+  for (const s of submissions) {
+    submissionsByIssue.set(s.issueId, [...(submissionsByIssue.get(s.issueId) ?? []), s]);
+  }
 
   return NextResponse.json({
     issues: issues.map((issue) => {
-      const submission = submissionByIssue.get(issue.id);
+      const issueSubmissions = submissionsByIssue.get(issue.id) ?? [];
+      const submission = issueSubmissions[0];
       // Исходные (сырые) тексты обращения: и в hints, и в распознавании смены
       // почты нужен именно сырой текст — в description почты уже вычищены.
       // Ссылку на урок из формы сюда намеренно не кладём: длинный числовой id
@@ -103,7 +110,7 @@ export async function GET(request: NextRequest) {
         ...[issue.telegramLink, ...issue.extraLinks].map((l) =>
           l ? (textByLink.get(l) ?? null) : null
         ),
-        ...(submission ? [submission.rawText, submission.studentContact] : []),
+        ...issueSubmissions.flatMap((s) => [s.rawText, s.studentContact]),
       ];
       return {
         ...issue,

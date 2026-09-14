@@ -1,7 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import type { IssueStatus } from "@/lib/status";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessage, sendWebAppButton } from "@/lib/telegram";
 import { isSubmitterNotifyEnabled } from "@/lib/settings";
+import { miniAppUrl, submissionFormEnabled } from "@/lib/miniapp";
+import { STATUS_KK } from "@/lib/statusKk";
 
 // Ответ автору обращения, поданного формой мини-аппа: бот пишет ему в личку,
 // когда дежурный двигает статус.
@@ -11,14 +13,12 @@ import { isSubmitterNotifyEnabled } from "@/lib/settings";
 // (см. reactToStatusChange); у обращения из формы сообщения в группе нет —
 // reactToStatusChange по нему молчит, и куратор отправлял заявку в пустоту.
 //
-// Текст — на казахском, как и вся форма: пишем тому же человеку, который её
-// заполнял.
-const STATUS_TEXT: Partial<Record<IssueStatus, string>> = {
-  IN_PROGRESS: "🔄 Өтінішіңіз жұмысқа алынды",
-  PENDING: "⏳ Өтінішіңіз күтуде — жаңалық болса, хабарлаймыз",
-  ESCALATED: "⚠️ Өтінішіңіз басқа командаға берілді",
-  RESOLVED: "✅ Өтінішіңіз шешілді",
-};
+// Авторов может быть несколько: одну поломку присылают разные кураторы, и
+// после склейки их заявки живут на одном тикете (mergeIssue.ts). Пишем
+// каждому — узнать, чем кончилось, нужно всем, кто спрашивал.
+//
+// Текст — на казахском, как и мини-апп; слова статусов общие с его списком
+// (statusKk.ts).
 
 // note — заметка, которую дежурный написал в этот же момент («как решили»):
 // в ней и есть ответ, ради которого куратор писал.
@@ -28,38 +28,61 @@ export async function notifySubmitter(
   note?: string | null
 ): Promise<void> {
   // SENT — исходный статус обращения, сообщать о нём нечего.
-  const line = STATUS_TEXT[status];
-  if (!line) return;
+  const notice = STATUS_KK[status].notice;
+  if (!notice) return;
 
   try {
     if (!(await isSubmitterNotifyEnabled())) return;
 
-    const submission = await prisma.issueSubmission.findUnique({
+    const submissions = await prisma.issueSubmission.findMany({
       where: { issueId },
-      select: {
-        telegramUserId: true,
-        issue: { select: { description: true, note: true } },
-      },
+      select: { telegramUserId: true },
     });
     // Обычный тикет из группы — там у бота свои ответы, дублировать в личку
     // некому и незачем.
-    if (!submission) return;
+    if (submissions.length === 0) return;
 
-    const parts = [line, "", `«${submission.issue.description}»`];
+    const issue = await prisma.issue.findUnique({
+      where: { id: issueId },
+      select: { description: true, note: true },
+    });
+    if (!issue) return;
+
+    const parts = [`${STATUS_KK[status].emoji} ${notice}`, "", `«${issue.description}»`];
     // Итог показываем только на «решено»: на промежуточных статусах в заметке
     // лежит рабочая пометка дежурного, а не ответ куратору.
-    const outcome = status === "RESOLVED" ? (note ?? submission.issue.note)?.trim() : null;
+    const outcome = status === "RESOLVED" ? (note ?? issue.note)?.trim() : null;
     if (outcome) parts.push("", outcome);
+    const text = parts.join("\n");
 
-    const sent = await sendTelegramMessage(Number(submission.telegramUserId), parts.join("\n"));
-    if (!sent) {
-      // Частый и безобидный случай — куратор заблокировал бота; причину
-      // (403 и т.п.) уже написал callBotApi строкой [telegram] sendMessage.
-      console.warn(`[miniapp] автор обращения ${issueId} не получил статус ${status}`);
+    // Кнопка «Көру» открывает мини-апп сразу на списке своих обращений. Без
+    // адреса мини-аппа (или с выключенной формой) — обычное сообщение.
+    const baseUrl = submissionFormEnabled() ? miniAppUrl() : null;
+    const listUrl = baseUrl ? withMineTab(baseUrl) : null;
+
+    const recipients = [...new Set(submissions.map((s) => s.telegramUserId.toString()))];
+    for (const recipient of recipients) {
+      const chatId = Number(recipient);
+      const sent = listUrl
+        ? await sendWebAppButton(chatId, text, "📋 Көру", listUrl)
+        : Boolean(await sendTelegramMessage(chatId, text));
+      if (!sent) {
+        // Частый и безобидный случай — куратор заблокировал бота; причину
+        // (403 и т.п.) уже написал callBotApi строкой [telegram] sendMessage.
+        console.warn(`[miniapp] автор обращения ${issueId} не получил статус ${status}`);
+      }
     }
   } catch (err) {
     // Сообщить автору — приятный довесок к смене статуса, а не её часть:
     // упавшая база или Telegram не должны отменять сам перевод тикета.
-    console.warn(`[miniapp] не смог сообщить автору обращения ${issueId}: ${String(err).slice(0, 200)}`);
+    console.warn(
+      `[miniapp] не смог сообщить автору обращения ${issueId}: ${String(err).slice(0, 200)}`
+    );
   }
+}
+
+function withMineTab(url: string): string {
+  const withTab = new URL(url);
+  withTab.searchParams.set("tab", "mine");
+  return withTab.toString();
 }

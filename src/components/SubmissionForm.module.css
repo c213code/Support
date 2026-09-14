@@ -425,3 +425,312 @@
   color: var(--accent);
   cursor: pointer;
 }
+
+/* --- вкладки мини-аппа: «Жаңа өтініш» / «Менің өтініштерім» ---
+   Сегментированный переключатель в духе iOS/Telegram: подложка цвета
+   секции, выбранный сегмент — кнопкой темы. */
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--section);
+}
+
+.tab {
+  padding: 9px 6px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--button);
+  color: var(--button-text);
+  font-weight: 600;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Подзаголовок формы сразу под вкладками. */
+[role="tabpanel"] > .subtitle:first-child {
+  margin-top: 14px;
+}
+
+/* --- список «Менің өтініштерім» --- */
+
+.listHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.listHeader .subtitle {
+  margin-top: 0;
+}
+
+.linkButton {
+  flex-shrink: 0;
+  padding: 4px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.linkButton:disabled {
+  color: var(--hint);
+}
+
+.submissionList {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.submissionItem + .submissionItem {
+  border-top: 0.5px solid var(--separator);
+}
+
+.submissionHead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.submissionHead:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.submissionMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  font-size: 13px;
+  line-height: 17px;
+  color: var(--hint);
+}
+
+.submissionText,
+.submissionTextClamped {
+  font-size: 15px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.submissionTextClamped {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.statusBadge {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone) 14%, var(--section));
+  color: var(--tone);
+  font-size: 13px;
+  line-height: 17px;
+  font-weight: 600;
+}
+
+.submissionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 16px 16px;
+}
+
+.noteBox {
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #31a24c 10%, var(--section));
+}
+
+.noteLabel {
+  display: block;
+  font-size: 13px;
+  line-height: 17px;
+  font-weight: 500;
+  color: var(--section-header);
+}
+
+.noteText {
+  margin: 4px 0 0;
+  font-size: 15px;
+  line-height: 20px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* История статусов — вертикальная линия с точкой цвета статуса на каждом
+   шаге: порядок здесь настоящий, это последовательность во времени. */
+.timeline {
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.timelineStep {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0 4px 20px;
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.timelineStep::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.timelineStep + .timelineStep::after {
+  content: "";
+  position: absolute;
+  left: 6.5px;
+  top: -8px;
+  height: 17px;
+  border-left: 1px solid var(--separator);
+}
+
+.timelineTime {
+  flex-shrink: 0;
+  color: var(--hint);
+}
+
+.photoRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.photoOpen {
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  cursor: zoom-in;
+}
+
+.photoOpen:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.photoPlaceholder {
+  display: grid;
+  place-items: center;
+  color: var(--destructive);
+  font-weight: 700;
+}
+
+.photoRow .photoThumb {
+  width: 64px;
+  height: 64px;
+}
+
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.viewerImage {
+  max-width: 100%;
+  max-height: calc(100dvh - 110px);
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.viewerClose {
+  padding: 10px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.skeletonRow {
+  height: 88px;
+  background: linear-gradient(90deg, transparent, var(--bg), transparent) var(--section);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+.skeletonRow + .skeletonRow {
+  border-top: 0.5px solid var(--separator);
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 40px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonRow {
+    animation: none;
+  }
+  .tab {
+    transition: none;
+  }
+}

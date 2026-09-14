@@ -37,6 +37,14 @@ export async function mergeIssueInto(
       data: { usedForIssueId: target.id },
     });
 
+    // Заявки из мини-аппа переезжают туда же. Иначе каскад удалит их вместе
+    // с source, и куратор молча потеряет обращение: ни в списке «Менің
+    // өтініштерім», ни в уведомлениях о статусе его больше не будет.
+    await tx.issueSubmission.updateMany({
+      where: { issueId: source.id },
+      data: { issueId: target.id },
+    });
+
     await tx.issue.delete({ where: { id: source.id } });
 
     return nextTarget;

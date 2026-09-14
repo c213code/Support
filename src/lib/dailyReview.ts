@@ -365,7 +365,7 @@ export async function startReviewSession(
 // и ссылка на урок лежат в заявке (то же делает GET /api/issues для сайта).
 // Скриншот формы — на карточке на сайте, здесь о нём говорит «есть вложение».
 async function hintsFor(issue: { id: string; telegramLink: string | null }) {
-  const [sources, submission] = await Promise.all([
+  const [sources, submissions] = await Promise.all([
     prisma.telegramMessage.findMany({
       where: {
         OR: [
@@ -375,21 +375,24 @@ async function hintsFor(issue: { id: string; telegramLink: string | null }) {
       },
       select: { text: true },
     }),
-    prisma.issueSubmission.findUnique({
+    // После склейки заявок у тикета может быть несколько — контакты
+    // учеников собираем из всех, урок берём из первой.
+    prisma.issueSubmission.findMany({
       where: { issueId: issue.id },
+      orderBy: { createdAt: "asc" },
       select: { rawText: true, studentContact: true, lessonLink: true },
     }),
   ]);
   const texts = [
     ...sources.map((s) => s.text),
-    ...(submission ? [submission.rawText, submission.studentContact] : []),
+    ...submissions.flatMap((s) => [s.rawText, s.studentContact]),
   ];
   if (texts.length === 0) return undefined;
   const hints = extractTicketHints(texts);
   return {
     ...hints,
-    hasAttachment: hints.hasAttachment || Boolean(submission),
-    lessonLink: submission?.lessonLink,
+    hasAttachment: hints.hasAttachment || submissions.length > 0,
+    lessonLink: submissions[0]?.lessonLink,
   };
 }
 
