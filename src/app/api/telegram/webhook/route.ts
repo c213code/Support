@@ -209,17 +209,28 @@ export async function POST(request: NextRequest) {
     // реплика того же агента могла опереться на неё как на "свой
     // разговор" (см. lib/agentThread.ts): без сохранённой связи цепочка
     // "Окей, қазір" → "өшірілді" рассыпается на два независимых сообщения.
+    //
+    // Время — отправки (message.date), а не получения: правку Telegram шлёт
+    // тем же сообщением, и "полчаса до реплики" надо отсчитывать от того,
+    // когда её написали, а не когда исправили.
     const target = await resolveAgentTarget({
       chatId,
       messageId: message.message_id,
       replyToMessageId: message.reply_to_message?.message_id ?? null,
       agentTelegramId: fromId,
-      sentAt: new Date(),
+      sentAt: new Date(message.date * 1000),
     });
     const targetIssueId = target.kind === "found" ? target.issueId : null;
     await prisma.telegramMessage.upsert({
       where: { chatId_messageId: { chatId, messageId: message.message_id } },
-      update: { agentIssueId: targetIssueId },
+      // Правка (edited_message) обновляет текст: итог часто дописывают именно
+      // правкой ("+7…\nпароль" → "…номермен кіреді екен"), и без этого
+      // подсказка "Как решили?" видела первую версию. Привязку к тикету
+      // правка не стирает: если заново определить не вышло, остаётся прежняя.
+      update: {
+        text: contextualText,
+        ...(targetIssueId ? { agentIssueId: targetIssueId } : {}),
+      },
       create: {
         agentIssueId: targetIssueId,
         chatId,
