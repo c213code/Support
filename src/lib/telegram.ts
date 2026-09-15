@@ -147,7 +147,9 @@ export function extractText(message: TelegramMessagePayload): string | null {
   return null;
 }
 
-const QUOTE_MAX_LENGTH = 200;
+// Экспорт — ради lib/resolutionNote.ts: там цитату нужно срезать обратно,
+// а для этого знать, до какой длины её обрезали.
+export const QUOTE_MAX_LENGTH = 200;
 
 // Ответ ("Reply") на чужое сообщение сам по себе часто нечитаем без
 // контекста — "Әдістеме бөлінді нұсқа салынып тұр дейді" ("дейді" —

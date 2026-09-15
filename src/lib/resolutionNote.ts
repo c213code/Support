@@ -1,5 +1,30 @@
 import { prisma } from "@/lib/prisma";
-import { ownAgentTelegramIdList } from "@/lib/telegram";
+import { ownAgentTelegramIdList, QUOTE_MAX_LENGTH } from "@/lib/telegram";
+
+// В TelegramMessage.text ответ стрелкой хранится вместе с цитатой того, на
+// что ответили: "↩️ Автор: цитата\nсвой текст" (extractReplyContextLine в
+// lib/telegram.ts). Во «Входящих» это нужно — без цитаты реплика нечитаема.
+// А модели для заметки — вредно: цитата — это чаще всего просьба куратора
+// ("почтаға ауыстырсаңыз"), и модель пересказывала её ("Почтасы
+// ауыстырылды") вместо того, что ответил агент. На копии прода с цитатой
+// хранятся три реплики агентов из четырёх.
+//
+// quoted — исходный текст сообщения, на которое ответили (как его прислал
+// Telegram, без собственной цитаты), если он известен.
+export function stripReplyQuote(text: string, quoted: string | null): string {
+  if (!text.startsWith("↩️ ")) return text;
+  if (quoted) {
+    const shown =
+      quoted.length > QUOTE_MAX_LENGTH ? `${quoted.slice(0, QUOTE_MAX_LENGTH)}…` : quoted;
+    const marker = `: ${shown}\n`;
+    const at = text.indexOf(marker);
+    if (at !== -1) return text.slice(at + marker.length).trim();
+  }
+  // Исходный текст неизвестен (сообщение не сохранилось) — цитата в одну
+  // строку, как почти всегда: отрезаем первую строку.
+  const newline = text.indexOf("\n");
+  return newline === -1 ? "" : text.slice(newline + 1).trim();
+}
 
 // Заметка "как решили" уходит прямо в репорт боссам, и к вечеру уже никто
 // не помнит, чем закончилось обращение. Но ответ там почти всегда уже
@@ -140,7 +165,7 @@ export async function collectResolutionContext(
       // тикету каждое. Агент часто отвечает стрелкой именно на них.
       prisma.botReply.findMany({
         where: { chatId },
-        select: { messageId: true, issueId: true },
+        select: { messageId: true, issueId: true, text: true },
       }),
     ]);
 
@@ -149,6 +174,7 @@ export async function collectResolutionContext(
     agentMessages.set(message.messageId, message);
   }
   const botMessageIssue = new Map(botReplies.map((b) => [b.messageId, b.issueId]));
+  const botMessageText = new Map(botReplies.map((b) => [b.messageId, b.text]));
 
   // Звенья цепочек ответов, до которых идём вверх, подгружаем по id — сколько
   // нужно, а не заранее весь чат.
@@ -239,8 +265,20 @@ export async function collectResolutionContext(
   );
   const linked: string[] = [];
   const loose: string[] = [];
+  // Исходный текст сообщения, на которое ответили: у сохранённого сообщения
+  // в базе может быть своя цитата — срезаем и её, Telegram цитирует без неё.
+  function quotedTextOf(message: ChatMessage): string | null {
+    const replyTo = message.replyToMessageId;
+    if (replyTo == null) return null;
+    const bot = botMessageText.get(replyTo);
+    if (bot != null) return bot;
+    const target = known.get(replyTo);
+    if (!target?.text) return null;
+    return stripReplyQuote(target.text, null);
+  }
+
   for (const message of ordered) {
-    const text = message.text?.trim();
+    const text = message.text ? stripReplyQuote(message.text, quotedTextOf(message)).trim() : "";
     if (!text) continue;
     const owner = ownerOf(message);
     if (owner === "ours") linked.push(text);
