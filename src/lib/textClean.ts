@@ -208,6 +208,42 @@ function stripNoise(raw: string): string {
     .trim();
 }
 
+// Значение после метки "логин/пароль", похожее на учётные данные: есть
+// цифра или символ (Balausa10, k82CO1xc, a@b.kz). Обычное слово после метки
+// ("пароль жібердім", "пароль керек") — не значение, его не трогаем.
+const CREDENTIAL_VALUE = new RegExp(
+  `((?<![\\p{L}\\p{N}])(?:${CREDENTIAL_LABEL_WORDS})\\s*[:\\-]?\\s*)` +
+    `(?!(?:${CREDENTIAL_LABEL_WORDS})(?![\\p{L}\\p{N}]))` +
+    `(?=[^\\s,]*[\\d@_.])[^\\s,]+`,
+  "giu"
+);
+// Токен без метки, который выглядит паролем: буквы и цифры вперемешку, от 8
+// символов (qovtoq-Qetko9-johsak). Короче — это "3-ай", "5ай", номера уроков.
+const BARE_CREDENTIAL_TOKEN =
+  /(?<![\p{L}\p{N}])(?=[\p{L}\p{N}._-]*\p{L})(?=[\p{L}\p{N}._-]*\d)[\p{L}\p{N}._-]{8,}(?![\p{L}\p{N}])/gu;
+
+// Реплики агентов уходят внешней модели (Groq), когда из них собирается
+// заметка "как решили" (lib/resolutionNote.ts). В отличие от описания
+// тикета, их никто не чистил, а агенты отвечают кураторам прямо в чате:
+// "Логин: a@b.kz Пароль: 20100619 Осымен кіріп көрсінші".
+//
+// cleanTicketDescription для этого не годится: строку с обычными словами
+// она оставляет целиком (иначе резала бы "пароль не подходит"), а заодно
+// выкидывает "[Голосовое сообщение]", по которому модель должна понять, что
+// содержания в ответе нет. Здесь — только маскировка чувствительного: смысл
+// реплики остаётся, почты, телефоны и пароли — нет.
+export function maskSensitiveForAi(raw: string): string {
+  return raw
+    .replace(EMAIL_PATTERN, "<почта>")
+    .replace(PHONE_CANDIDATE_PATTERN, (match) =>
+      (match.match(/\d/g) ?? []).length >= 10 ? "<телефон>" : match
+    )
+    .replace(CREDENTIAL_VALUE, "$1<скрыто>")
+    .replace(BARE_CREDENTIAL_TOKEN, "<скрыто>")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 export function cleanTicketDescription(raw: string): string {
   // Если чистка выкосила вообще всё — лучше грязный тикет, чем пустой.
   return stripNoise(raw) || raw.trim();

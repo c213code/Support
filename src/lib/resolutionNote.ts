@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { ownAgentTelegramIdList, QUOTE_MAX_LENGTH } from "@/lib/telegram";
+import { maskSensitiveForAi } from "@/lib/textClean";
 
 // В TelegramMessage.text ответ стрелкой хранится вместе с цитатой того, на
 // что ответили: "↩️ Автор: цитата\nсвой текст" (extractReplyContextLine в
@@ -278,7 +279,10 @@ export async function collectResolutionContext(
   }
 
   for (const message of ordered) {
-    const text = message.text ? stripReplyQuote(message.text, quotedTextOf(message)).trim() : "";
+    // Реплики уходят внешней модели — почты, телефоны и пароли маскируем.
+    const text = message.text
+      ? maskSensitiveForAi(stripReplyQuote(message.text, quotedTextOf(message)))
+      : "";
     if (!text) continue;
     const owner = ownerOf(message);
     if (owner === "ours") linked.push(text);
