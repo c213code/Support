@@ -22,11 +22,6 @@ const LOOKBACK_HOURS = 24;
 // решение — это конец разговора, а не его начало.
 const MAX_AGENT_MESSAGES = 5;
 
-// Сколько сообщений чата поднимаем за раз, чтобы разобрать цепочки ответов
-// в памяти. За сутки в рабочей группе их сотни, но для окна "Как решили?"
-// важен только участок вокруг обращения.
-const MAX_WINDOW_MESSAGES = 300;
-
 // На сколько звеньев идём вверх по цепочке ответов. Реальные цепочки
 // короткие ("проблема → уточнение → ответ агента"); больше — уже не связь,
 // а совпадение.
@@ -35,9 +30,9 @@ const MAX_REPLY_HOPS = 4;
 export type ResolutionContext = {
   // Реплики наших агентов, относящиеся к тикету, в порядке написания.
   agentTexts: string[];
-  // true — реплику удалось привязать к тикету по цепочке ответов (надёжно),
-  // false — взята просто из окна времени (догадка). Влияет на то, что
-  // показываем: по догадке подсказку помечаем как менее уверенную.
+  // true — реплику удалось привязать к тикету (надёжно), false — взята
+  // просто из окна времени (догадка). Влияет на то, что показываем: по
+  // догадке подсказку помечаем как менее уверенную.
   exact: boolean;
 };
 
@@ -58,6 +53,26 @@ export type NoContextReason =
 export type ResolutionContextResult =
   | { ok: true; context: ResolutionContext }
   | { ok: false; reason: NoContextReason };
+
+type ChatMessage = {
+  messageId: number;
+  fromId: bigint | null;
+  text: string | null;
+  replyToMessageId: number | null;
+  usedForIssueId: string | null;
+  agentIssueId: string | null;
+  receivedAt: Date;
+};
+
+const MESSAGE_FIELDS = {
+  messageId: true,
+  fromId: true,
+  text: true,
+  replyToMessageId: true,
+  usedForIssueId: true,
+  agentIssueId: true,
+  receivedAt: true,
+} as const;
 
 export async function collectResolutionContext(
   issueId: string
@@ -86,33 +101,79 @@ export async function collectResolutionContext(
   // почти наверняка про его же тикет, даже если то сообщение само тикетом не
   // стало (типичный случай: прислал почту, которую мы попросили, — она
   // отсеивается как "одни учётные данные" и остаётся без usedForIssueId).
-  const reporterIds = new Set(
-    issueMessages
-      .map((m) => m.fromId)
-      .filter((id): id is bigint => id != null)
-      .map((id) => id.toString())
-  );
+  const reporterIds = issueMessages
+    .map((m) => m.fromId)
+    .filter((id): id is bigint => id != null);
+  const reporterIdSet = new Set(reporterIds.map((id) => id.toString()));
 
-  // Весь срез чата за окно одним запросом: дальше цепочки ответов
-  // разбираются в памяти. Так дешевле, чем ходить в базу за каждым звеном,
-  // и, главное, позволяет пройти цепочку вверх — агент часто отвечает не на
-  // сообщение с проблемой, а на последнее сообщение человека или на свою же
-  // предыдущую реплику.
-  const windowMessages = await prisma.telegramMessage.findMany({
-    where: { chatId, receivedAt: { gte: since, lte: until } },
-    select: {
-      messageId: true,
-      fromId: true,
-      text: true,
-      replyToMessageId: true,
-      usedForIssueId: true,
-      receivedAt: true,
-    },
-    orderBy: { receivedAt: "asc" },
-    take: MAX_WINDOW_MESSAGES,
-  });
+  // Реплики агентов берём прицельно, а не срезом всего чата: раньше
+  // поднимались первые 300 сообщений окна, и в оживлённой группе ответ,
+  // написанный через пару часов, просто не доезжал до разбора — подсказка
+  // говорила "в чате нет твоих ответов", хотя ответ был.
+  //
+  // Плюс все реплики, которые вебхук уже привязал к этому тикету
+  // (agentIssueId), даже вне окна: он решал это в момент сообщения — по
+  // стрелке, по своему разговору, по ближайшему обращению (lib/agentThread.ts).
+  const [windowAgentMessages, linkedByWebhook, reporterMessages, botReplies] =
+    await Promise.all([
+      prisma.telegramMessage.findMany({
+        where: {
+          chatId,
+          receivedAt: { gte: since, lte: until },
+          fromId: { in: ownAgentIds },
+        },
+        select: MESSAGE_FIELDS,
+      }),
+      prisma.telegramMessage.findMany({
+        where: { agentIssueId: issueId, fromId: { in: ownAgentIds } },
+        select: MESSAGE_FIELDS,
+      }),
+      reporterIds.length > 0
+        ? prisma.telegramMessage.findMany({
+            where: { chatId, receivedAt: { lte: until }, fromId: { in: reporterIds } },
+            select: MESSAGE_FIELDS,
+            orderBy: { receivedAt: "asc" },
+          })
+        : Promise.resolve([] as ChatMessage[]),
+      // Сообщения самого бота ("жақсы, қарап береміз"). Telegram не шлёт их
+      // вебхуку, в TelegramMessage их нет — но BotReply помнит, к какому
+      // тикету каждое. Агент часто отвечает стрелкой именно на них.
+      prisma.botReply.findMany({
+        where: { chatId },
+        select: { messageId: true, issueId: true },
+      }),
+    ]);
 
-  const byMessageId = new Map(windowMessages.map((m) => [m.messageId, m]));
+  const agentMessages = new Map<number, ChatMessage>();
+  for (const message of [...windowAgentMessages, ...linkedByWebhook]) {
+    agentMessages.set(message.messageId, message);
+  }
+  const botMessageIssue = new Map(botReplies.map((b) => [b.messageId, b.issueId]));
+
+  // Звенья цепочек ответов, до которых идём вверх, подгружаем по id — сколько
+  // нужно, а не заранее весь чат.
+  const known = new Map<number, ChatMessage>();
+  for (const message of [...agentMessages.values(), ...reporterMessages]) {
+    known.set(message.messageId, message);
+  }
+  let pending = [...agentMessages.values()].map((m) => m.replyToMessageId);
+  for (let hop = 0; hop < MAX_REPLY_HOPS; hop++) {
+    const missing = [
+      ...new Set(
+        pending.filter(
+          (id): id is number =>
+            id != null && !known.has(id) && !botMessageIssue.has(id)
+        )
+      ),
+    ];
+    if (missing.length === 0) break;
+    const fetched = await prisma.telegramMessage.findMany({
+      where: { chatId, messageId: { in: missing } },
+      select: MESSAGE_FIELDS,
+    });
+    for (const message of fetched) known.set(message.messageId, message);
+    pending = fetched.map((m) => m.replyToMessageId);
+  }
 
   // К какому тикету относится сообщение человека, которое само тикетом не
   // стало (прислал почту, дописал подробность). Считаем, что оно продолжает
@@ -122,41 +183,49 @@ export async function collectResolutionContext(
   // Без этой оговорки правило "ответ на сообщение автора обращения = наш
   // тикет" разъезжается: один куратор за день заводит несколько обращений,
   // и реплика по второму подставлялась бы в первый.
-  function issueOfLooseMessage(message: {
-    fromId: bigint | null;
-    receivedAt: Date;
-  }): string | null {
+  function issueOfLooseMessage(message: ChatMessage): string | null {
     if (message.fromId == null) return null;
     const authorId = message.fromId.toString();
     let found: string | null = null;
-    for (const candidate of windowMessages) {
+    for (const candidate of reporterMessages) {
       if (candidate.receivedAt > message.receivedAt) break;
       if (candidate.fromId?.toString() !== authorId) continue;
       if (candidate.usedForIssueId) found = candidate.usedForIssueId;
     }
     return found;
   }
-  const ownAgentIdSet = new Set(ownAgentIds.map((id) => id.toString()));
 
   // Кому принадлежит реплика агента: "ours" — этому тикету, "other" — другому
-  // (её подставлять нельзя), "unknown" — по цепочке не понять.
-  //
-  // Идём вверх по replyToMessageId максимум MAX_REPLY_HOPS звеньев. Реальные
-  // цепочки короткие ("проблема → уточнение → ответ агента"), а ограничение
-  // защищает от кольца, если Telegram отдаст неожиданную пару id.
-  function ownerOf(message: { replyToMessageId: number | null }): "ours" | "other" | "unknown" {
+  // (её подставлять нельзя), "unknown" — не понять.
+  function ownerOf(message: ChatMessage): "ours" | "other" | "unknown" {
+    // Решение вебхука — первым: оно принято в момент сообщения и учитывает
+    // то, чего цепочка ответов не видит, — реплику без стрелки, которая
+    // продолжает свой же разговор ("қазір қараймын" → "өшірілді").
+    if (message.agentIssueId) {
+      return message.agentIssueId === issueId ? "ours" : "other";
+    }
+
+    // Иначе идём вверх по replyToMessageId максимум MAX_REPLY_HOPS звеньев.
+    // Реальные цепочки короткие, а ограничение защищает от кольца, если
+    // Telegram отдаст неожиданную пару id.
     let cursor = message.replyToMessageId;
     for (let hop = 0; cursor != null && hop < MAX_REPLY_HOPS; hop++) {
       if (issueMessageIds.has(cursor)) return "ours";
 
-      const target = byMessageId.get(cursor);
+      const botIssue = botMessageIssue.get(cursor);
+      if (botIssue) return botIssue === issueId ? "ours" : "other";
+
+      const target = known.get(cursor);
       if (!target) return "unknown";
       if (target.usedForIssueId) {
         return target.usedForIssueId === issueId ? "ours" : "other";
       }
+      if (target.agentIssueId) {
+        return target.agentIssueId === issueId ? "ours" : "other";
+      }
       // Ответ на сообщение автора обращения, которое само тикетом не стало.
       // Куда его отнести, решает предыдущая привязка этого же человека.
-      if (target.fromId != null && reporterIds.has(target.fromId.toString())) {
+      if (target.fromId != null && reporterIdSet.has(target.fromId.toString())) {
         const owner = issueOfLooseMessage(target);
         if (owner) return owner === issueId ? "ours" : "other";
       }
@@ -165,13 +234,12 @@ export async function collectResolutionContext(
     return "unknown";
   }
 
-  const agentMessages = windowMessages.filter(
-    (m) => m.fromId != null && ownAgentIdSet.has(m.fromId.toString())
+  const ordered = [...agentMessages.values()].sort(
+    (a, b) => a.receivedAt.getTime() - b.receivedAt.getTime()
   );
-
   const linked: string[] = [];
   const loose: string[] = [];
-  for (const message of agentMessages) {
+  for (const message of ordered) {
     const text = message.text?.trim();
     if (!text) continue;
     const owner = ownerOf(message);
@@ -181,9 +249,9 @@ export async function collectResolutionContext(
     else if (owner === "unknown") loose.push(text);
   }
 
-  // Привязанные по цепочке — надёжно. Ничем не привязанные реплики берём,
-  // только если надёжных нет вовсе: это уже догадка, и в окне она помечается
-  // иначе ("собрано по переписке", а не "из твоего ответа").
+  // Привязанные — надёжно. Ничем не привязанные реплики берём, только если
+  // надёжных нет вовсе: это уже догадка, и в окне она помечается иначе
+  // ("собрано по переписке", а не "из твоего ответа").
   if (linked.length > 0) {
     return {
       ok: true,
