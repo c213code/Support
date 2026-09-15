@@ -21,6 +21,51 @@ export function stripReplyQuote(text: string, quoted: string | null): string {
     const at = text.indexOf(marker);
     if (at !== -1) return text.slice(at + marker.length).trim();
   }
+
+  // Начало цитаты — сразу после "↩️ Автор: ".
+  const colon = text.indexOf(": ");
+  if (colon !== -1) {
+    const quoteStart = colon + 2;
+
+    // Длинная цитата обрезана ровно до QUOTE_MAX_LENGTH и помечена "…".
+    const cut = quoteStart + QUOTE_MAX_LENGTH;
+    if (text[cut] === "…" && text[cut + 1] === "\n") {
+      return text.slice(cut + 2).trim();
+    }
+
+  }
+
+  // Сохранённый текст сообщения, на которое ответили, не всегда совпадает с
+  // тем, что процитировал Telegram, символ в символ: вебхук склеивает серию
+  // сообщений одного человека (5 минут), и у первого сообщения серии в базе —
+  // вся серия, а цитата — только его текст; бывают расхождения в пробелах; в
+  // имени автора бывает своё двоеточие. Поэтому не сравниваем посимвольно, а
+  // снимаем строки: цитата состоит из строк того сообщения, и ответ агента
+  // начинается с первой строки, которой в нём нет.
+  if (quoted) {
+    const quotedLines = quoted.split("\n").map((l) => l.trim()).filter(Boolean);
+    const isQuoteLine = (line: string) => {
+      const t = line.trim();
+      if (!t) return true;
+      if (quotedLines.includes(t)) return true;
+      // Последняя строка длинной цитаты обрезана и помечена "…".
+      return t.endsWith("…") && quotedLines.some((l) => l.startsWith(t.slice(0, -1)));
+    };
+    const lines = text.split("\n");
+    // Первая строка — "↩️ Автор: первая строка цитаты"; с какого двоеточия
+    // начинается цитата, не гадаем: достаточно, что строка ею кончается.
+    const first = lines[0].trim();
+    const firstIsQuote =
+      quotedLines.some((l) => first.endsWith(l)) ||
+      (first.endsWith("…") && quotedLines.some((l) => first.includes(`: ${l.slice(0, 20)}`)));
+    if (firstIsQuote) {
+      let i = 1;
+      while (i < lines.length && isQuoteLine(lines[i])) i++;
+      const own = lines.slice(i).join("\n").trim();
+      if (own) return own;
+    }
+  }
+
   // Исходный текст неизвестен (сообщение не сохранилось) — цитата в одну
   // строку, как почти всегда: отрезаем первую строку.
   const newline = text.indexOf("\n");
