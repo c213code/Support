@@ -221,6 +221,16 @@ const CREDENTIAL_VALUE = new RegExp(
 // символов (qovtoq-Qetko9-johsak). Короче — это "3-ай", "5ай", номера уроков.
 const BARE_CREDENTIAL_TOKEN =
   /(?<![\p{L}\p{N}])(?=[\p{L}\p{N}._-]*\p{L})(?=[\p{L}\p{N}._-]*\d)[\p{L}\p{N}._-]{8,}(?![\p{L}\p{N}])/gu;
+// Пароль, который выдаёт платформа, бывает и без цифр: "ccyItBrV" — латиница
+// с регистром, скачущим внутри слова. Правило выше его пропускало, и модель
+// видела его отдельной строкой как "новый пароль" ("Құпия сөз жаңартылды"),
+// хотя агент писал про вход по номеру. Считаем пароль токен с двумя и более
+// переходами строчная→заглавная: у названий вроде YouTube, WhatsApp, iPhone
+// такой переход один.
+const MIXED_CASE_TOKEN = /(?<![\p{L}\p{N}])[A-Za-z]{6,32}(?![\p{L}\p{N}])/g;
+function looksLikeGeneratedPassword(token: string): boolean {
+  return (token.match(/[a-z][A-Z]/g) ?? []).length >= 2;
+}
 
 // Реплики агентов уходят внешней модели (Groq), когда из них собирается
 // заметка "как решили" (lib/resolutionNote.ts). В отличие от описания
@@ -240,6 +250,7 @@ export function maskSensitiveForAi(raw: string): string {
     )
     .replace(CREDENTIAL_VALUE, "$1<скрыто>")
     .replace(BARE_CREDENTIAL_TOKEN, "<скрыто>")
+    .replace(MIXED_CASE_TOKEN, (token) => (looksLikeGeneratedPassword(token) ? "<скрыто>" : token))
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 }
