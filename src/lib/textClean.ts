@@ -227,7 +227,7 @@ const BARE_CREDENTIAL_TOKEN =
 // хотя агент писал про вход по номеру. Считаем пароль токен с двумя и более
 // переходами строчная→заглавная: у названий вроде YouTube, WhatsApp, iPhone
 // такой переход один.
-const MIXED_CASE_TOKEN = /(?<![\p{L}\p{N}])[A-Za-z]{6,32}(?![\p{L}\p{N}])/g;
+const MIXED_CASE_TOKEN = /(?<![\p{L}\p{N}])[A-Za-z]{6,32}(?![\p{L}\p{N}])/gu;
 function looksLikeGeneratedPassword(token: string): boolean {
   return (token.match(/[a-z][A-Z]/g) ?? []).length >= 2;
 }
