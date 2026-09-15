@@ -9,9 +9,16 @@ import { prisma } from "@/lib/prisma";
 // набор букв там, где на самом деле стоит конкретная проблема, — и точно
 // так же вслепую ищет дубли и выбирает слово для ответа.
 //
-// Поэтому один и тот же блок знаний подмешивается в system-промпт каждой
-// ИИ-функции (см. src/lib/ai.ts): описания тикетов, поиск дублей, выбор
-// "Жөнделді/Өзгертілді".
+// Поэтому блок знаний подмешивается в system-промпт каждой ИИ-функции (см.
+// src/lib/ai.ts): описания тикетов, поиск дублей, заметки "как решили",
+// выбор "Жөнделді/Өзгертілді".
+//
+// Но только те термины, что встречаются в самом тексте запроса. Весь
+// словарь — 134 термина, ~4300 токенов — уходил в КАЖДЫЙ запрос, а лимит
+// Groq — 8000 токенов в минуту на ключ: проходило 1–2 запроса в минуту, и
+// окно "Как решили?" показывало "не удалось получить подсказку" (на
+// проверке 24 запроса из 30 упали с 429). Значение "ПФ" модели нужно, только
+// когда в тексте есть "ПФ".
 //
 // Про частоту сборки. Знание накапливается из уже решённых тикетов, а не
 // из каждого входящего сообщения: пересобирать словарь на каждое
@@ -20,32 +27,69 @@ import { prisma } from "@/lib/prisma";
 // раз в сутки по cron плюс кнопка "пересобрать" на сайте, а вот
 // использование — на каждом вызове.
 
-// Кэш на время жизни серверлесс-инстанса: контекст читают все ИИ-функции,
+// Кэш на время жизни серверлесс-инстанса: словарь читают все ИИ-функции,
 // а меняется он раз в сутки. TTL короткий, чтобы правка глоссария руками
 // не ждала перезапуска инстанса.
 const CACHE_TTL_MS = 60 * 1000;
-let cache: { text: string; at: number } | null = null;
+type ContextTerm = { term: string; meaning: string };
+let cache: { terms: ContextTerm[]; at: number } | null = null;
 
-export async function buildAiContext(): Promise<string> {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.text;
-
+async function loadContextTerms(): Promise<ContextTerm[]> {
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.terms;
   const terms = await prisma.glossaryTerm.findMany({
     orderBy: [{ auto: "asc" }, { term: "asc" }],
     select: { term: true, meaning: true },
   });
+  cache = { terms, at: Date.now() };
+  return terms;
+}
 
-  const text =
-    terms.length === 0
-      ? ""
-      : [
-          "",
-          "Контекст проекта (внутренний жаргон онлайн-школы JUZ40, обращения приходят на казахском и русском):",
-          ...terms.map((t) => `- ${t.term} — ${t.meaning}`),
-          "Учитывай это при разборе: эти сокращения — суть обращения, а не мусор.",
-        ].join("\n");
+function forMatching(text: string): string {
+  return text.replace(/[\u2010-\u2015]/g, "-").replace(/\s+/g, " ");
+}
 
-  cache = { text, at: Date.now() };
-  return text;
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Встречается ли термин в тексте. Граница слова — lookbehind, а не \b: \b
+// кириллицу не видит (см. CLAUDE.md).
+//
+// Длинный термин ищем в начале слова в любом регистре — казахские окончания
+// прилипают к нему ("кабинетке", "VIP-PRO-2.0"). С короткими (до трёх букв)
+// так нельзя: "СТ" нашёлся бы в "статус" и "студент", "ПС" — в "психолог".
+// Поэтому короткий — либо отдельным словом в любом регистре ("дт шықпайды"),
+// либо заглавными, как аббревиатура, с окончанием ("ДТ-ны", "ДТны").
+export function termMentioned(term: string, text: string): boolean {
+  const normalized = forMatching(term).trim();
+  if (!normalized) return false;
+  const body = escapeRegExp(normalized).replace(/ /g, "\\s+");
+  const start = "(?<![\\p{L}\\p{N}])";
+  const haystack = forMatching(text);
+  const letters = normalized.replace(/[^\p{L}\p{N}]/gu, "");
+  if (letters.length <= 3) {
+    if (new RegExp(`${start}${body}(?![\\p{L}\\p{N}])`, "iu").test(haystack)) return true;
+    const isAbbreviation = normalized === normalized.toUpperCase() && normalized !== normalized.toLowerCase();
+    return isAbbreviation && new RegExp(`${start}${body}`, "u").test(haystack);
+  }
+  return new RegExp(`${start}${body}`, "iu").test(haystack);
+}
+
+// relevantText — текст, который получит модель. Без него — весь словарь
+// (для вызовов, где текста нет).
+export async function buildAiContext(relevantText?: string): Promise<string> {
+  const terms = await loadContextTerms();
+  const used =
+    relevantText === undefined
+      ? terms
+      : terms.filter((t) => termMentioned(t.term, relevantText));
+  if (used.length === 0) return "";
+  return [
+    "",
+    "Контекст проекта (внутренний жаргон онлайн-школы JUZ40, обращения приходят на казахском и русском):",
+    ...used.map((t) => `- ${t.term} — ${t.meaning}`),
+    "Учитывай это при разборе: эти сокращения — суть обращения, а не мусор.",
+  ].join("\n");
 }
 
 // Сбрасывает кэш — после пересборки словаря или ручной правки, чтобы

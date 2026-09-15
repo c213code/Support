@@ -222,7 +222,7 @@ export async function rewriteTicketDescriptionWithAI(
         // обрезался на полуслове (см. комментарий у GROQ_MODEL).
         max_tokens: 500,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT + (await buildAiContext()) },
+          { role: "system", content: SYSTEM_PROMPT + (await buildAiContext(raw)) },
           ...FEW_SHOT_TURNS.flatMap(({ user, assistant }) => [
             { role: "user", content: user },
             { role: "assistant", content: assistant },
@@ -278,7 +278,7 @@ export async function findDuplicateGroups(
         max_tokens: 2500,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: DUPLICATE_SYSTEM_PROMPT + (await buildAiContext()) },
+          { role: "system", content: DUPLICATE_SYSTEM_PROMPT + (await buildAiContext(list)) },
           { role: "user", content: list },
         ],
       },
@@ -380,7 +380,8 @@ export async function summarizeResolutionNote(
         messages: [
           {
             role: "system",
-            content: RESOLUTION_NOTE_SYSTEM_PROMPT + (await buildAiContext()),
+            content: RESOLUTION_NOTE_SYSTEM_PROMPT +
+              (await buildAiContext(`${description}\n${agentTexts.join("\n")}`)),
           },
           {
             role: "user",
@@ -427,7 +428,7 @@ export async function pickResolvedWord(
         max_tokens: 200,
         reasoning_effort: "low",
         messages: [
-          { role: "system", content: RESOLVED_WORD_SYSTEM_PROMPT + (await buildAiContext()) },
+          { role: "system", content: RESOLVED_WORD_SYSTEM_PROMPT + (await buildAiContext(`${description}\n${note ?? ""}`)) },
           {
             role: "user",
             content: note ? `Обращение: ${description}\nЧто сделали: ${note}` : description,
@@ -503,7 +504,7 @@ export async function classifyAckAsk(text: string): Promise<AckAskKind | null> {
         reasoning_effort: "low",
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: ASK_HINT_SYSTEM_PROMPT + (await buildAiContext()) },
+          { role: "system", content: ASK_HINT_SYSTEM_PROMPT + (await buildAiContext(text)) },
           { role: "user", content: text },
         ],
       },
@@ -736,7 +737,7 @@ export async function classifySituation(
         messages: [
           {
             role: "system",
-            content: SITUATION_SYSTEM_PROMPT + (await buildAiContext()),
+            content: SITUATION_SYSTEM_PROMPT + (await buildAiContext(text)),
           },
           { role: "user", content: text },
         ],
@@ -794,7 +795,7 @@ export async function summarizeIssueTopic(
         reasoning_effort: "low",
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: TOPIC_SYSTEM_PROMPT + (await buildAiContext()) },
+          { role: "system", content: TOPIC_SYSTEM_PROMPT + (await buildAiContext(description)) },
           { role: "user", content: description },
         ],
       },
@@ -893,7 +894,7 @@ export async function investigateStudentLogs(
   // Контекст проекта тянется из БД (см. projectContext) — держим его снаружи
   // try, иначе упавший Postgres неотличим от неответившей модели, и агенту
   // будет предложено "попробовать ещё раз" вместо починки базы.
-  const context = await buildAiContext();
+  const context = await buildAiContext(`${situation}\n${JSON.stringify(events)}`);
 
   try {
     const data = (await callGroqChat(
@@ -1004,7 +1005,7 @@ const LOG_ERROR_EXPLANATION_SYSTEM_PROMPT = `Ты помогаешь агент�
 export async function explainLogError(event: LogErrorEvent): Promise<string | null> {
   if (groqApiKeys().length === 0) return null;
 
-  const context = await buildAiContext();
+  const context = await buildAiContext(JSON.stringify(event));
 
   try {
     const data = (await callGroqChat(
