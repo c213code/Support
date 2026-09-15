@@ -38,8 +38,11 @@
      explain/path точнее);
    - `graphify-out/GRAPH_REPORT.md` — узлы-гиганты, кластеры, связность: для
      обзора архитектуры и поиска пробелов;
-   - `graphify-out/wiki/index.md` — навигация по кластерам. Хук вики **не**
-     обновляет: перед опорой на неё — `graphify export wiki`.
+   - `graphify-out/wiki/index.md` — навигация по кластерам. Post-commit хук
+     пересобирает её вслед за графом (строка `[graphify hook] wiki:` в
+     `~/.cache/graphify-rebuild.log`). Хук живёт в `.git/hooks/` — только на
+     этой машине, и `graphify hook install` сотрёт вставку про вики; если в
+     логе строки нет — `graphify export wiki` руками.
 3. **Проверить находку в коде** — граф подсказывает, где смотреть, но не
    заменяет чтение файла.
 
