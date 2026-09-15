@@ -7,7 +7,7 @@ import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { detectAgentIntent } from "@/lib/agentIntent";
 import { type AgentTarget } from "@/lib/agentThread";
 import { collectResolutionContext } from "@/lib/resolutionNote";
-import { summarizeResolutionNote } from "@/lib/ai";
+import { isSameCaseFromAnotherPerson, summarizeResolutionNote } from "@/lib/ai";
 import { buildStatusReplyText, pickLanguage } from "@/lib/autoReply";
 import { sendBotReply } from "@/lib/botReply";
 import { isChatIntentEnabled, isAiCleaningEnabled } from "@/lib/settings";
@@ -290,7 +290,16 @@ export async function findSameAuthorActiveIssue(
 
 // Реплай на уже заведённое сообщение — частый паттерн "напоминание":
 // человек отвечает на своё же старое сообщение (или снова пишет по уже
-// "решённому" тикету), на которое так и не ответили. Обычная
+// "решённому" тикету), на которое так и не ответили.
+//
+// Но только если отвечает АВТОР обращения. Другой человек, ответивший на
+// чужое обращение, чаще приносит свою похожую просьбу ("Құқық қазан ағымының
+// ашылу уақытын да ауыстыру қажет" в ответ на такую же по Географии) — это
+// новый случай. Раньше и такой ответ считался напоминанием: решённый тикет
+// возвращался в работу, а бот писал в группу "Кешіріңіз, кідіріп қалды". Для
+// другого человека решает ИИ (isSameCaseFromAnotherPerson); если это не тот же
+// случай или ИИ недоступен — возвращаем false, и сообщение идёт обычным
+// путём: свой тикет со своим подтверждением. Обычная
 // regex/ИИ-чистка тут не спасает: сама реплика ("Осы бойынша кері
 // байланыс бере аласыздарма?") без исходного вопроса ничего не значит.
 // Вместо отдельного, оторванного от контекста тикета — приклеиваем
@@ -324,6 +333,20 @@ export async function attachFollowUpToTicket(
   const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
   const authorName = extractAuthorName(message.from);
   const wasResolved = issue.status === "RESOLVED";
+
+  const ticketAuthors = await prisma.telegramMessage.findMany({
+    where: { usedForIssueId: issue.id, fromId: { not: null } },
+    distinct: ["fromId"],
+    select: { fromId: true },
+  });
+  const isTicketAuthor =
+    fromId != null && ticketAuthors.some((author) => author.fromId === fromId);
+  if (!isTicketAuthor) {
+    const sameCase = (await isAiCleaningEnabled())
+      ? await isSameCaseFromAnotherPerson(issue.description, ownText)
+      : null;
+    if (sameCase !== true) return false;
+  }
 
   // Ссылку в extraLinks НЕ добавляем — это тот же случай, а не отдельное
   // обращение (см. ATTACH_LINK_POLICY выше). Статус, если тикет считался

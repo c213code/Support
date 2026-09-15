@@ -594,6 +594,67 @@ export async function isSameRequestFollowUp(
   }
 }
 
+// ДРУГОЙ человек ответил Reply на обращение, по которому уже есть тикет. Это
+// не то же самое, что напоминание от автора (см. attachFollowUpToTicket):
+// в рабочих чатах кураторы часто отвечают на чужое обращение своей похожей
+// просьбой — "Құқық қазан ағымының ашылу уақытын да ауыстыру қажет" в ответ на
+// такую же просьбу по Географии. Раньше любой такой ответ считался
+// напоминанием: решённый тикет возвращался в работу, а бот писал в группу
+// "Кешіріңіз, кідіріп қалды", хотя никто ничего не ждал.
+const OTHER_PERSON_FOLLOWUP_SYSTEM_PROMPT = `Ты помогаешь боту поддержки понять, что значит ответ на чужое обращение.
+
+В рабочем чате поддержки один человек написал обращение, по нему уже есть тикет. ДРУГОЙ человек ответил на это обращение (Reply). Реши: он пишет про ЭТОТ ЖЕ КОНКРЕТНЫЙ случай — или приносит СВОЮ, отдельную просьбу, пусть даже такую же по типу.
+
+true — тот же случай: напоминает или спрашивает, что с ним ("осы бойынша жауап бар ма?", "әлі шешілмеді ме?"); уточняет или добавляет данные по нему же (почту, скриншот того же ученика); сообщает, что именно в этом случае проблема осталась.
+
+false — своя просьба: "нам тоже", то же самое для своего курса, потока, ағым, группы, класса, предмета, другого ученика или куратора ("біздің ағымда да", "құқық ағымын да ауыстыру керек", "бізде де осындай мәселе"). Это новый случай, ему нужен свой тикет.
+
+Если сомневаешься — false.
+
+Ответь строго JSON без пояснений: {"sameCase": true} или {"sameCase": false}.`;
+
+// null — модель недоступна или ответила не по формату; вызывающий код тогда
+// заводит новый тикет: лишний тикет безопаснее, чем вернуть решённый и
+// написать в группу неуместное "кідіріп қалды".
+export async function isSameCaseFromAnotherPerson(
+  existingTicket: string,
+  newMessage: string
+): Promise<boolean | null> {
+  if (groqApiKeys().length === 0 || !newMessage.trim()) return null;
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 200,
+        reasoning_effort: "low",
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              OTHER_PERSON_FOLLOWUP_SYSTEM_PROMPT +
+              (await buildAiContext(`${existingTicket}\n${newMessage}`)),
+          },
+          {
+            role: "user",
+            content: `Обращение (тикет): ${existingTicket}\nОтвет другого человека: ${newMessage}`,
+          },
+        ],
+      },
+      FOLLOWUP_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") return null;
+    const parsed = JSON.parse(content);
+    return typeof parsed?.sameCase === "boolean" ? parsed.sameCase : null;
+  } catch {
+    return null;
+  }
+}
+
 const GLOSSARY_TIMEOUT_MS = 20000;
 // Сколько тикетов показываем модели за раз. Больше — точнее словарь, но
 // длиннее промпт; на бесплатной квоте Groq это ощутимо.
