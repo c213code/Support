@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchApiJson } from "@/lib/fetchApiJson";
 import type { ChatThreadDTO } from "@/lib/submissionChat";
+import type { IssueStatus } from "@/lib/status";
 
 // Переписка с куратором в окне тикета. Дежурный пишет здесь, куратор получает
 // сообщение от бота в личку и отвечает там же — своего чата в мини-аппе нет
@@ -11,63 +12,86 @@ import type { ChatThreadDTO } from "@/lib/submissionChat";
 // Тредов бывает несколько: тикет мог быть склеен из заявок разных кураторов.
 // Тогда сверху появляется выбор, кому пишем, — иначе дежурный отвечал бы
 // одному, думая, что говорит с другим.
-export function SubmissionChat({ issueId }: { issueId: string }) {
+
+// Лента опрашивается, как и доска (Inbox.tsx), только чаще: там ждут новых
+// тикетов за день, здесь — ответа на заданный минуту назад вопрос. Без
+// опроса ответ куратора появлялся только после перезахода в тикет.
+const POLL_INTERVAL_MS = 10000;
+
+type Props = {
+  issueId: string;
+  // Ответ куратора возвращает решённый тикет в работу, и форма должна
+  // показать это сама: человек смотрит на переписку, а не на доску.
+  onIssueStatus?: (status: IssueStatus) => void;
+};
+
+type ChatResponse = { threads: ChatThreadDTO[]; status: IssueStatus | null };
+
+export function SubmissionChat({ issueId, onIssueStatus }: Props) {
   const [threads, setThreads] = useState<ChatThreadDTO[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Колбэк родителя приходит инлайном и меняется на каждый его рендер —
+  // через ref опрос не перезапускается из-за этого.
+  const statusCallback = useRef(onIssueStatus);
   useEffect(() => {
-    let cancelled = false;
+    statusCallback.current = onIssueStatus;
+  }, [onIssueStatus]);
 
+  // Сессия истекла — опрашивать дальше бессмысленно, каждый запрос вернёт
+  // страницу входа.
+  const stopped = useRef(false);
+
+  useEffect(() => {
+    stopped.current = false;
+
+    // Объявлена внутри эффекта намеренно: вынесенную наружу функцию, которая
+    // ставит состояние, eslint считает setState прямо в теле эффекта
+    // (react-hooks/set-state-in-effect) — здесь же всё происходит после await.
     async function load() {
-      const res = await fetchApiJson<{ threads: ChatThreadDTO[] }>(
-        `/api/issues/${issueId}/chat`
-      );
-      if (cancelled) return;
+      const res = await fetchApiJson<ChatResponse>(`/api/issues/${issueId}/chat`);
       if (!res.ok) {
-        setError(
-          res.reason === "session"
-            ? "Сессия истекла — обновите страницу"
-            : "Переписка не загрузилась"
-        );
-        setThreads([]);
+        if (res.reason === "session") {
+          stopped.current = true;
+          setError("Сессия истекла — обновите страницу");
+        }
+        // Разовый сетевой сбой при опросе не стирает уже показанную переписку:
+        // лента на экране честнее пустого блока с ошибкой.
+        setThreads((current) => current ?? []);
         return;
       }
+      setError(null);
       setThreads(res.data.threads);
       setActiveId((current) => current ?? res.data.threads[0]?.submissionId ?? null);
+      if (res.data.status) statusCallback.current?.(res.data.status);
     }
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    const timer = setInterval(() => {
+      // Вкладку оставили открытой в фоне — дёргать сервер незачем, при
+      // возврате на неё всё равно будет свежий запрос по таймеру.
+      if (stopped.current || document.visibilityState !== "visible") return;
+      load();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, [issueId]);
 
-  if (threads === null) {
-    return <p className="text-xs text-slate-400">Загружаем переписку…</p>;
-  }
-  if (threads.length === 0) {
-    return error ? <p className="text-xs text-rose-600">{error}</p> : null;
-  }
+  const active = threads?.find((t) => t.submissionId === activeId) ?? threads?.[0];
 
-  const active = threads.find((t) => t.submissionId === activeId) ?? threads[0];
-
-  async function send() {
+  const send = useCallback(async () => {
     const text = draft.trim();
-    if (!text || sending) return;
+    if (!text || sending || !active) return;
 
     setSending(true);
     setError(null);
-    const res = await fetchApiJson<{ threads: ChatThreadDTO[] }>(
-      `/api/issues/${issueId}/chat`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submissionId: active.submissionId, text }),
-      }
-    );
+    const res = await fetchApiJson<ChatResponse>(`/api/issues/${issueId}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ submissionId: active.submissionId, text }),
+    });
     setSending(false);
 
     if (!res.ok) {
@@ -79,7 +103,15 @@ export function SubmissionChat({ issueId }: { issueId: string }) {
       return;
     }
     setThreads(res.data.threads);
+    if (res.data.status) statusCallback.current?.(res.data.status);
     setDraft("");
+  }, [draft, sending, active, issueId]);
+
+  if (threads === null) {
+    return <p className="text-xs text-slate-400">Загружаем переписку…</p>;
+  }
+  if (!active) {
+    return error ? <p className="text-xs text-rose-600">{error}</p> : null;
   }
 
   return (
@@ -147,13 +179,24 @@ export function SubmissionChat({ issueId }: { issueId: string }) {
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter отправляет, как в любом мессенджере: здесь пишут короткие
+          // уточнения, а не абзацы. Перенос строки — Shift+Enter.
+          // isComposing — набор через IME (казахская/китайская раскладка с
+          // подсказками): там Enter подтверждает слово, а не отправляет.
+          if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          send();
+        }}
         rows={2}
         placeholder="Что уточнить у куратора?"
         className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
       />
       {error && <p className="text-xs text-rose-600">{error}</p>}
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] text-slate-400">Куратор увидит сообщение от бота</p>
+        <p className="text-[11px] text-slate-400">
+          Enter — отправить, Shift+Enter — перенос строки
+        </p>
         <button
           type="button"
           onClick={send}

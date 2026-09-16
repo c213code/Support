@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
 import { loadIssueThreads, markThreadRead, sendToCurator } from "@/lib/submissionChat";
 
@@ -21,7 +22,19 @@ export async function GET(_request: NextRequest, { params }: Params) {
   // лишнее действие ради того, что и так очевидно из открытого окна.
   await markThreadRead(id);
 
-  return NextResponse.json({ threads });
+  return NextResponse.json({ threads, status: await issueStatus(id) });
+}
+
+// Статус отдаётся вместе с перепиской, потому что ответ куратора его меняет
+// (решённый тикет возвращается в работу). Без этого открытое окно тикета
+// показывало бы прежний статус до перезахода — человек видел новый ответ и
+// старый статус одновременно.
+async function issueStatus(issueId: string) {
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { status: true },
+  });
+  return issue?.status ?? null;
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
@@ -51,5 +64,5 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   const threads = await loadIssueThreads(id);
-  return NextResponse.json({ threads });
+  return NextResponse.json({ threads, status: await issueStatus(id) });
 }

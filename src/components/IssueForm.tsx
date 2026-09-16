@@ -84,6 +84,11 @@ export function IssueForm({
   const [status, setStatus] = useState<IssueStatus>(
     initial?.status ?? "SENT"
   );
+  // Статус, выбранный человеком прямо в этом окне, важнее пришедшего с
+  // сервера: пока он ставил «Решено», ответ куратора мог вернуть тикет в
+  // работу (см. SubmissionChat), и подменить выбор под рукой — худшее из
+  // возможного. До первого клика, наоборот, показываем серверное состояние.
+  const [statusPickedHere, setStatusPickedHere] = useState(false);
   const [note, setNote] = useState(initial?.note ?? "");
   const [ticketLink, setTicketLink] = useState(initial?.ticketLink ?? "");
   const [escalatedTeam, setEscalatedTeam] = useState<EscalationTeam | "">(
@@ -185,6 +190,7 @@ export function IssueForm({
 
   function pickStatus(next: IssueStatus) {
     setStatus(next);
+    setStatusPickedHere(true);
     if (next === "ESCALATED" && !escalatedTeam) {
       setEscalatedTeam(ESCALATION_TEAMS[0]);
     }
@@ -350,7 +356,14 @@ export function IssueForm({
         )}
         {/* У заявки из формы нет сообщения в группе, где можно было бы
             переспросить, — поэтому переписка с куратором живёт здесь. */}
-        {initial?.submission && initial.id && <SubmissionChat issueId={initial.id} />}
+        {initial?.submission && initial.id && (
+          <SubmissionChat
+            issueId={initial.id}
+            onIssueStatus={(serverStatus) => {
+              if (!statusPickedHere) setStatus(serverStatus);
+            }}
+          />
+        )}
         {showSource && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs">
             {sourceState === "loading" ? (
