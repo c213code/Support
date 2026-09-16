@@ -23,6 +23,7 @@ import {
 } from "@/lib/botReply";
 import { isAutoReplyEnabled } from "@/lib/settings";
 import { handleBotMessageDeleteCallback } from "@/lib/botMessageDelete";
+import { handleCuratorChoiceCallback } from "@/lib/submissionChat";
 import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
@@ -41,6 +42,7 @@ import {
   AGENT_TARGET_PREFIX,
   AUTO_REPLY_MERGE_PREFIX,
   AUTO_REPLY_PICK_PREFIX,
+  SUBMISSION_PICK_PREFIX,
   CONFIRM_RESOLVED_PREFIX,
   RESOLVE_WITH_DRAFT_PREFIX,
   SOLVE_LIKE_PREFIX,
@@ -356,6 +358,12 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
       query.message.message_id,
       `${query.message.text ?? ""}\n\n🔗 Объединено с прошлым обращением. Отправлено: ${text}`
     );
+    return;
+  }
+
+  // Куратор выбрал, о какой из своих заявок он пишет (см. submissionChat.ts).
+  if (data.startsWith(SUBMISSION_PICK_PREFIX)) {
+    await handleCuratorChoiceCallback(query);
     return;
   }
 

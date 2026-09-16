@@ -58,7 +58,10 @@ export type TelegramMessagePayload = {
   };
   text?: string;
   caption?: string;
-  photo?: unknown[];
+  // Telegram отдаёт один снимок несколькими размерами, от превью к оригиналу
+  // (см. largestPhotoFileId). Сами байты у нас не хранятся — только file_id,
+  // как и у фото из формы мини-аппа.
+  photo?: Array<{ file_id?: string }>;
   sticker?: { emoji?: string };
   document?: { file_name?: string };
   voice?: unknown;
@@ -86,8 +89,13 @@ export function buildMessageLink(chatId: number, messageId: number): string {
   return `https://t.me/c/${internalId}/${messageId}`;
 }
 
+// Имя нужно и для нажатия на кнопку (TelegramCallbackQuery.from), где поля
+// is_bot нет, — поэтому параметр описан по тем полям, которые реально
+// читаются, а не целым типом отправителя сообщения.
 export function extractAuthorName(
-  from: TelegramMessagePayload["from"]
+  from:
+    | { first_name?: string; last_name?: string; username?: string }
+    | undefined
 ): string | null {
   if (!from) return null;
   const name = [from.first_name, from.last_name].filter(Boolean).join(" ");
@@ -145,6 +153,17 @@ export function extractText(message: TelegramMessagePayload): string | null {
   if (message.voice) return "[Голосовое сообщение]";
   if (message.video) return "[Видео]";
   return null;
+}
+
+// file_id самого крупного размера присланного фото. Telegram шлёт один
+// снимок несколькими размерами по возрастанию, последний — оригинал; мелкие
+// нужны ленте чатов, а не нам: на скриншоте куратора важно прочитать текст
+// ошибки (см. lib/submissionChat.ts).
+export function largestPhotoFileId(
+  message: TelegramMessagePayload
+): string | undefined {
+  const sizes = message.photo ?? [];
+  return sizes[sizes.length - 1]?.file_id;
 }
 
 // Экспорт — ради lib/resolutionNote.ts: там цитату нужно срезать обратно,

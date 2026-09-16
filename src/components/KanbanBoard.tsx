@@ -424,7 +424,14 @@ export function KanbanBoard({
                         одного чипа почты/телефона — иначе он уже виден. */}
                     {issue.submission && (
                       <div className="mt-1.5 space-y-1 rounded-md bg-slate-50 p-1.5 text-[11px] text-slate-600">
-                        <p>📝 Из формы · {issue.submission.authorName}</p>
+                        <p>
+                          📝 Из формы · {issue.submission.authorName}
+                          {issue.submission.unreadReplies > 0 && (
+                            <span className="ml-1.5 rounded-full bg-brand-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                              💬 {issue.submission.unreadReplies}
+                            </span>
+                          )}
+                        </p>
                         {!issue.hints?.emails.length && !issue.hints?.phones.length && (
                           <p className="break-words">👤 {issue.submission.studentContact}</p>
                         )}

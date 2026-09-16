@@ -10,6 +10,7 @@ import { handleBotCommand } from "@/lib/webhook/commands";
 import { ensureMiniAppMenuButton } from "@/lib/miniapp";
 import { handleCallbackQuery } from "@/lib/webhook/callbacks";
 import { createAutoIssue, sendAcknowledgement } from "@/lib/webhook/acknowledge";
+import { intakeCuratorMessage } from "@/lib/submissionChat";
 import {
   applyAgentIntent,
   attachReplyToBotMessage,
@@ -251,6 +252,18 @@ export async function POST(request: NextRequest) {
     // передал / сделал". Двигаем статус по ней, чтобы вечером не
     // проставлять заново то, что уже сделано днём.
     await applyAgentIntent(message, chatId, text, target);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Личка с куратором, подавшим обращение формой: его сообщение — это ответ
+  // дежурному, а не новый запрос во "Входящие" (см. lib/submissionChat.ts).
+  // Проверяется до всех привязок ниже: те ищут исходное сообщение в рабочей
+  // группе, которого у заявки из формы нет, и ответ куратора проваливался бы
+  // во "Входящие" отдельной карточкой без всякой связи с тикетом.
+  if (
+    message.chat.type === "private" &&
+    (await intakeCuratorMessage(message, chatId, text))
+  ) {
     return NextResponse.json({ ok: true });
   }
 

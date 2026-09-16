@@ -35,3 +35,12 @@ export function telegramIdToAgent(id: number): string | null {
   const entry = parseAgentTelegramIds().find(([, agentId]) => agentId === id);
   return entry?.[0] ?? null;
 }
+
+// Обратный поиск: в какую личку писать конкретному дежурному. Нужен, чтобы
+// ответ куратора по его тикету не ждал, пока дежурный откроет доску, —
+// уведомление приходит туда же, где он и так сидит (см. submissionChat.ts).
+// null — агента нет в AGENT_TELEGRAM_IDS (например, общий "Дежурный").
+export function agentTelegramId(name: string): number | null {
+  const entry = parseAgentTelegramIds().find(([agentName]) => agentName === name);
+  return entry?.[1] ?? null;
+}

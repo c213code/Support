@@ -412,8 +412,57 @@ model IssueSubmission {
   // нажал ещё раз) находит уже заведённый тикет, а не заводит второй.
   clientSubmissionId String?  @unique
   createdAt          DateTime @default(now())
+  // Переписка с куратором по этой заявке — см. SubmissionMessage.
+  messages           SubmissionMessage[]
 
   @@index([issueId])
+  @@index([telegramUserId, createdAt])
+}
+
+// Переписка дежурного с куратором, подавшим обращение через мини-апп.
+// Живёт в личке бота: дежурный пишет с сайта под тикетом, куратору это
+// приходит от бота, и он отвечает там же. Своего чата у мини-аппа нет
+// намеренно — кураторы и так сидят в Telegram.
+model SubmissionMessage {
+  id           String          @id @default(cuid())
+  submission   IssueSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  submissionId String
+  // true — написал дежурный (ушло куратору в личку), false — ответ куратора.
+  fromAgent    Boolean
+  // Кто написал: имя дежурного по сессии сайта или имя куратора из Telegram.
+  // Куратору имя дежурного не показывается — для него это разговор с ботом.
+  authorName   String
+  text         String
+  // Фото из ответа куратора: у нас только file_id, как и у самой заявки
+  // (см. комментарий к photoFileIds выше).
+  photoFileIds String[]        @default([])
+  // id сообщения бота в личке куратора. По нему ответ стрелкой попадает в
+  // нужную переписку, даже когда у куратора открыто несколько обращений.
+  telegramMessageId Int?
+  // Когда дежурный увидел ответ на доске — по этому полю считается
+  // «есть новый ответ» на карточке тикета.
+  readAt       DateTime?
+  createdAt    DateTime        @default(now())
+
+  @@index([submissionId, createdAt])
+  @@index([telegramMessageId])
+}
+
+// Сообщение куратора, пришедшее в личку без ответа стрелкой, когда
+// непонятно, к какому из его обращений оно относится. Бот спрашивает
+// кнопками «Қай өтініш бойынша?» и держит текст здесь, пока тот не выберет.
+// Без этого пришлось бы либо гадать, либо терять сообщение.
+model PendingCuratorMessage {
+  id              String   @id @default(cuid())
+  telegramUserId  BigInt
+  chatId          String
+  // Сообщение бота с кнопками: по нему находим этот черновик при нажатии.
+  promptMessageId Int
+  text            String
+  photoFileIds    String[] @default([])
+  createdAt       DateTime @default(now())
+
+  @@unique([chatId, promptMessageId])
   @@index([telegramUserId, createdAt])
 }
 

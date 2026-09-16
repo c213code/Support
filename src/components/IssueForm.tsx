@@ -8,6 +8,7 @@ import { ESCALATION_TEAMS, type EscalationTeam } from "@/lib/escalation";
 import { useAiCleaningEnabled } from "@/lib/useAiCleaningEnabled";
 import { IconRefresh } from "@/components/Icons";
 import { SubmissionPhoto } from "@/components/SubmissionPhoto";
+import { SubmissionChat } from "@/components/SubmissionChat";
 
 export type IssueFormValues = {
   groupName: string;
@@ -347,6 +348,9 @@ export function IssueForm({
             />
           </div>
         )}
+        {/* У заявки из формы нет сообщения в группе, где можно было бы
+            переспросить, — поэтому переписка с куратором живёт здесь. */}
+        {initial?.submission && initial.id && <SubmissionChat issueId={initial.id} />}
         {showSource && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs">
             {sourceState === "loading" ? (

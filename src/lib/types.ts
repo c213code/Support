@@ -58,6 +58,9 @@ export type IssueDTO = {
     // Сколько фото приложил куратор — по одному их отдаёт
     // GET /api/issues/[id]/photo?i=N.
     photoCount: number;
+    // Сколько ответов куратора в переписке дежурный ещё не открывал (см.
+    // lib/submissionChat.ts). 0 — новых нет.
+    unreadReplies: number;
   } | null;
 };
 

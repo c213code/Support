@@ -9,6 +9,7 @@ import { extractTicketHints } from "@/lib/ticketHints";
 import { detectEmailChangeRequest } from "@/lib/emailChangeRequest";
 import { mentionsUntTest } from "@/lib/untResetRequest";
 import { platformEnabled } from "@/lib/platform";
+import { unreadReplyCounts } from "@/lib/submissionChat";
 
 export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
@@ -97,6 +98,11 @@ export async function GET(request: NextRequest) {
     submissionsByIssue.set(s.issueId, [...(submissionsByIssue.get(s.issueId) ?? []), s]);
   }
 
+  // Сколько ответов куратора дежурный ещё не открывал — метка на карточке.
+  // Без неё ответ на уточнение было бы видно, только если зайти в тикет, а
+  // заходят в него как раз потому, что заметили метку.
+  const unreadByIssue = await unreadReplyCounts(issueIds);
+
   return NextResponse.json({
     issues: issues.map((issue) => {
       const issueSubmissions = submissionsByIssue.get(issue.id) ?? [];
@@ -131,6 +137,7 @@ export async function GET(request: NextRequest) {
               // У обращений, поданных до появления нескольких фото,
               // photoFileIds пуст, а фото ровно одно (в photoFileId).
               photoCount: submission.photoFileIds.length || 1,
+              unreadReplies: unreadByIssue.get(issue.id) ?? 0,
             }
           : null,
       };
