@@ -194,6 +194,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Личка с куратором, подавшим обращение формой: его сообщение — это ответ
+  // дежурному, а не новый запрос во "Входящие" (см. lib/submissionChat.ts).
+  //
+  // Стоит до ветки "это сообщение нашего агента" по той же причине, что и
+  // проверки pendingAutoReply/pendingNotePrompt выше: агент бывает и автором
+  // заявки (свой же курс, проверка фичи), и тогда его ответ реплаем на вопрос
+  // бота уходил в разбор реплик агента, а в переписке не появлялся вовсе.
+  // Ответ стрелкой на конкретное сообщение бота однозначен, кем бы он ни был
+  // отправлен; остальные пути для агентов внутри намеренно выключены, чтобы
+  // не перехватывать его переписку с ботом по другим сценариям.
+  if (
+    message.chat.type === "private" &&
+    (await intakeCuratorMessage(message, chatId, text))
+  ) {
+    return NextResponse.json({ ok: true });
+  }
+
   const preset = await prisma.groupPreset.findUnique({ where: { chatId } });
 
   if (isOwnAgentMessage(message.from?.id)) {
@@ -252,18 +269,6 @@ export async function POST(request: NextRequest) {
     // передал / сделал". Двигаем статус по ней, чтобы вечером не
     // проставлять заново то, что уже сделано днём.
     await applyAgentIntent(message, chatId, text, target);
-    return NextResponse.json({ ok: true });
-  }
-
-  // Личка с куратором, подавшим обращение формой: его сообщение — это ответ
-  // дежурному, а не новый запрос во "Входящие" (см. lib/submissionChat.ts).
-  // Проверяется до всех привязок ниже: те ищут исходное сообщение в рабочей
-  // группе, которого у заявки из формы нет, и ответ куратора проваливался бы
-  // во "Входящие" отдельной карточкой без всякой связи с тикетом.
-  if (
-    message.chat.type === "private" &&
-    (await intakeCuratorMessage(message, chatId, text))
-  ) {
     return NextResponse.json({ ok: true });
   }
 

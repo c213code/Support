@@ -6,6 +6,7 @@ import {
   answerCallbackQuery,
   editMessageText,
   extractAuthorName,
+  isOwnAgentMessage,
   largestPhotoFileId,
   sendTelegramMessage,
   type TelegramCallbackQuery,
@@ -276,6 +277,13 @@ export async function intakeCuratorMessage(
       return true;
     }
   }
+
+  // Дальше — пути без точной привязки. Для наших же агентов они выключены:
+  // личка с ботом у них рабочая (репорт, разбор, заметки реплаем), и молча
+  // утащить оттуда сообщение в переписку по заявке значит сломать всё
+  // остальное. Агент, который сам подал заявку, отвечает стрелкой — этот
+  // путь выше и работает для всех.
+  if (isOwnAgentMessage(fromId)) return false;
 
   // 2. Ровно один висящий вопрос — ответ, очевидно, на него.
   const openQuestion = await singleOpenQuestion(telegramUserId);
