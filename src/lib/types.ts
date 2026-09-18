@@ -61,6 +61,10 @@ export type IssueDTO = {
     // Сколько ответов куратора в переписке дежурный ещё не открывал (см.
     // lib/submissionChat.ts). 0 — новых нет.
     unreadReplies: number;
+    // Название выбранной типовой проблемы и расшифровка её полей. null —
+    // обращение подано до появления ярлыков (lib/submissionLabels.ts).
+    labelTitle: string | null;
+    details: string;
   } | null;
 };
 

@@ -84,6 +84,10 @@ export type SubmissionFields = {
   // photoFileId — первое фото, photoFileIds — все (их может быть до пяти).
   photoFileId: string;
   photoFileIds: string[];
+  // Выбранная типовая проблема и ответы на её поля (lib/submissionLabels.ts).
+  // Необязательные: заявки, поданные до появления ярлыков, их не имеют.
+  labelId?: string | null;
+  labelFields?: Record<string, string | string[]>;
 };
 
 // regex (hasIdentifier) уже решил "просить почту/ссылку" или "не просить" —

@@ -2,6 +2,14 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { OFFICIAL_GROUPS } from "@/lib/groups";
+import { LabelFields } from "@/components/LabelFields";
+import {
+  buildSummary,
+  fieldVisible,
+  labelsForGroup,
+  missingFields,
+  type LabelField,
+} from "@/lib/submissionLabels";
 import { currentInitData, haptic, telegramApp, type MiniAppEnv } from "@/lib/miniappClient";
 import styles from "./SubmissionForm.module.css";
 
@@ -46,9 +54,9 @@ type Photo = { blob: Blob; url: string };
 
 type Draft = {
   groupName: string;
-  description: string;
-  studentContact: string;
-  lessonLink: string;
+  // Выбранная типовая проблема и ответы на её поля (см. lib/submissionLabels).
+  labelId: string;
+  values: Record<string, string | string[]>;
   submissionId: string;
 };
 
@@ -114,28 +122,6 @@ function formatSize(bytes: number): string {
     : `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
 }
 
-// Почта или телефон — подсказываем на лету, чтобы опечатку было видно до
-// отправки, а не когда дежурный не найдёт ученика.
-function contactKind(value: string): "empty" | "email" | "phone" | "unknown" {
-  const v = value.trim();
-  if (!v) return "empty";
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return "email";
-  const digits = v.replace(/[\s()+-]/g, "");
-  if (/^\d{10,12}$/.test(digits)) return "phone";
-  return "unknown";
-}
-
-// Урок можно указать двумя способами, и оба одинаково годятся: ссылкой или
-// «ай-аптой» — привязкой к программе (3-ай 2-апта), по которой дежурный сам
-// найдёт нужное занятие. Ссылка есть не всегда, а ай-апта — почти всегда.
-function lessonKind(value: string): "empty" | "url" | "week" | "text" {
-  const v = value.trim();
-  if (!v) return "empty";
-  if (/^https?:\/\/\S+$/i.test(v)) return "url";
-  if (/\d\s*-?\s*(ай|апта)/i.test(v)) return "week";
-  return "text";
-}
-
 // Картинки из буфера обмена, если они там есть.
 function imagesFromClipboard(event: ClipboardEvent): File[] {
   return Array.from(event.clipboardData?.items ?? [])
@@ -144,14 +130,12 @@ function imagesFromClipboard(event: ClipboardEvent): File[] {
     .filter((file): file is File => file !== null);
 }
 
+// Якоря для прокрутки к незаполненному. Поля ярлыка адресуются по своему id
+// (см. fieldElementId), поэтому здесь остались только постоянные секции.
 const FIELD_IDS = {
   group: "field-group",
-  description: "field-description",
-  contact: "field-contact",
-  link: "field-link",
-  photo: "field-photo",
+  photo: "field-photos",
 } as const;
-type Field = keyof typeof FIELD_IDS;
 
 function CheckIcon({ size }: { size: number }) {
   return (
@@ -196,9 +180,10 @@ export function SubmissionForm({
   const [restored, setRestored] = useState(false);
 
   const [groupName, setGroupName] = useState("");
-  const [description, setDescription] = useState("");
-  const [studentContact, setStudentContact] = useState("");
-  const [lessonLink, setLessonLink] = useState("");
+  // Что за проблема и ответы на её поля. Раньше здесь были три фиксированных
+  // поля (описание, ученик, урок) — теперь их состав задаёт выбранный ярлык.
+  const [labelId, setLabelId] = useState("");
+  const [values, setValues] = useState<Record<string, string | string[]>>({});
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [compressing, setCompressing] = useState(false);
   const [submissionId, setSubmissionId] = useState(newSubmissionId);
@@ -233,9 +218,8 @@ export function SubmissionForm({
       try {
         const draft = raw ? (JSON.parse(raw) as Partial<Draft>) : {};
         setGroupName(draft.groupName || lastGroup || "");
-        setDescription(draft.description ?? "");
-        setStudentContact(draft.studentContact ?? "");
-        setLessonLink(draft.lessonLink ?? "");
+        setLabelId(draft.labelId ?? "");
+        setValues(draft.values ?? {});
         if (draft.submissionId) setSubmissionId(draft.submissionId);
       } catch {
         if (lastGroup) setGroupName(lastGroup);
@@ -247,12 +231,14 @@ export function SubmissionForm({
 
   useEffect(() => {
     if (!restored || sent) return;
-    const draft: Draft = { groupName, description, studentContact, lessonLink, submissionId };
-    const empty = !description && !studentContact && !lessonLink;
-    writeStorage(DRAFT_KEY, empty ? null : JSON.stringify(draft));
-  }, [restored, sent, groupName, description, studentContact, lessonLink, submissionId]);
+    const draft: Draft = { groupName, labelId, values, submissionId };
+    const filled = Object.values(values).some((v) =>
+      Array.isArray(v) ? v.some((s) => s.trim() !== "") : v.trim() !== ""
+    );
+    writeStorage(DRAFT_KEY, labelId || filled ? JSON.stringify(draft) : null);
+  }, [restored, sent, groupName, labelId, values, submissionId]);
 
-  const dirty = Boolean(description || studentContact || lessonLink || photos.length);
+  const dirty = Boolean(labelId || photos.length);
 
   // Закрыть начатую форму — спросить. Текст переживёт закрытие в черновике,
   // фото — нет; различать это в одном системном вопросе Telegram нельзя,
@@ -380,14 +366,26 @@ export function SubmissionForm({
     setPhotos([]);
   }
 
-  const missing: Field[] = [
-    ...(!groupName ? (["group"] as const) : []),
-    ...(!description.trim() ? (["description"] as const) : []),
-    ...(!studentContact.trim() ? (["contact"] as const) : []),
-    ...(!lessonLink.trim() ? (["link"] as const) : []),
-    ...(photos.length === 0 ? (["photo"] as const) : []),
+  // Выбранная типовая проблема и её требования. Пока ярлык не выбран, полей
+  // нет вовсе — форма состоит из выбора группы и ленты проблем.
+  const label = labelsForGroup(groupName).find((l) => l.id === labelId) ?? null;
+  // Активное поле скриншотов: оно задаёт подпись секции фото и минимум. У
+  // «кірмей тұр» их два — для прошедших регистрацию и для тех, кто нет.
+  const photoField: LabelField | null =
+    label?.fields.find((f) => f.type === "photos" && fieldVisible(f, values)) ?? null;
+
+  const missing: string[] = [
+    ...(!groupName ? ["group"] : []),
+    ...(groupName && !label ? ["label"] : []),
+    ...(label ? missingFields(label, values, photos.length) : []),
   ];
-  const isMissing = (field: Field) => showErrors && missing.includes(field);
+  const isMissing = (id: string) => showErrors && missing.includes(id);
+  const fieldElementId = (id: string) =>
+    id === "group" ? FIELD_IDS.group : id === "label" ? "field-label" : `field-${id}`;
+
+  function setValue(id: string, value: string | string[]) {
+    setValues((prev) => ({ ...prev, [id]: value }));
+  }
 
   async function submit() {
     if (inFlightRef.current || compressing) return;
@@ -396,7 +394,7 @@ export function SubmissionForm({
       haptic("warning");
       const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       document
-        .getElementById(FIELD_IDS[missing[0]])
+        .getElementById(fieldElementId(missing[0]))
         ?.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
       return;
     }
@@ -409,9 +407,10 @@ export function SubmissionForm({
       form.append("initData", currentInitData());
       form.append("submissionId", submissionId);
       form.append("groupName", groupName);
-      form.append("description", description);
-      form.append("studentContact", studentContact);
-      form.append("lessonLink", lessonLink);
+      form.append("labelId", labelId);
+      // Описание собирает сервер из этих же полей — клиенту тут доверять
+      // нечего, а формат текста должен быть одинаковым для всех отправок.
+      form.append("labelFields", JSON.stringify(values));
       photos.forEach((photo, index) => form.append("photo", photo.blob, `photo-${index + 1}.jpg`));
       const res = await fetch("/api/miniapp/submit", {
         method: "POST",
@@ -438,7 +437,7 @@ export function SubmissionForm({
       }
       writeStorage(DRAFT_KEY, null);
       writeStorage(LAST_GROUP_KEY, groupName);
-      setSent({ groupName, description: description.trim() });
+      setSent({ groupName, description: label ? buildSummary(label, values) : "" });
       haptic("success");
       window.scrollTo({ top: 0 });
     } catch (err) {
@@ -456,10 +455,10 @@ export function SubmissionForm({
   }
 
   function startOver() {
-    // Группа остаётся: следующее обращение почти всегда туда же.
-    setDescription("");
-    setStudentContact("");
-    setLessonLink("");
+    // Группа остаётся: следующее обращение почти всегда туда же. Ярлык —
+    // нет: следующая проблема обычно другая.
+    setLabelId("");
+    setValues({});
     clearPhotos();
     setSubmissionId(newSubmissionId());
     setShowErrors(false);
@@ -468,8 +467,6 @@ export function SubmissionForm({
     window.scrollTo({ top: 0 });
   }
 
-  const kind = contactKind(studentContact);
-  const lesson = lessonKind(lessonLink);
   // Кнопка на странице — там, где нет MainButton Telegram.
   const pageButton = env === "browser" || env === "script-failed";
 
@@ -592,108 +589,61 @@ export function SubmissionForm({
         )}
       </section>
 
-      <section className={styles.section}>
-        <label className={styles.sectionHeader} htmlFor={FIELD_IDS.description}>
-          Не болды
-        </label>
-        <div className={styles.list}>
-          <textarea
-            id={FIELD_IDS.description}
-            className={`${styles.input} ${styles.textarea}`}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Мысалы: оқушыда геометриядан тест ашылмайды, «500 қатесі» шығады"
-            maxLength={4000}
-          />
-        </div>
-        <p
-          className={`${styles.footer} ${isMissing("description") ? styles.footerError : ""}`}
-        >
-          {isMissing("description")
-            ? "Не болғанын жазыңыз"
-            : "Оқушы не істеді және не көрді — сонда кезекшіге қайта сұраудың қажеті болмайды"}
-        </p>
-      </section>
+      {groupName && (
+        <section className={styles.section} id="field-label">
+          <span className={styles.sectionHeader}>Мәселе түрі</span>
+          <div className={styles.labels} role="group" aria-label="Мәселе түрі">
+            {labelsForGroup(groupName).map((item) => {
+              const selected = labelId === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={selected}
+                  className={`${styles.labelTile} ${selected ? styles.labelTileOn : ""}`}
+                  onClick={() => {
+                    if (selected) return;
+                    haptic("select");
+                    setLabelId(item.id);
+                    // Ответы прошлого ярлыка новому не подходят: у него свои
+                    // поля, и старые значения выглядели бы как заполненные.
+                    setValues({});
+                    setShowErrors(false);
+                  }}
+                >
+                  <span className={styles.labelEmoji} aria-hidden="true">
+                    {item.emoji}
+                  </span>
+                  <span>{item.title}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className={`${styles.labelHint} ${isMissing("label") ? styles.footerError : ""}`}>
+            {isMissing("label")
+              ? "Мәселе түрін таңдаңыз"
+              : (label?.hint ?? "Түрін таңдасаңыз, тек қажетті сұрақтар шығады")}
+          </p>
+        </section>
+      )}
 
-      <section className={styles.section}>
-        <label className={styles.sectionHeader} htmlFor={FIELD_IDS.contact}>
-          Оқушы
-        </label>
-        <div className={styles.list}>
-          <input
-            id={FIELD_IDS.contact}
-            className={styles.input}
-            value={studentContact}
-            onChange={(e) => setStudentContact(e.target.value)}
-            placeholder="Поштасы немесе телефоны"
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            inputMode={kind === "phone" ? "tel" : "email"}
-            maxLength={200}
-          />
-        </div>
-        <p
-          className={`${styles.footer} ${
-            isMissing("contact") || kind === "unknown"
-              ? styles.footerError
-              : kind === "email" || kind === "phone"
-                ? styles.footerOk
-                : ""
-          }`}
-        >
-          {isMissing("contact")
-            ? "Оқушының поштасы немесе телефоны керек"
-            : kind === "email"
-              ? "Оқушының поштасы"
-              : kind === "phone"
-                ? "Оқушының телефоны"
-                : kind === "unknown"
-                  ? "Пошта немесе телефонға ұқсамайды — тексеріңіз"
-                  : "Поштасыз немесе телефонсыз кезекші оқушыны таба алмайды"}
-        </p>
-      </section>
+      {label && (
+        <LabelFields
+          label={label}
+          values={values}
+          onChange={setValue}
+          missing={showErrors ? missing : []}
+          fieldId={fieldElementId}
+        />
+      )}
 
-      <section className={styles.section}>
-        <label className={styles.sectionHeader} htmlFor={FIELD_IDS.link}>
-          Сабақ немесе тапсырма
-        </label>
-        <div className={styles.list}>
-          <input
-            id={FIELD_IDS.link}
-            className={styles.input}
-            value={lessonLink}
-            onChange={(e) => setLessonLink(e.target.value)}
-            placeholder="Сілтеме немесе ай-апта (3-ай 2-апта)"
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            maxLength={500}
-          />
-        </div>
-        <p
-          className={`${styles.footer} ${
-            isMissing("link")
-              ? styles.footerError
-              : lesson === "url" || lesson === "week"
-                ? styles.footerOk
-                : ""
-          }`}
-        >
-          {isMissing("link")
-            ? "Сабақтың сілтемесі немесе ай-аптасы керек"
-            : lesson === "url"
-              ? "Сабақтың сілтемесі"
-              : lesson === "week"
-                ? "Ай-апта көрсетілді"
-                : lesson === "text"
-                  ? "Сілтеме де, ай-апта да жарайды — мысалы: 3-ай 2-апта"
-                  : "Сілтемені қойыңыз немесе ай-аптаны жазыңыз (3-ай 2-апта)"}
-        </p>
-      </section>
 
+      {/* Скриншоты — постоянная секция со сжатием и вставкой из буфера;
+          ярлык задаёт ей только подпись и минимум. До выбора ярлыка её нет:
+          фото без указанной проблемы дежурному ничего не говорит. */}
+      {label && (
       <section className={styles.section} id={FIELD_IDS.photo}>
-        <span className={styles.sectionHeader}>Скриншот</span>
+        <span className={styles.sectionHeader}>{photoField?.label ?? "Скриншот"}</span>
         <div className={styles.list}>
           {photos.length > 0 && (
             <div className={styles.photoGrid}>
@@ -737,14 +687,20 @@ export function SubmissionForm({
             }}
           />
         </div>
-        <p className={`${styles.footer} ${isMissing("photo") ? styles.footerError : ""}`}>
-          {isMissing("photo")
-            ? "Қатенің скриншотын тіркеңіз"
+        <p className={`${styles.footer} ${isMissing("photos") ? styles.footerError : ""}`}>
+          {isMissing("photos")
+            ? (photoField?.minPhotos ?? 1) > 1
+              ? `Кемінде ${photoField?.minPhotos} скрин керек`
+              : "Қатенің скриншотын тіркеңіз"
             : photos.length > 0
               ? `${photos.length} сурет · ${formatSize(totalBytes)} · ${MAX_PHOTOS} суретке дейін`
-              : "Телефонда сығылады — бірнеше сурет тіркеуге болады"}
+              : (photoField?.hint ??
+                (photoField?.required
+                  ? "Телефонда сығылады — бірнеше сурет тіркеуге болады"
+                  : "Қаласаңыз, скрин тіркеңіз"))}
         </p>
       </section>
+      )}
 
       {error && (
         <p className={styles.error} role="alert">

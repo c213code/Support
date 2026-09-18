@@ -741,3 +741,95 @@
     transition: none;
   }
 }
+
+/* --- лента типовых проблем: горизонтальный список плиток под группой.
+   Горизонтальный, а не сетка: ярлыков у группы до пяти, вертикально они
+   отодвинули бы поля за первый экран, а так видно и выбор, и что дальше
+   идёт форма. --- */
+.labels {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 6px;
+  margin: 0 -16px;
+  padding-left: 16px;
+  padding-right: 16px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.labels::-webkit-scrollbar {
+  display: none;
+}
+
+.labelTile {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.labelTileOn {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.labelEmoji {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.labelHint {
+  padding: 2px 0 0;
+  color: var(--hint);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/* --- выбор из нескольких вариантов внутри ярлыка. Не нативный <select>:
+   на телефоне он открывает колесо, а тут вариантов два-три и тап по
+   крупной кнопке быстрее. --- */
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choice {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 16px;
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.choiceOn {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.addMore {
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 15px;
+  padding: 6px 0;
+  cursor: pointer;
+}

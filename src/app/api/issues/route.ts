@@ -10,6 +10,7 @@ import { detectEmailChangeRequest } from "@/lib/emailChangeRequest";
 import { mentionsUntTest } from "@/lib/untResetRequest";
 import { platformEnabled } from "@/lib/platform";
 import { unreadReplyCounts } from "@/lib/submissionChat";
+import { findLabel } from "@/lib/submissionLabels";
 
 export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
@@ -85,6 +86,7 @@ export async function GET(request: NextRequest) {
       issueId: true,
       authorName: true,
       rawText: true,
+      labelId: true,
       studentContact: true,
       lessonLink: true,
       photoFileIds: true,
@@ -138,6 +140,13 @@ export async function GET(request: NextRequest) {
               // photoFileIds пуст, а фото ровно одно (в photoFileId).
               photoCount: submission.photoFileIds.length || 1,
               unreadReplies: unreadByIssue.get(issue.id) ?? 0,
+              // Что за типовая проблема и что куратор заполнил в её полях.
+              // Дежурному это заменяет переспрашивание: форма уже собрала
+              // почту, номер и остальное (см. lib/submissionLabels.ts).
+              labelTitle: submission.labelId
+                ? (findLabel(issue.groupName, submission.labelId)?.title ?? null)
+                : null,
+              details: submission.rawText,
             }
           : null,
       };

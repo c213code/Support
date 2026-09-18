@@ -41,6 +41,10 @@ export type IssueFormInitial = Partial<{
     studentContact: string;
     lessonLink: string;
     photoCount: number;
+    // Какую типовую проблему выбрал куратор и что заполнил в её полях
+    // (lib/submissionLabels.ts). Пусто у обращений до появления ярлыков.
+    labelTitle?: string | null;
+    details?: string;
   } | null;
 }>;
 
@@ -334,8 +338,22 @@ export function IssueForm({
         />
         {initial?.submission && initial.id && (
           <div className="space-y-1.5 rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600">
-            <p>📝 Из формы · {initial.submission.authorName}</p>
+            <p>
+              📝 Из формы · {initial.submission.authorName}
+              {initial.submission.labelTitle && (
+                <span className="ml-1.5 rounded bg-white px-1.5 py-0.5 font-medium text-slate-700">
+                  {initial.submission.labelTitle}
+                </span>
+              )}
+            </p>
             <p className="break-words">👤 {initial.submission.studentContact}</p>
+            {/* Ответы на поля ярлыка: то, что раньше приходилось выспрашивать
+                в переписке, форма собрала сразу. */}
+            {initial.submission.details && (
+              <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-5 text-slate-600">
+                {initial.submission.details}
+              </pre>
+            )}
             {/^https?:\/\//i.test(initial.submission.lessonLink) ? (
               <a
                 href={initial.submission.lessonLink}

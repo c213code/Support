@@ -2,8 +2,15 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { OFFICIAL_GROUPS } from "@/lib/groups";
-import { buildDescription } from "@/lib/ticketDescription";
 import { cleanTicketDescription, isNoiseOnly } from "@/lib/textClean";
+import {
+  buildDetails,
+  buildSummary,
+  extractContact,
+  extractLessonLink,
+  findLabel,
+  missingFields,
+} from "@/lib/submissionLabels";
 import { insertSentIssue } from "@/lib/webhook/acknowledge";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
 import { uploadPhotos } from "@/lib/telegram";
@@ -39,6 +46,8 @@ const T = {
   reopen: "Форманы боттан қайта ашыңыз",
   tooManyAttempts: "Бір сағатта тым көп әрекет — кейінірек қайталаңыз",
   noGroup: "Топты таңдаңыз",
+  noLabel: "Мәселе түрін таңдаңыз",
+  incomplete: "Барлық қажетті өрістерді толтырыңыз",
   noDescription: "Мәселені сипаттаңыз",
   noContact: "Оқушының поштасын немесе телефонын көрсетіңіз",
   // Урок принимается и ссылкой, и «ай-аптой» (3-ай 2-апта) — по ней дежурный
@@ -52,6 +61,32 @@ const T = {
   photoNetwork: "Фотоны жіберу мүмкін болмады — байланысты тексеріп, қайта жіберіңіз",
   saveFailed: "Өтінішті сақтау мүмкін болмады — қайталап көріңіз",
 };
+
+// Ответы на поля ярлыка приходят одним JSON. Берём только строки и массивы
+// строк: всё остальное (числа, вложенные объекты) — не то, что отправляет
+// форма, и в базу такому попадать незачем. null — сломанный JSON.
+function parseValues(raw: string): Record<string, string | string[]> | null {
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+
+  const values: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value === "string") values[key] = value.slice(0, 4000);
+    else if (Array.isArray(value)) {
+      values[key] = value
+        .filter((v): v is string => typeof v === "string")
+        .slice(0, 20)
+        .map((v) => v.slice(0, 4000));
+    }
+  }
+  return values;
+}
 
 function field(form: FormData, name: string, max: number): string {
   const value = form.get(name);
@@ -121,16 +156,20 @@ export async function POST(request: NextRequest) {
   });
 
   const group = OFFICIAL_GROUPS.find((g) => g.name === field(form, "groupName", 100));
-  const description = field(form, "description", 4000);
-  const studentContact = field(form, "studentContact", 200);
-  const lessonLink = field(form, "lessonLink", 500);
+  if (!group) return reply(400, T.noGroup);
+
+  // Какую типовую проблему выбрал куратор и что ответил в её полях. Состав
+  // полей задаёт тот же справочник, что рисует форму (lib/submissionLabels.ts),
+  // поэтому проверка здесь и подсветка на телефоне не могут разойтись.
+  const label = findLabel(group.name, field(form, "labelId", 64));
+  if (!label) return reply(400, T.noLabel);
+
+  const values = parseValues(field(form, "labelFields", 8000));
+  if (values === null) return reply(400, T.unreadable);
+
   const photos = form.getAll("photo").filter((p): p is File => p instanceof File && p.size > 0);
 
-  if (!group) return reply(400, T.noGroup);
-  if (!description) return reply(400, T.noDescription);
-  if (!studentContact) return reply(400, T.noContact);
-  if (!lessonLink) return reply(400, T.noLink);
-  if (photos.length === 0) return reply(400, T.noPhoto);
+  if (missingFields(label, values, photos.length).length > 0) return reply(400, T.incomplete);
   if (photos.length > MAX_PHOTOS) return reply(400, T.tooManyPhotos);
   if (photos.some((photo) => !photo.type.startsWith("image/"))) return reply(400, T.notImage);
   if (photos.reduce((sum, photo) => sum + photo.size, 0) > MAX_PHOTOS_BYTES) {
@@ -138,20 +177,25 @@ export async function POST(request: NextRequest) {
   }
 
   // Порядок: описание → фото → тикет. Описание первым: обращение-мусор не
-  // должно оставлять фото в служебном канале. own и contextual совпадают —
-  // у формы нет цитаты, на которую отвечали.
-  let cleaned = await buildDescription(description, description);
-  if (cleaned === null) {
-    if (isNoiseOnly(description)) {
-      console.warn(`[miniapp] отклонено как мусор: user=${user.id}, ${description.length} симв.`);
-      return reply(400, T.noise);
-    }
-    // ИИ ответил SKIP: его промпт настроен на переписку в группе, где SKIP —
-    // "это разговор коллег, а не обращение". Обращение из формы — явный
-    // запрос по определению, поэтому не отказываем, а берём regex-чистку.
-    console.warn(`[miniapp] ИИ ответил SKIP на обращение из формы — беру regex-чистку: user=${user.id}`);
-    cleaned = cleanTicketDescription(description);
+  // должно оставлять фото в служебном канале.
+  //
+  // Описание тикета — короткая суть: название проблемы и пояснение куратора.
+  // Оно уходит в репорт руководству, поэтому почты, номера и пароли из полей
+  // сюда не попадают — они в rawText, который видит только дежурный.
+  //
+  // ИИ здесь больше не нужен: он вытаскивал суть из свободного текста, а
+  // теперь её задаёт сам ярлык. Остаётся regex-чистка — на случай, если
+  // куратор вписал контакты прямо в пояснение.
+  const summary = buildSummary(label, values);
+  const details = buildDetails(label, values);
+  const own = typeof values.description === "string" ? values.description : "";
+  // Мусор ловим только у свободного «Басқа мәселе»: у остальных ярлыков суть
+  // задана названием, и пустым обращение быть не может.
+  if (label.id === "other" && isNoiseOnly(own)) {
+    console.warn(`[miniapp] отклонено как мусор: user=${user.id}, ${own.length} симв.`);
+    return reply(400, T.noise);
   }
+  const cleaned = cleanTicketDescription(summary) || summary;
 
   // Фото до тикета: если Telegram их не принял, тикета без вложений быть не
   // должно — куратор повторит отправку целиком. Все фото уходят одним
@@ -160,7 +204,7 @@ export async function POST(request: NextRequest) {
   const upload = await uploadPhotos(
     storageChatId,
     photos,
-    `${user.name} · ${group.name}\n${description.slice(0, 200)}`
+    `${user.name} · ${group.name}\n${summary.slice(0, 200)}`
   );
   if (!upload.ok) {
     if (upload.kind === "config") {
@@ -185,11 +229,13 @@ export async function POST(request: NextRequest) {
       clientSubmissionId,
       telegramUserId: user.id,
       authorName: user.name,
-      rawText: description,
-      studentContact,
-      lessonLink,
+      rawText: details,
+      studentContact: extractContact(values),
+      lessonLink: extractLessonLink(values),
       photoFileId: photoFileIds[0],
       photoFileIds,
+      labelId: label.id,
+      labelFields: values,
     });
     return NextResponse.json({ ok: true, issueId: issue.id });
   } catch (err) {
