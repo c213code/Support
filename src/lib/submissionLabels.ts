@@ -460,6 +460,47 @@ const PRODUCT: SubmissionLabel[] = [
     ],
   },
   {
+    id: "unt-dt",
+    emoji: "🎓",
+    title: "ҰБТ / ДТ бойынша мәселе",
+    hint: "Нәтиже шықпады, қайта тапсыру керек",
+    fields: [
+      {
+        id: "testType",
+        label: "Тест түрі",
+        type: "select",
+        required: true,
+        options: [
+          { value: "unt", label: "ҰБТ" },
+          { value: "dt", label: "ДТ (деңгейлік тест)" },
+        ],
+      },
+      {
+        id: "issueKind",
+        label: "Не болды?",
+        type: "select",
+        required: true,
+        options: [
+          { value: "no-result", label: "Нәтиже шықпады" },
+          { value: "reopen", label: "Қайта тапсыру керек" },
+          { value: "not-opening", label: "Тест ашылмайды" },
+          { value: "other", label: "Басқа" },
+        ],
+      },
+      {
+        // Почта обязательна: по ней кезекші сбрасывает результат ДТ прямо с
+        // карточки (/platform/reset-unt), и без неё кнопка бесполезна.
+        id: "studentEmail",
+        label: "Оқушының поштасы",
+        type: "email",
+        required: true,
+        hint: "Осы пошта бойынша кезекші нәтижені қайта ашады",
+      },
+      { ...SCREENSHOT, label: "Тест экранының скрині" },
+      { ...DESCRIPTION, label: "Толықтай сипаттама", required: false },
+    ],
+  },
+  {
     id: "suggestion",
     emoji: "💡",
     title: "Ұсыныс",
