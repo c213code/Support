@@ -592,17 +592,36 @@ export function SubmissionForm({
       {groupName && (
         <section className={styles.section} id="field-label">
           <span className={styles.sectionHeader}>Мәселе түрі</span>
-          <div className={styles.labels} role="group" aria-label="Мәселе түрі">
-            {labelsForGroup(groupName).map((item) => {
-              const selected = labelId === item.id;
-              return (
+          {/* Пока проблема не выбрана — весь список; после выбора он
+              сворачивается в одну строку, освобождая экран под поля. */}
+          {label ? (
+            <div className={styles.labelChosen}>
+              <span className={styles.labelEmoji} aria-hidden="true">
+                {label.emoji}
+              </span>
+              <span className={styles.labelChosenTitle}>{label.title}</span>
+              <button
+                type="button"
+                className={styles.labelClear}
+                aria-label="Мәселе түрін өзгерту"
+                onClick={() => {
+                  haptic("select");
+                  setLabelId("");
+                  setValues({});
+                  setShowErrors(false);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <div className={styles.labelList} role="group" aria-label="Мәселе түрі">
+              {labelsForGroup(groupName).map((item) => (
                 <button
                   key={item.id}
                   type="button"
-                  aria-pressed={selected}
-                  className={`${styles.labelTile} ${selected ? styles.labelTileOn : ""}`}
+                  className={styles.labelRow}
                   onClick={() => {
-                    if (selected) return;
                     haptic("select");
                     setLabelId(item.id);
                     // Ответы прошлого ярлыка новому не подходят: у него свои
@@ -614,16 +633,19 @@ export function SubmissionForm({
                   <span className={styles.labelEmoji} aria-hidden="true">
                     {item.emoji}
                   </span>
-                  <span>{item.title}</span>
+                  <span className={styles.labelRowText}>
+                    <span className={styles.labelRowTitle}>{item.title}</span>
+                    {item.hint && <span className={styles.labelRowHint}>{item.hint}</span>}
+                  </span>
                 </button>
-              );
-            })}
-          </div>
-          <p className={`${styles.labelHint} ${isMissing("label") ? styles.footerError : ""}`}>
-            {isMissing("label")
-              ? "Мәселе түрін таңдаңыз"
-              : (label?.hint ?? "Түрін таңдасаңыз, тек қажетті сұрақтар шығады")}
-          </p>
+              ))}
+            </div>
+          )}
+          {isMissing("label") && (
+            <p className={`${styles.labelHint} ${styles.footerError}`}>
+              Мәселе түрін таңдаңыз
+            </p>
+          )}
         </section>
       )}
 
