@@ -290,7 +290,7 @@ const REOPEN_LABEL: SubmissionLabel = {
   id: "reopen",
   emoji: "🔄",
   title: "Қайта ашу керек",
-  hint: "Оқушы байқамай жіберіп қойды",
+  hint: "Оқушы тапсырманы қате жіберіп қойды",
   fields: [
     {
       id: "what",

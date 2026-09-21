@@ -567,8 +567,18 @@ export function SubmissionForm({
                 className={styles.groupTile}
                 style={{ "--hue": GROUP_HUE[g.name] } as CSSProperties}
                 onClick={() => {
-                  if (!selected) haptic("select");
+                  if (selected) return;
+                  haptic("select");
                   setGroupName(g.name);
+                  // Смена группы сбрасывает выбранную проблему и ответы. Сам
+                  // по себе ярлык чужой группы отвалился бы (его нет в её
+                  // списке), но общие ярлыки — «Балл дұрыс емес», «Платформа
+                  // қате береді» — есть сразу у нескольких, и они оставались
+                  // выбранными вместе с ответами, набранными для другой
+                  // группы. Куратор при этом уже переехал в другую тему.
+                  setLabelId("");
+                  setValues({});
+                  setShowErrors(false);
                 }}
               >
                 <span className={styles.groupEmoji} aria-hidden="true">
