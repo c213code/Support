@@ -17,12 +17,28 @@ import { Modal } from "@/components/Modal";
 export function SubmissionPhoto({ issueId, count = 1 }: { issueId: string; count?: number }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [failed, setFailed] = useState<number[]>([]);
+  const [retry, setRetry] = useState<Record<number, number>>({});
 
-  const total = Math.max(1, count);
+  const total = count;
   const indexes = Array.from({ length: total }, (_, i) => i);
-  const src = (index: number) => `/api/issues/${issueId}/photo?i=${index}`;
-  const markFailed = (index: number) =>
-    setFailed((prev) => (prev.includes(index) ? prev : [...prev, index]));
+  // Номер попытки в адресе — чтобы повтор был новым запросом, а не картинкой
+  // из кэша браузера (в кэше лежит как раз неудача).
+  const src = (index: number) =>
+    `/api/issues/${issueId}/photo?i=${index}${retry[index] ? `&r=${retry[index]}` : ""}`;
+
+  // Первую осечку не считаем отказом. Доска обновляется каждые 15 секунд, и
+  // запрос картинки может оборваться на перерисовке или на полпути — сервер
+  // при этом уже ответил 200 и ничего не знает. Отказ прилипал к карточке до
+  // перезагрузки страницы, и выглядело это как «у тикета нет фото».
+  const onFail = (index: number) =>
+    setRetry((prev) => {
+      const tries = prev[index] ?? 0;
+      if (tries >= 1) {
+        setFailed((was) => (was.includes(index) ? was : [...was, index]));
+        return prev;
+      }
+      return { ...prev, [index]: tries + 1 };
+    });
 
   // Стрелками листать привычнее, чем целиться в кнопки, — но только когда
   // фото несколько и просмотр открыт.
@@ -40,6 +56,8 @@ export function SubmissionPhoto({ issueId, count = 1 }: { issueId: string; count
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [openIndex, total]);
+
+  if (total <= 0) return null;
 
   return (
     <>
@@ -72,10 +90,11 @@ export function SubmissionPhoto({ issueId, count = 1 }: { issueId: string; count
                   редирект на /login (proxy.ts). */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
+                key={retry[index] ?? 0}
                 src={src(index)}
                 alt={total > 1 ? `Фото ${index + 1} из обращения` : "Фото из обращения"}
                 loading="lazy"
-                onError={() => markFailed(index)}
+                onError={() => onFail(index)}
                 className="max-h-28 rounded border border-slate-200"
               />
             </button>

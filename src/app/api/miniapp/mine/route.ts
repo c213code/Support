@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
       rawText: true,
       labelId: true,
       labelFields: true,
+      photoFileId: true,
       photoFileIds: true,
       issue: {
         select: {
@@ -96,7 +97,12 @@ export async function POST(request: NextRequest) {
         .filter((event) => event.at >= row.createdAt)
         .map((event) => ({ status: event.to, at: event.at.toISOString() })),
     ],
-    photoCount: row.photoFileIds.length || 1,
+    // Старые обращения (до нескольких фото) держат единственное фото в
+    // photoFileId, а photoFileIds у них пуст — отсюда запасной вариант.
+    // Но «ни одного фото» — это ноль: у ярлыков, где скрин необязателен
+    // («Ұсыныс», «Басқа мәселе»), раньше выходила единица, карточка
+    // просила несуществующее фото и показывала «не загрузилось».
+    photoCount: row.photoFileIds.length || (row.photoFileId ? 1 : 0),
   }));
 
   // Нерешённые сверху: это то, за чем куратор открыл список. Сортировка

@@ -90,6 +90,7 @@ export async function GET(request: NextRequest) {
       labelFields: true,
       studentContact: true,
       lessonLink: true,
+      photoFileId: true,
       photoFileIds: true,
     },
     orderBy: { createdAt: "asc" },
@@ -162,7 +163,12 @@ export async function GET(request: NextRequest) {
               lessonLink: submission.lessonLink,
               // У обращений, поданных до появления нескольких фото,
               // photoFileIds пуст, а фото ровно одно (в photoFileId).
-              photoCount: submission.photoFileIds.length || 1,
+              // Старые обращения (до нескольких фото) держат единственное фото в
+              // photoFileId, а photoFileIds у них пуст — отсюда запасной вариант.
+              // Но «ни одного фото» — это ноль: у ярлыков, где скрин необязателен
+              // («Ұсыныс», «Басқа мәселе»), раньше выходила единица, карточка
+              // просила несуществующее фото и показывала «не загрузилось».
+              photoCount: submission.photoFileIds.length || (submission.photoFileId ? 1 : 0),
               unreadReplies: unreadByIssue.get(issue.id) ?? 0,
               // Что за типовая проблема и что куратор заполнил в её полях.
               // Дежурному это заменяет переспрашивание: форма уже собрала
