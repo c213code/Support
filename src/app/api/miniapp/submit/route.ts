@@ -13,7 +13,8 @@ import {
 } from "@/lib/submissionLabels";
 import { insertSentIssue } from "@/lib/webhook/acknowledge";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
-import { uploadPhotos } from "@/lib/telegram";
+import { uploadPhotos, type PhotoUpload } from "@/lib/telegram";
+import { postSubmissionToGroup } from "@/lib/submissionGroupPost";
 
 // Сколько фото можно приложить к одному обращению. Больше пяти — это уже не
 // «покажи, что на экране», а выгрузка галереи, и в лимит запроса она не
@@ -204,8 +205,16 @@ export async function POST(request: NextRequest) {
   // Фото до тикета: если Telegram их не принял, тикета без вложений быть не
   // должно — куратор повторит отправку целиком. Все фото уходят одним
   // альбомом, поэтому в служебном канале это одно сообщение с подписью.
+  //
+  // Фото может не быть вовсе: у «Ұсыныс», «Басқа мәселе» и прочих скрин
+  // необязателен. Тогда в Telegram идти незачем — раньше шли всё равно и
+  // получали «нет фото», которое куратор читал как «Telegram бұл фотоны
+  // қабылдамады» и отправить обращение не мог совсем.
   const storageChatId = process.env.TELEGRAM_STORAGE_CHAT_ID!;
-  const upload = await uploadPhotos(
+  const noPhotos: PhotoUpload = { ok: true, fileIds: [] };
+  const upload = photos.length === 0
+    ? noPhotos
+    : await uploadPhotos(
     storageChatId,
     photos,
     // Подпись к фото в служебном канале — с полями целиком: по одному
@@ -240,11 +249,33 @@ export async function POST(request: NextRequest) {
       rawText: details,
       studentContact: extractContact(values),
       lessonLink: extractLessonLink(values),
-      photoFileId: photoFileIds[0],
+      // Без фото — пустая строка: колонка обязательная, а undefined Prisma
+      // не принимает. Отличать «нет фото» от «одно фото» по ней нельзя,
+      // для этого есть photoFileIds (см. photoCount в /api/issues).
+      photoFileId: photoFileIds[0] ?? "",
       photoFileIds,
       labelId: label.id,
       labelFields: values,
     });
+    // Обращение — в ту рабочую группу, которую куратор выбрал первым
+    // экраном (если рубильник включён). После тикета, а не вместо: отправка
+    // может не удаться, и терять из-за этого само обращение нельзя.
+    const link = await postSubmissionToGroup({
+      issueId: issue.id,
+      groupName: group.name,
+      authorName: user.name,
+      details,
+      photoFileIds,
+    }).catch((err) => {
+      console.warn(`[miniapp] обращение не ушло в группу: ${String(err).slice(0, 200)}`);
+      return null;
+    });
+    // Ссылка на сообщение в группе — это «Открыть в Telegram» на карточке.
+    // У тикетов из формы её раньше не было вовсе.
+    if (link) {
+      await prisma.issue.update({ where: { id: issue.id }, data: { telegramLink: link } });
+    }
+
     return NextResponse.json({ ok: true, issueId: issue.id });
   } catch (err) {
     // Два одинаковых запроса пришли одновременно: второй упёрся в

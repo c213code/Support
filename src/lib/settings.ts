@@ -155,3 +155,24 @@ export async function setLogsAiEnabled(enabled: boolean): Promise<void> {
     create: { id: SETTINGS_ID, logsAiEnabled: enabled },
   });
 }
+
+// Отправлять ли обращение из формы мини-аппа в выбранную куратором рабочую
+// группу. Выключено по умолчанию, как и всё, что заставляет бота писать
+// коллегам: включает человек, а не выкатка. Отдельный рубильник от
+// autoReplyEnabled намеренно — там бот отвечает на чужие сообщения, здесь
+// публикует своё, и включать одно, не трогая другое, надо уметь.
+export async function isSubmissionToGroupEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { submissionToGroup: true },
+  });
+  return row?.submissionToGroup ?? false;
+}
+
+export async function setSubmissionToGroupEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { submissionToGroup: enabled },
+    create: { id: SETTINGS_ID, submissionToGroup: enabled },
+  });
+}

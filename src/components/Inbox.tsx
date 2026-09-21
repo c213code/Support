@@ -918,6 +918,14 @@ export function Inbox() {
                 color: "bg-teal-600",
               },
               {
+                key: "submissiontogroup",
+                label: "📤 Обращения — в группу",
+                hint: "Обращение из формы уходит в рабочую группу, которую выбрал куратор: коллеги видят вопрос, ответ реплаем цепляется к тикету",
+                enabled: bot.submissionToGroup,
+                onToggle: bot.toggleSubmissionToGroup,
+                color: "bg-indigo-600",
+              },
+              {
                 key: "chatintent",
                 label: "👂 Читать мои ответы",
                 hint: "Статус ставится сам по твоей реплике в группе",

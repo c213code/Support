@@ -29,6 +29,7 @@ export function useBotSettings() {
     null
   );
   const [submitterNotify, setSubmitterNotify] = useState<boolean | null>(null);
+  const [submissionToGroup, setSubmissionToGroup] = useState<boolean | null>(null);
 
   useEffect(() => {
     // Не загрузилось (например, сессия истекла) — тумблер остаётся в
@@ -44,6 +45,7 @@ export function useBotSettings() {
     load("/api/settings/auto-reply-confirm", setAutoReplyConfirm);
     load("/api/settings/status-reply", setStatusReplyEnabled);
     load("/api/settings/submitter-notify", setSubmitterNotify);
+    load("/api/settings/submission-to-group", setSubmissionToGroup);
   }, []);
 
   async function toggleAiCleaning() {
@@ -181,6 +183,32 @@ export function useBotSettings() {
     );
   }
 
+  async function toggleSubmissionToGroup() {
+    const next = !submissionToGroup;
+    // Включение заставляет бота публиковать обращения там, где сидят
+    // коллеги, — как и у автоответов, спрашиваем прямо.
+    if (next && !window.confirm("Обращения из формы будут уходить в рабочую группу, которую выбрал куратор. Включить?")) {
+      return;
+    }
+    setSubmissionToGroup(next);
+    const res = await fetch("/api/settings/submission-to-group", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok || isSessionLost(res)) {
+      setSubmissionToGroup(!next);
+      toast("Не удалось переключить отправку обращений в группу", "error");
+      return;
+    }
+    toast(
+      next
+        ? "Обращения из формы уходят в выбранную группу"
+        : "Обращения из формы остаются только на доске",
+      next ? "success" : "info"
+    );
+  }
+
   async function toggleAiAsk() {
     const next = !aiAskEnabled;
     setAiAskEnabled(next);
@@ -208,6 +236,7 @@ export function useBotSettings() {
     autoReplyConfirm,
     statusReplyEnabled,
     submitterNotify,
+    submissionToGroup,
     toggleAiCleaning,
     toggleAutoReply,
     toggleChatIntent,
@@ -215,5 +244,6 @@ export function useBotSettings() {
     toggleAutoReplyConfirm,
     toggleStatusReply,
     toggleSubmitterNotify,
+    toggleSubmissionToGroup,
   };
 }

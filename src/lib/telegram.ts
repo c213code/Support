@@ -306,6 +306,9 @@ export async function sendTelegramMessage(
 // отдельный вызов. Таймаут длиннее: фото весит больше, чем текст.
 const BOT_UPLOAD_TIMEOUT_MS = 20000;
 
+// Подпись к фото у Telegram — 1024 символа, дальше он отклоняет запрос целиком.
+export const CAPTION_LIMIT = 1024;
+
 // Результат загрузки фото. Причина отказа нужна вызывающему коду, чтобы
 // сказать правду: "канал настроен неверно" (config) куратор не исправит —
 // это к тому, кто настраивал форму; "Telegram не принял фото" (photo) — к
@@ -420,6 +423,40 @@ export async function uploadPhotos(
 // отдаются файлы до 20 МБ (фото из формы сжаты на телефоне задолго до этого).
 // В ссылке зашит токен бота — отдавать её в браузер нельзя, только качать
 // сервером (см. GET /api/issues/[id]/photo).
+// Отправляет в чат фото, которые у нас уже есть как file_id (лежат в
+// служебном канале после uploadPhotos). Байты не перезагружаются: тот же бот
+// шлёт file_id как есть — это один JSON-запрос вместо мегабайтов трафика.
+//
+// Возвращает message_id первого сообщения: по нему строится ссылка на
+// обращение в группе и к нему же привязываются ответы коллег.
+export async function sendStoredPhotos(
+  chatId: string,
+  fileIds: string[],
+  caption?: string
+): Promise<{ message_id: number } | null> {
+  if (fileIds.length === 0) return null;
+
+  // Альбом Telegram принимает от двух фото; подпись у альбома одна — на
+  // первом, иначе она повторится под каждым.
+  const single = fileIds.length === 1;
+  const data = (await callBotApi(
+    single ? "sendPhoto" : "sendMediaGroup",
+    single
+      ? { chat_id: chatId, photo: fileIds[0], caption: caption?.slice(0, CAPTION_LIMIT) }
+      : {
+          chat_id: chatId,
+          media: fileIds.map((fileId, index) => ({
+            type: "photo",
+            media: fileId,
+            ...(index === 0 && caption ? { caption: caption.slice(0, CAPTION_LIMIT) } : {}),
+          })),
+        }
+  )) as { result?: { message_id?: number } | Array<{ message_id?: number }> } | null;
+
+  const first = Array.isArray(data?.result) ? data?.result[0] : data?.result;
+  return typeof first?.message_id === "number" ? { message_id: first.message_id } : null;
+}
+
 export async function getFileDownloadUrl(fileId: string): Promise<string | null> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return null;
