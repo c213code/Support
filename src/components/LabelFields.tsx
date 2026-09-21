@@ -262,7 +262,10 @@ export function LabelFields({
                     key={i}
                     className={styles.input}
                     value={value}
-                    inputMode={field.type === "link" ? "url" : "text"}
+                    inputMode={
+                      field.type === "link" ? "url" : field.type === "email" ? "email" : "text"
+                    }
+                    autoCapitalize={field.type === "email" ? "none" : undefined}
                     placeholder={field.placeholder}
                     onChange={(e) => {
                       const next = [...list];

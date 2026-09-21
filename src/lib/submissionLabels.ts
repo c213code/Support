@@ -752,18 +752,51 @@ const PRODUCT: SubmissionLabel[] = [
     ],
   },
   {
+    // ЖЖ — жұптыҚ жұмыс. В базе таких обращений девять и все в этой группе,
+    // но темы у них разные и требуют разного: «жұбы көрінбейді» — кто именно
+    // и на каком уроке, «жұптарды ауыстыру керек» — кого с кем пересадить.
+    // Одно поле «описание» это не собирало — кезекші доспрашивал вторым кругом.
     id: "zhzh",
-    emoji: "📋",
-    title: "ЖЖ бойынша мәселе",
+    emoji: "👥",
+    title: "ЖЖ (жұптық жұмыс) бойынша мәселе",
+    hint: "Жұп көрінбейді, тест ашылмайды, жұпты ауыстыру керек",
     fields: [
-      { id: "curatorEmail", label: "Куратордың поштасы", type: "email", required: true },
-      { ...SCREENSHOT, label: "Қате көрінетін скрин" },
       {
-        id: "description",
-        label: "Толықтай сипаттама",
+        id: "issueKind",
+        label: "Не болды?",
+        type: "select",
+        required: true,
+        options: [
+          { value: "pairs-not-visible", label: "Оқушыға жұбы көрінбейді" },
+          { value: "test-error", label: "ЖЖ тесті ашылмайды / аяқталмайды" },
+          { value: "change-pairs", label: "Жұпты ауыстыру / алып тастау керек" },
+          { value: "lesson-type", label: "Сабақ типінде «Жұптық жұмыс» жоқ" },
+          { value: "other", label: "Басқа" },
+        ],
+      },
+      LESSON_LINK,
+      {
+        id: "studentEmail",
+        label: "Оқушылардың поштасы",
+        type: "email",
+        required: true,
+        repeatable: true,
+        hint: "Жұптың екі оқушысын да жазыңыз",
+        showIf: {
+          field: "issueKind",
+          equals: ["pairs-not-visible", "test-error", "change-pairs"],
+        },
+      },
+      {
+        id: "pairChange",
+        label: "Кімді кіммен жұптау керек?",
         type: "textarea",
         required: true,
+        placeholder: "Айдана мен Нұрсұлтанды жұптау, Асылды алып тастау",
+        showIf: { field: "issueKind", equals: ["change-pairs"] },
       },
+      { ...SCREENSHOT, label: "Жұптар бөлімінің скріні" },
+      { ...DESCRIPTION, label: "Толықтай сипаттама" },
     ],
   },
   {
@@ -956,7 +989,10 @@ const CONTACT_FIELDS = [
 export function extractContact(values: Record<string, string | string[]>): string {
   for (const id of CONTACT_FIELDS) {
     const value = values[id];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    // Повторяемое поле (у ЖЖ это оба ученика пары) приходит массивом: для
+    // подсказки на карточке берём первый — остальные видны в описании.
+    const first = Array.isArray(value) ? value.find((v) => v.trim()) : value;
+    if (typeof first === "string" && first.trim()) return first.trim();
   }
   return "";
 }
