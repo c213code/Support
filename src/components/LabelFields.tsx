@@ -1,8 +1,22 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { fieldVisible, type SubmissionLabel } from "@/lib/submissionLabels";
-import { haptic } from "@/lib/miniappClient";
+import { currentInitData, haptic } from "@/lib/miniappClient";
 import styles from "./SubmissionForm.module.css";
+
+// Состояние автопроверки контакта на платформе: свободен ли новый номер или
+// почта. "unavailable" — проверить не вышло (инструмент выключен, платформа
+// молчит); тогда форма спрашивает то же самое вручную.
+type CheckState =
+  | { status: "loading" }
+  | { status: "free" }
+  | { status: "taken"; name: string | null }
+  | { status: "unavailable" };
+
+// Пауза перед запросом: номер набирают по цифре, и без неё запрос уходил бы
+// на каждое нажатие.
+const CHECK_DEBOUNCE_MS = 600;
 
 // Поля выбранного ярлыка (см. lib/submissionLabels.ts). Что именно спрашивать,
 // решает справочник — здесь только отрисовка, поэтому новая типовая проблема
@@ -29,10 +43,109 @@ export function LabelFields({
   missing: string[];
   fieldId: (id: string) => string;
 }) {
+  const [checks, setChecks] = useState<Record<string, CheckState>>({});
+
+  // Поля, которые проверяются на платформе, и их текущие значения — по ним
+  // же перезапускается эффект.
+  const watched = label.fields
+    .filter((f) => f.checkOccupancy)
+    .map((f) => `${f.id}=${typeof values[f.id] === "string" ? values[f.id] : ""}`)
+    .join("|");
+
+  useEffect(() => {
+    const pending = label.fields
+      .filter((f) => f.checkOccupancy)
+      .map((f) => ({ field: f, value: (typeof values[f.id] === "string" ? values[f.id] : "") as string }))
+      .filter(({ field, value }) => {
+        const v = value.trim();
+        if (!fieldVisible(field, values)) return false;
+        return field.type === "email" ? v.includes("@") && v.length >= 5 : v.replace(/\D/g, "").length >= 9;
+      });
+    if (pending.length === 0) return;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      for (const { field, value } of pending) {
+        setChecks((prev) => ({ ...prev, [field.id]: { status: "loading" } }));
+        try {
+          const res = await fetch("/api/miniapp/check-contact", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ initData: currentInitData(), contact: value.trim() }),
+          });
+          const data = (await res.json().catch(() => null)) as {
+            available?: boolean;
+            taken?: boolean;
+            name?: string | null;
+          } | null;
+          if (cancelled) return;
+          if (!data?.available) {
+            setChecks((prev) => ({ ...prev, [field.id]: { status: "unavailable" } }));
+            continue;
+          }
+          setChecks((prev) => ({
+            ...prev,
+            [field.id]: data.taken
+              ? { status: "taken", name: data.name ?? null }
+              : { status: "free" },
+          }));
+          // Ответ платформы — это и есть ответ на вопрос «бар ма?»: по нему
+          // открывается следующий вопрос, что делать с тем пользователем.
+          onChange("occupied", data.taken ? "yes" : "no");
+        } catch {
+          if (!cancelled) {
+            setChecks((prev) => ({ ...prev, [field.id]: { status: "unavailable" } }));
+          }
+        }
+      }
+    }, CHECK_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watched, label.id]);
+
+  // Ответила ли автопроверка хоть по одному полю — тогда поле, которое она
+  // заполняет (occupied), спрашивать не нужно.
+  const autoAnswered = label.fields.some((f) => {
+    if (!f.checkOccupancy) return false;
+    const state = checks[f.id]?.status;
+    return state === "free" || state === "taken";
+  });
+
+  // Что показать под проверяемым полем.
+  function checkNote(id: string) {
+    const state = checks[id];
+    if (!state) return null;
+    if (state.status === "loading") {
+      return <p className={styles.footer}>Тексерілуде…</p>;
+    }
+    if (state.status === "unavailable") {
+      return (
+        <p className={styles.footer}>Тексеру мүмкін болмады — төменде өзіңіз көрсетіңіз</p>
+      );
+    }
+    if (state.status === "free") {
+      return (
+        <p className={`${styles.footer} ${styles.footerOk}`}>Бос — қолданушы жоқ</p>
+      );
+    }
+    return (
+      <p className={`${styles.footer} ${styles.footerError}`}>
+        Бос емес{state.name ? ` — ${state.name}` : ""}
+      </p>
+    );
+  }
+
   return (
     <>
       {label.fields.map((field, index) => {
         if (!fieldVisible(field, values)) return null;
+        // Поле, которое заполняет автопроверка, спрашиваем только когда она
+        // не сработала.
+        if (field.autoFilled && autoAnswered) return null;
         const invalid = missing.includes(field.id);
         // Ключ с индексом: у ярлыка бывают два поля с одним id для разных
         // веток («кірмей тұр»: свой набор для прошедших регистрацию и для
@@ -143,6 +256,7 @@ export function LabelFields({
                 />
               )}
             </div>
+            {field.checkOccupancy && checkNote(field.id)}
             {field.hint && <p className={styles.footer}>{field.hint}</p>}
             {invalid && <p className={`${styles.footer} ${styles.footerError}`}>Толтырыңыз</p>}
           </section>

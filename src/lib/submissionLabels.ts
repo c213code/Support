@@ -53,6 +53,13 @@ export type LabelField = {
   // Блок можно добавить ещё раз (у одного вопроса бывает несколько потоков —
   // те же правки в разных ссылках).
   repeatable?: boolean;
+  // Пока куратор вводит значение, форма спрашивает платформу, занят ли такой
+  // контакт (POST /api/miniapp/check-contact), и сама проставляет ответ в
+  // поле occupied. Если платформа недоступна, occupied спрашивается вручную.
+  checkOccupancy?: boolean;
+  // Поле заполняется автопроверкой и показывается, только когда та не
+  // сработала.
+  autoFilled?: boolean;
 };
 
 export type SubmissionLabel = {
@@ -103,6 +110,9 @@ function occupancyFields(what: "номер" | "почта"): LabelField[] {
       label: `ПФ-да ${subject} бойынша қолданушы бар ма?`,
       type: "select",
       required: true,
+      // Обычно это выясняет сама форма, спросив платформу; вручную спрашиваем
+      // только когда проверить не удалось.
+      autoFilled: true,
       hint: "Тексеріп көрсеңіз — бар болса, онымен не істейтінін айтып кетіңіз",
       options: [
         { value: "no", label: "Жоқ" },
@@ -166,6 +176,7 @@ const SALES: SubmissionLabel[] = [
         type: "phone",
         required: true,
         placeholder: "+7 700 000 00 00",
+        checkOccupancy: true,
       },
       ...occupancyFields("номер"),
       { ...SCREENSHOT, required: false, minPhotos: 0 },
@@ -190,6 +201,7 @@ const SALES: SubmissionLabel[] = [
         type: "email",
         required: true,
         placeholder: "student@gmail.com",
+        checkOccupancy: true,
       },
       ...occupancyFields("почта"),
       { ...SCREENSHOT, required: false, minPhotos: 0 },
