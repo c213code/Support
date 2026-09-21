@@ -204,7 +204,11 @@ export async function POST(request: NextRequest) {
   const upload = await uploadPhotos(
     storageChatId,
     photos,
-    `${user.name} · ${group.name}\n${summary.slice(0, 200)}`
+    // Подпись к фото в служебном канале — с полями целиком: по одному
+    // названию ярлыка («Номер өзгерту») там ничего не понять, а это тот же
+    // канал, куда дежурный заглядывает за скриншотом. Caption у Telegram —
+    // до 1024 символов, поэтому с запасом обрезаем.
+    `${user.name} · ${group.name}\n${details.slice(0, 900)}`
   );
   if (!upload.ok) {
     if (upload.kind === "config") {
