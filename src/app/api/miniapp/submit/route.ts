@@ -264,6 +264,7 @@ export async function POST(request: NextRequest) {
       issueId: issue.id,
       groupName: group.name,
       authorName: user.name,
+      telegramUserId: user.id,
       details,
       photoFileIds,
     }).catch((err) => {

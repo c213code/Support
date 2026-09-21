@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import {
   buildMessageLink,
   CAPTION_LIMIT,
+  escapeHtml,
   sendStoredPhotos,
   sendTelegramMessage,
 } from "@/lib/telegram";
@@ -26,6 +27,10 @@ export async function postSubmissionToGroup(opts: {
   issueId: string;
   groupName: string;
   authorName: string;
+  // Telegram-id автора: по нему имя в шапке становится упоминанием, и
+  // куратор получает уведомление, что его заявку видно в группе. Через
+  // tg://user, а не @username — юзернейма у половины кураторов нет.
+  telegramUserId: bigint;
   details: string;
   photoFileIds: string[];
 }): Promise<string | null> {
@@ -42,13 +47,24 @@ export async function postSubmissionToGroup(opts: {
     return null;
   }
 
-  const text = `📨 Жаңа өтініш · ${opts.authorName}\n${opts.details}`;
+  // Подпись к фото у Telegram — 1024 символа, у сообщения — 4096. Режем
+  // сами поля ДО сборки html: обрезать готовую разметку нельзя, оборванный
+  // тег Telegram не примет вовсе.
+  const withPhotos = opts.photoFileIds.length > 0;
+  const room = (withPhotos ? CAPTION_LIMIT : 4096) - opts.authorName.length - 40;
+  const details = opts.details.slice(0, room);
+  const mention = `<a href="tg://user?id=${opts.telegramUserId}">${escapeHtml(opts.authorName)}</a>`;
+  const html = `📨 Жаңа өтініш · ${mention}\n${escapeHtml(details)}`;
+  // То же самое без разметки — для записи о сообщении бота и для списка
+  // «удалить ответ», где разметка только мешает читать.
+  const plain = `📨 Жаңа өтініш · ${opts.authorName}\n${details}`;
+
   // С фото текст уходит подписью к альбому: отдельным сообщением он
   // оторвался бы от скриншотов, а в группе между ними успевает влезть
   // чужая реплика.
-  const sent = opts.photoFileIds.length
-    ? await sendStoredPhotos(preset.chatId, opts.photoFileIds, text)
-    : await sendTelegramMessage(preset.chatId, text);
+  const sent = withPhotos
+    ? await sendStoredPhotos(preset.chatId, opts.photoFileIds, html, "HTML")
+    : await sendTelegramMessage(preset.chatId, html, undefined, undefined, "HTML");
   if (!sent) {
     console.warn(`[submission] не отправилось в «${opts.groupName}» (чат ${preset.chatId})`);
     return null;
@@ -64,7 +80,7 @@ export async function postSubmissionToGroup(opts: {
       chatId: preset.chatId,
       messageId: sent.message_id,
       kind: "SUBMISSION",
-      text: text.slice(0, CAPTION_LIMIT),
+      text: plain.slice(0, CAPTION_LIMIT),
     },
   });
 

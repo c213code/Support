@@ -432,7 +432,10 @@ export async function uploadPhotos(
 export async function sendStoredPhotos(
   chatId: string,
   fileIds: string[],
-  caption?: string
+  caption?: string,
+  // "HTML" — когда в подписи есть разметка (например, упоминание автора
+  // ссылкой tg://user). Текст вокруг неё вызывающий код экранирует сам.
+  parseMode?: "HTML"
 ): Promise<{ message_id: number } | null> {
   if (fileIds.length === 0) return null;
 
@@ -442,13 +445,20 @@ export async function sendStoredPhotos(
   const data = (await callBotApi(
     single ? "sendPhoto" : "sendMediaGroup",
     single
-      ? { chat_id: chatId, photo: fileIds[0], caption: caption?.slice(0, CAPTION_LIMIT) }
+      ? {
+          chat_id: chatId,
+          photo: fileIds[0],
+          caption: caption?.slice(0, CAPTION_LIMIT),
+          parse_mode: parseMode,
+        }
       : {
           chat_id: chatId,
           media: fileIds.map((fileId, index) => ({
             type: "photo",
             media: fileId,
-            ...(index === 0 && caption ? { caption: caption.slice(0, CAPTION_LIMIT) } : {}),
+            ...(index === 0 && caption
+              ? { caption: caption.slice(0, CAPTION_LIMIT), parse_mode: parseMode }
+              : {}),
           })),
         }
   )) as { result?: { message_id?: number } | Array<{ message_id?: number }> } | null;
