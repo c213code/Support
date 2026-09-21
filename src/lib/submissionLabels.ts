@@ -177,6 +177,36 @@ function occupancyFields(what: "номер" | "почта"): LabelField[] {
   ];
 }
 
+// Предложение по улучшению — не проблема, но приходит от тех же кураторов и
+// по тем же четырём направлениям, поэтому ярлык общий для всех групп.
+const SUGGESTION_LABEL: SubmissionLabel = {
+  id: "suggestion",
+  emoji: "💡",
+  title: "Ұсыныс",
+  hint: "Жақсарту туралы идея",
+  fields: [
+    {
+      id: "description",
+      label: "Ұсынысыңыз",
+      type: "textarea",
+      required: true,
+      placeholder: "Нені жақсартуға болады",
+    },
+    {
+      id: "urgency",
+      label: "Қаншалықты шұғыл?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "low", label: "Шұғыл емес" },
+        { value: "medium", label: "Орташа" },
+        { value: "high", label: "Шұғыл" },
+      ],
+    },
+    { ...SCREENSHOT, required: false, minPhotos: 0 },
+  ],
+};
+
 const OTHER_LABEL: SubmissionLabel = {
   id: "other",
   emoji: "📝",
@@ -316,6 +346,7 @@ const SALES: SubmissionLabel[] = [
       { ...SCREENSHOT, label: "Келмегені туралы скрин" },
     ],
   },
+  SUGGESTION_LABEL,
   OTHER_LABEL,
 ];
 
@@ -381,6 +412,7 @@ const METHODOLOGY: SubmissionLabel[] = [
       { ...SCREENSHOT, label: "Нақты нені өзгерту керегі көрсетілген скрин" },
     ],
   },
+  SUGGESTION_LABEL,
   OTHER_WITH_LESSON,
 ];
 
@@ -449,6 +481,7 @@ const SERVICE: SubmissionLabel[] = [
       },
     ],
   },
+  SUGGESTION_LABEL,
   OTHER_LABEL,
 ];
 
@@ -537,33 +570,7 @@ const PRODUCT: SubmissionLabel[] = [
       { ...DESCRIPTION, label: "Толықтай сипаттама", required: false },
     ],
   },
-  {
-    id: "suggestion",
-    emoji: "💡",
-    title: "Ұсыныс",
-    hint: "Жақсарту туралы идея",
-    fields: [
-      {
-        id: "description",
-        label: "Ұсынысыңыз",
-        type: "textarea",
-        required: true,
-        placeholder: "Нені жақсартуға болады",
-      },
-      {
-        id: "urgency",
-        label: "Қаншалықты шұғыл?",
-        type: "select",
-        required: true,
-        options: [
-          { value: "low", label: "Шұғыл емес" },
-          { value: "medium", label: "Орташа" },
-          { value: "high", label: "Шұғыл" },
-        ],
-      },
-      { ...SCREENSHOT, required: false, minPhotos: 0 },
-    ],
-  },
+  SUGGESTION_LABEL,
   OTHER_WITH_LESSON,
 ];
 
