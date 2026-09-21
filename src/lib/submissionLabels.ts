@@ -286,47 +286,6 @@ const LOGIN_LABEL: SubmissionLabel = {
   ],
 };
 
-const NOT_VISIBLE_LABEL: SubmissionLabel = {
-  id: "not-visible",
-  emoji: "🫥",
-  title: "Ашылмайды / көрінбейді",
-  hint: "Сабақ, тест немесе бөлім жоқ не ашылмай тұр",
-  fields: [
-    {
-      id: "what",
-      label: "Не ашылмайды?",
-      type: "select",
-      required: true,
-      options: [
-        { value: "lesson", label: "Сабақ" },
-        { value: "test", label: "Тест" },
-        { value: "quiz", label: "Куиз гейм" },
-        { value: "homework", label: "Үй жұмысы" },
-        { value: "video", label: "Видео" },
-        { value: "section", label: "Бөлім" },
-        { value: "other", label: "Басқа" },
-      ],
-    },
-    {
-      // Один ученик или все — это первое, что дежурный выясняет: от ответа
-      // зависит, чинить доступ конкретному или звать бэкенд.
-      id: "scope",
-      label: "Кімде байқалады?",
-      type: "select",
-      required: true,
-      options: [
-        { value: "one", label: "Бір оқушыда" },
-        { value: "several", label: "Бірнеше оқушыда" },
-        { value: "all", label: "Барлығында" },
-      ],
-    },
-    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
-    LESSON_LINK,
-    { ...SCREENSHOT, label: "Қате немесе бос экран көрінетін скрин" },
-    { ...DESCRIPTION, required: false },
-  ],
-};
-
 const REOPEN_LABEL: SubmissionLabel = {
   id: "reopen",
   emoji: "🔄",
@@ -412,31 +371,6 @@ const PLATFORM_ERROR_LABEL: SubmissionLabel = {
     },
     { ...SCREENSHOT, label: "Қате көрінетін скрин" },
     { ...DESCRIPTION, required: true },
-  ],
-};
-
-const COURSE_LABEL: SubmissionLabel = {
-  id: "course-change",
-  emoji: "🎒",
-  title: "Курсқа қосу / ауыстыру",
-  hint: "Курс, ағым немесе мерзім",
-  fields: [
-    {
-      id: "action",
-      label: "Не істеу керек?",
-      type: "select",
-      required: true,
-      options: [
-        { value: "add", label: "Курсқа қосу" },
-        { value: "move", label: "Басқа курсқа ауыстыру" },
-        { value: "stream", label: "Ағымды ауыстыру" },
-        { value: "extend", label: "Мерзімін ұзарту" },
-      ],
-    },
-    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
-    { id: "target", label: "Қай курсқа / ағымға", type: "text", required: true },
-    { ...SCREENSHOT, required: false, minPhotos: 0 },
-    { ...DESCRIPTION, required: false },
   ],
 };
 
@@ -576,8 +510,6 @@ const SALES: SubmissionLabel[] = [
     ],
   },
   PLATFORM_ERROR_LABEL,
-  NOT_VISIBLE_LABEL,
-  COURSE_LABEL,
   SUGGESTION_LABEL,
   OTHER_LABEL,
 ];
@@ -644,7 +576,6 @@ const METHODOLOGY: SubmissionLabel[] = [
       { ...SCREENSHOT, label: "Нақты нені өзгерту керегі көрсетілген скрин" },
     ],
   },
-  NOT_VISIBLE_LABEL,
   SCORE_LABEL,
   REOPEN_LABEL,
   SUGGESTION_LABEL,
@@ -716,7 +647,6 @@ const SERVICE: SubmissionLabel[] = [
       },
     ],
   },
-  NOT_VISIBLE_LABEL,
   PLATFORM_ERROR_LABEL,
   SUGGESTION_LABEL,
   OTHER_LABEL,
@@ -840,7 +770,6 @@ const PRODUCT: SubmissionLabel[] = [
       { ...DESCRIPTION, label: "Толықтай сипаттама", required: false },
     ],
   },
-  NOT_VISIBLE_LABEL,
   LOGIN_LABEL,
   REOPEN_LABEL,
   PLATFORM_ERROR_LABEL,
