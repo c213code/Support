@@ -7,7 +7,8 @@
     "build": "prisma generate && prisma migrate deploy && prisma db seed && next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "pilot": "tsx --env-file=.env scripts/pilot-check.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

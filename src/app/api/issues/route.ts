@@ -112,6 +112,22 @@ export async function GET(request: NextRequest) {
       const submission = issueSubmissions[0];
       const label =
         submission?.labelId ? findLabel(issue.groupName, submission.labelId) : null;
+      const labelValues = (submission?.labelFields ?? {}) as Record<
+        string,
+        string | string[]
+      >;
+      const labelText = (id: string) =>
+        typeof labelValues[id] === "string" ? (labelValues[id] as string).trim() : "";
+
+      // Ярлык прямо сказал, что менять на что, — распознавать это регуляркой
+      // из текста больше незачем (она и ошибалась, когда почт в обращении
+      // было больше двух). Регулярка остаётся для обращений без ярлыка.
+      const labelEmailChange =
+        submission?.labelId === "email-change" &&
+        labelText("oldEmail").includes("@") &&
+        labelText("newEmail").includes("@")
+          ? { oldEmail: labelText("oldEmail"), newEmail: labelText("newEmail") }
+          : null;
       // Исходные (сырые) тексты обращения: и в hints, и в распознавании смены
       // почты нужен именно сырой текст — в description почты уже вычищены.
       // Ссылку на урок из формы сюда намеренно не кладём: длинный числовой id
@@ -131,9 +147,14 @@ export async function GET(request: NextRequest) {
         // Set, поэтому дубликаты безвредны.
         hints: extractTicketHints(rawTexts),
         emailChange: platformOn
-          ? detectEmailChangeRequest(rawTexts.filter(Boolean).join("\n"))
+          ? (labelEmailChange ?? detectEmailChangeRequest(rawTexts.filter(Boolean).join("\n")))
           : null,
-        untReset: platformOn && mentionsUntTest(rawTexts.filter(Boolean).join("\n")),
+        // Ярлык «ҰБТ / ДТ» — это и есть заявка про уровневый тест: кнопка
+        // сброса нужна независимо от того, какие слова в тексте.
+        untReset:
+          platformOn &&
+          (submission?.labelId === "unt-dt" ||
+            mentionsUntTest(rawTexts.filter(Boolean).join("\n"))),
         submission: submission
           ? {
               authorName: submission.authorName,

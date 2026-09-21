@@ -226,6 +226,220 @@ const SUGGESTION_LABEL: SubmissionLabel = {
   ],
 };
 
+
+// Ярлыки, которые встречаются больше чем в одной группе. По истории тикетов
+// «не открывается» — самая частая тема вообще (10–26% в каждой группе), а
+// вход, переоткрытие попытки, балл и ошибки платформы идут следом. Держим их
+// одним определением, чтобы вопросы были одинаковыми, куда бы обращение ни
+// пришло.
+
+const LOGIN_LABEL: SubmissionLabel = {
+  id: "login-issue",
+  emoji: "🔐",
+  title: "Оқушы аккаунтқа кірмей тұр",
+  hint: "Кіру кезінде қате шығады немесе тіркеле алмайды",
+  fields: [
+    {
+      id: "registered",
+      label: "Оқушы тіркеуден өтті ме?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "yes", label: "Тіркеуден өткен" },
+        { value: "no", label: "Тіркеуден өтпеген" },
+      ],
+    },
+    // Прошёл регистрацию: нужен текст ошибки и то, чем он входит.
+    {
+      id: "errorAndCredentials",
+      label: "Шығып тұрған қате, жазылған логин және пароль",
+      type: "textarea",
+      required: true,
+      showIf: { field: "registered", equals: ["yes"] },
+      placeholder: "Қате мәтіні, логин, пароль",
+    },
+    {
+      id: "photos",
+      label: "Қате көрініп тұрған скрин",
+      type: "photos",
+      required: true,
+      minPhotos: 1,
+      showIf: { field: "registered", equals: ["yes"] },
+    },
+    // Не прошёл: форма регистрации — три страницы, нужны все.
+    {
+      id: "studentEmail",
+      label: "Оқушының поштасы",
+      type: "email",
+      required: true,
+      showIf: { field: "registered", equals: ["no"] },
+    },
+    {
+      id: "photos",
+      label: "Тіркеу формасын қалай толтырғаны",
+      type: "photos",
+      required: true,
+      minPhotos: 3,
+      hint: "Форманың үш бетінің де скрині керек",
+      showIf: { field: "registered", equals: ["no"] },
+    },
+  ],
+};
+
+const NOT_VISIBLE_LABEL: SubmissionLabel = {
+  id: "not-visible",
+  emoji: "🫥",
+  title: "Ашылмайды / көрінбейді",
+  hint: "Сабақ, тест немесе бөлім жоқ не ашылмай тұр",
+  fields: [
+    {
+      id: "what",
+      label: "Не ашылмайды?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "lesson", label: "Сабақ" },
+        { value: "test", label: "Тест" },
+        { value: "quiz", label: "Куиз гейм" },
+        { value: "homework", label: "Үй жұмысы" },
+        { value: "video", label: "Видео" },
+        { value: "section", label: "Бөлім" },
+        { value: "other", label: "Басқа" },
+      ],
+    },
+    {
+      // Один ученик или все — это первое, что дежурный выясняет: от ответа
+      // зависит, чинить доступ конкретному или звать бэкенд.
+      id: "scope",
+      label: "Кімде байқалады?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "one", label: "Бір оқушыда" },
+        { value: "several", label: "Бірнеше оқушыда" },
+        { value: "all", label: "Барлығында" },
+      ],
+    },
+    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
+    LESSON_LINK,
+    { ...SCREENSHOT, label: "Қате немесе бос экран көрінетін скрин" },
+    { ...DESCRIPTION, required: false },
+  ],
+};
+
+const REOPEN_LABEL: SubmissionLabel = {
+  id: "reopen",
+  emoji: "🔄",
+  title: "Қайта ашу керек",
+  hint: "Оқушы байқамай жіберіп қойды",
+  fields: [
+    {
+      id: "what",
+      label: "Нені қайта ашу керек?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "test", label: "Тест" },
+        { value: "quiz", label: "Куиз гейм" },
+        { value: "ubt", label: "ҰБТ" },
+        { value: "homework", label: "Үй жұмысы" },
+      ],
+    },
+    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
+    LESSON_LINK,
+    {
+      id: "reason",
+      label: "Себебі",
+      type: "select",
+      required: true,
+      options: [
+        { value: "accident", label: "Байқамай жіберіп қойды" },
+        { value: "technical", label: "Техникалық ақау" },
+        { value: "other", label: "Басқа" },
+      ],
+    },
+    { ...SCREENSHOT, label: "Әрекет көрінетін скрин" },
+    { ...DESCRIPTION, required: false },
+  ],
+};
+
+const SCORE_LABEL: SubmissionLabel = {
+  id: "score",
+  emoji: "💯",
+  title: "Балл дұрыс емес",
+  hint: "Балл қате есептелген",
+  fields: [
+    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
+    LESSON_LINK,
+    { id: "current", label: "Қазір қандай балл тұр", type: "text", required: true },
+    { id: "expected", label: "Қандай болуы керек", type: "text", required: true },
+    { ...SCREENSHOT, label: "Балл көрінетін скрин" },
+  ],
+};
+
+const PLATFORM_ERROR_LABEL: SubmissionLabel = {
+  id: "platform-error",
+  emoji: "⚠️",
+  title: "Платформа қате береді",
+  hint: "Баяу жүктеледі немесе қате шығады",
+  fields: [
+    {
+      id: "where",
+      label: "Қай жерде?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "lesson", label: "Сабақта" },
+        { value: "test", label: "Тесте" },
+        { value: "video", label: "Видеода" },
+        { value: "cabinet", label: "Кабинетте" },
+        { value: "other", label: "Басқа" },
+      ],
+    },
+    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
+    {
+      // Устройство спрашиваем сразу: половина «платформа не грузится»
+      // оказывается старым браузером на телефоне.
+      id: "device",
+      label: "Неден кіреді?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "phone", label: "Телефон" },
+        { value: "computer", label: "Компьютер" },
+        { value: "both", label: "Екеуінде де" },
+      ],
+    },
+    { ...SCREENSHOT, label: "Қате көрінетін скрин" },
+    { ...DESCRIPTION, required: true },
+  ],
+};
+
+const COURSE_LABEL: SubmissionLabel = {
+  id: "course-change",
+  emoji: "🎒",
+  title: "Курсқа қосу / ауыстыру",
+  hint: "Курс, ағым немесе мерзім",
+  fields: [
+    {
+      id: "action",
+      label: "Не істеу керек?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "add", label: "Курсқа қосу" },
+        { value: "move", label: "Басқа курсқа ауыстыру" },
+        { value: "stream", label: "Ағымды ауыстыру" },
+        { value: "extend", label: "Мерзімін ұзарту" },
+      ],
+    },
+    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
+    { id: "target", label: "Қай курсқа / ағымға", type: "text", required: true },
+    { ...SCREENSHOT, required: false, minPhotos: 0 },
+    { ...DESCRIPTION, required: false },
+  ],
+};
+
 const OTHER_LABEL: SubmissionLabel = {
   id: "other",
   emoji: "📝",
@@ -279,58 +493,7 @@ const SALES: SubmissionLabel[] = [
       { ...SCREENSHOT, required: false, minPhotos: 0 },
     ],
   },
-  {
-    id: "login-issue",
-    emoji: "🔐",
-    title: "Оқушы аккаунтқа кірмей тұр",
-    hint: "Кіру кезінде қате шығады немесе тіркеле алмайды",
-    fields: [
-      {
-        id: "registered",
-        label: "Оқушы тіркеуден өтті ме?",
-        type: "select",
-        required: true,
-        options: [
-          { value: "yes", label: "Тіркеуден өткен" },
-          { value: "no", label: "Тіркеуден өтпеген" },
-        ],
-      },
-      // Прошёл регистрацию: нужен текст ошибки и то, чем он входит.
-      {
-        id: "errorAndCredentials",
-        label: "Шығып тұрған қате, жазылған логин және пароль",
-        type: "textarea",
-        required: true,
-        showIf: { field: "registered", equals: ["yes"] },
-        placeholder: "Қате мәтіні, логин, пароль",
-      },
-      {
-        id: "photos",
-        label: "Қате көрініп тұрған скрин",
-        type: "photos",
-        required: true,
-        minPhotos: 1,
-        showIf: { field: "registered", equals: ["yes"] },
-      },
-      // Не прошёл: форма регистрации — три страницы, нужны все.
-      {
-        id: "studentEmail",
-        label: "Оқушының поштасы",
-        type: "email",
-        required: true,
-        showIf: { field: "registered", equals: ["no"] },
-      },
-      {
-        id: "photos",
-        label: "Тіркеу формасын қалай толтырғаны",
-        type: "photos",
-        required: true,
-        minPhotos: 3,
-        hint: "Форманың үш бетінің де скрині керек",
-        showIf: { field: "registered", equals: ["no"] },
-      },
-    ],
-  },
+  LOGIN_LABEL,
   {
     id: "no-message",
     emoji: "📨",
@@ -412,6 +575,9 @@ const SALES: SubmissionLabel[] = [
       },
     ],
   },
+  PLATFORM_ERROR_LABEL,
+  NOT_VISIBLE_LABEL,
+  COURSE_LABEL,
   SUGGESTION_LABEL,
   OTHER_LABEL,
 ];
@@ -478,6 +644,9 @@ const METHODOLOGY: SubmissionLabel[] = [
       { ...SCREENSHOT, label: "Нақты нені өзгерту керегі көрсетілген скрин" },
     ],
   },
+  NOT_VISIBLE_LABEL,
+  SCORE_LABEL,
+  REOPEN_LABEL,
   SUGGESTION_LABEL,
   OTHER_WITH_LESSON,
 ];
@@ -547,6 +716,8 @@ const SERVICE: SubmissionLabel[] = [
       },
     ],
   },
+  NOT_VISIBLE_LABEL,
+  PLATFORM_ERROR_LABEL,
   SUGGESTION_LABEL,
   OTHER_LABEL,
 ];
@@ -636,6 +807,11 @@ const PRODUCT: SubmissionLabel[] = [
       { ...DESCRIPTION, label: "Толықтай сипаттама", required: false },
     ],
   },
+  NOT_VISIBLE_LABEL,
+  LOGIN_LABEL,
+  REOPEN_LABEL,
+  PLATFORM_ERROR_LABEL,
+  SCORE_LABEL,
   SUGGESTION_LABEL,
   OTHER_WITH_LESSON,
 ];
