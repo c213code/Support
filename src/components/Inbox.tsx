@@ -677,6 +677,17 @@ export function Inbox() {
     );
   }, [issues, boardQuery]);
 
+  // Сколько сообщений дня так и не стали тикетом. Это единственный след
+  // решения "по этому сообщению тикета нет": его принимает либо ИИ (ответил
+  // SKIP), либо regex-чистка, и принимается оно молча. Дежурный при этом
+  // сидит на "Доске" — вкладка открывается по умолчанию, — и такое сообщение
+  // не показывается ему вообще ничем. Отсюда ощущение "бот пропускает
+  // тикеты": пропуск бывает и правильным, но узнать о нём было неоткуда.
+  const undecidedCount = useMemo(
+    () => messages.filter((m) => !m.usedForIssueId).length,
+    [messages]
+  );
+
   // Счётчики по статусам для плиток над доской — по всему дню, не по
   // отфильтрованному виду.
   const counts = useMemo(
@@ -945,6 +956,18 @@ export function Inbox() {
             >
               <IconInbox className="h-3.5 w-3.5" />
               Сообщения
+              {undecidedCount > 0 && (
+                <span
+                  title={`${undecidedCount} — столько сообщений за день не стали тикетом`}
+                  className={`ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                    tab === "messages"
+                      ? "bg-white/20 text-white"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {undecidedCount}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setTab("board")}
