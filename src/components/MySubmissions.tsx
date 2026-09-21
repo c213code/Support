@@ -225,13 +225,25 @@ function SubmissionItem({
           <span>{formatWhen(item.createdAt)}</span>
         </span>
         <span className={open ? styles.submissionText : styles.submissionTextClamped}>
-          {item.text}
+          {item.labelTitle ?? item.text}
         </span>
         <StatusBadge status={item.status} />
       </button>
 
       {open && (
         <div id={panelId} className={styles.submissionBody}>
+          {item.fields.some((f) => !f.service) && (
+            <div className={styles.fields}>
+              {item.fields
+                .filter((f) => !f.service)
+                .map((f) => (
+                <p key={f.label} className={styles.fieldLine}>
+                  <span className={styles.fieldLabel}>{f.label}: </span>
+                  {f.value}
+                </p>
+              ))}
+            </div>
+          )}
           {item.note && (
             <div className={styles.noteBox}>
               <span className={styles.noteLabel}>Кезекшінің жауабы</span>

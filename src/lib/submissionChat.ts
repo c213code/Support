@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { agentTelegramId } from "@/lib/agentTelegram";
+import { findLabel } from "@/lib/submissionLabels";
 import { SUBMISSION_PICK_PREFIX } from "@/lib/telegramCallbacks";
 import {
   answerCallbackQuery,
@@ -205,12 +206,21 @@ export async function sendToCurator(params: {
       telegramUserId: true,
       rawText: true,
       createdAt: true,
+      labelId: true,
+      issue: { select: { groupName: true } },
       messages: { where: { fromAgent: true }, select: { id: true }, take: 1 },
     },
   });
   if (!submission) return { ok: false, error: "Обращение не найдено" };
 
-  const header = `📌 «${excerptOf(submission.rawText)}» · ${formatDayKk(submission.createdAt)}`;
+  // В шапке — название типовой проблемы, если куратор его выбирал: по нему
+  // он узнаёт своё обращение сразу. У заявок без ярлыка (и у старых) остаётся
+  // начало текста.
+  const label = submission.labelId
+    ? findLabel(submission.issue.groupName, submission.labelId)
+    : null;
+  const subject = label?.title ?? excerptOf(submission.rawText);
+  const header = `📌 «${subject}» · ${formatDayKk(submission.createdAt)}`;
   // Подсказку про Reply пишем только в первом сообщении треда: дальше куратор
   // уже знает, как отвечать, а повторять одно и то же в каждом письме —
   // ровно то попугайничанье, которого бот избегает в группах.

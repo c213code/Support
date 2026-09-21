@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { describeFields, findLabel } from "@/lib/submissionLabels";
 import type { IssueStatus } from "@/lib/status";
 import type { MySubmission } from "@/lib/miniappClient";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
@@ -49,6 +50,8 @@ export async function POST(request: NextRequest) {
       id: true,
       createdAt: true,
       rawText: true,
+      labelId: true,
+      labelFields: true,
       photoFileIds: true,
       issue: {
         select: {
@@ -62,10 +65,22 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  const labelOf = (row: { labelId: string | null; issue: { groupName: string } }) =>
+    row.labelId ? findLabel(row.issue.groupName, row.labelId) : null;
+
   const items: MySubmission[] = rows.map((row) => ({
     id: row.id,
     createdAt: row.createdAt.toISOString(),
     text: row.rawText,
+    // То же, что видит дежурный на карточке: название проблемы и поля с
+    // подписями. Без них в списке лежал бы склеенный текст всех ответов.
+    labelTitle: labelOf(row)?.title ?? null,
+    fields: (() => {
+      const label = labelOf(row);
+      return label
+        ? describeFields(label, (row.labelFields ?? {}) as Record<string, string | string[]>)
+        : [];
+    })(),
     groupName: row.issue.groupName,
     groupEmoji: row.issue.groupEmoji,
     status: row.issue.status,

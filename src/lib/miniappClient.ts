@@ -8,6 +8,10 @@ export type MySubmission = {
   id: string;
   createdAt: string;
   text: string;
+  // Название выбранной типовой проблемы и её заполненные поля (см.
+  // lib/submissionLabels.ts). Пусто у обращений, поданных до ярлыков.
+  labelTitle: string | null;
+  fields: Array<{ label: string; value: string; service: boolean }>;
   groupName: string;
   groupEmoji: string | null;
   status: IssueStatus;

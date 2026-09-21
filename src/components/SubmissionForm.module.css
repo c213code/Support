@@ -872,3 +872,22 @@
   padding: 6px 0;
   cursor: pointer;
 }
+
+/* --- заполненные поля обращения в списке «Менің өтініштерім»: те же пары
+   «подпись — значение», что видит дежурный на карточке. --- */
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.fieldLine {
+  font-size: 15px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.fieldLabel {
+  color: var(--hint);
+}
