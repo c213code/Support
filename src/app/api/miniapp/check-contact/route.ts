@@ -28,6 +28,20 @@ import { platformEnabled, searchStudents } from "@/lib/platform";
 const MIN_DIGITS = 9;
 const MIN_QUERY = 5;
 
+// В поиск уходит нормализованный номер, а не то, что видно в поле: форма
+// показывает «+7 (777) 777 77 77», а на платформе тот же номер может лежать
+// как «+77777777777» или даже «+7 ( (7) 77) 777 77 77». Пробуем варианты по
+// очереди, пока не найдём совпадение.
+// Вариантов ровно два: на свободном номере отрабатывают оба, и каждый лишний
+// запрос — лишняя секунда ожидания под полем.
+function phoneQueries(contact: string): string[] {
+  let digits = contact.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("8")) digits = `7${digits.slice(1)}`;
+  if (digits.length === 10) digits = `7${digits}`;
+  const local = digits.length === 11 ? digits.slice(1) : digits;
+  return [...new Set([`+${digits}`, local])].filter((q) => q.length >= MIN_DIGITS);
+}
+
 export async function POST(request: NextRequest) {
   if (!submissionFormEnabled()) return NextResponse.json({ available: false });
 
@@ -51,15 +65,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const found = await searchStudents(contact, 5);
     // Точное совпадение, а не «похоже»: тот же search цепляет и куски имени,
-    // и по ним объявлять номер занятым нельзя.
+    // и по ним объявлять контакт занятым нельзя. У телефона сравниваем по
+    // цифрам — на платформе они записаны как попало.
     const tail = digits.slice(-MIN_DIGITS);
-    const match = found.find((user) =>
+    const matches = (user: { email: string | null; phoneNumber: string | null }) =>
       isEmail
         ? (user.email ?? "").toLowerCase() === contact.toLowerCase()
-        : (user.phoneNumber ?? "").replace(/\D/g, "").endsWith(tail)
-    );
+        : (user.phoneNumber ?? "").replace(/\D/g, "").endsWith(tail);
+
+    let match: Awaited<ReturnType<typeof searchStudents>>[number] | undefined;
+    for (const query of isEmail ? [contact] : phoneQueries(contact)) {
+      const found = await searchStudents(query, 5);
+      match = found.find(matches);
+      if (match) break;
+    }
 
     const name = match
       ? [match.firstname, match.lastname].filter(Boolean).join(" ").trim()
