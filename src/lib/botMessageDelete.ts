@@ -11,7 +11,9 @@ import {
 import {
   BOT_MESSAGE_DELETE_PREFIX,
   BOT_MESSAGE_KEEP_PREFIX,
+  BOT_REPLY_DELETE_PREFIX,
 } from "@/lib/telegramCallbacks";
+import { formatDateTimeAlmaty } from "@/lib/date";
 
 // Удаление ЛЮБОГО сообщения бота в рабочей группе по ссылке: /delete <ссылка>
 // в личке. Кнопки «удалить ответ» на сайте и в разборе знают только ответы
@@ -33,6 +35,13 @@ const USAGE = [
   "Удалить можно только сообщение самого бота и только в первые 48 часов — дальше Telegram не даёт.",
 ].join("\n");
 
+// Сколько последних сообщений показывать, когда ссылку не прислали. Пять —
+// чтобы список помещался на экран телефона вместе с кнопками.
+const RECENT_LIMIT = 5;
+// Telegram разрешает боту удалять свои сообщения только 48 часов. Показывать
+// более старые — обещать то, чего кнопка не сделает.
+const DELETE_WINDOW_HOURS = 48;
+
 type Target = { chatId: string; messageId: number };
 
 // Ссылки на сообщения, которые даёт Telegram:
@@ -49,9 +58,62 @@ export function parseMessageLink(raw: string): Target | null {
 }
 
 // Шаг 1-2: показать сообщение агенту и спросить подтверждение.
+// Последние ответы бота в группах — списком с кнопкой удаления у каждого.
+// Убрать обычно надо то, что бот сказал только что, и искать ради этого
+// ссылку в группе дольше, чем нажать кнопку в личке.
+//
+// Берём из BotReply: это ответы по тикетам, которые бот пишет сам. Репорт и
+// объявления там не лежат — их по-прежнему удаляют ссылкой.
+async function showRecentBotReplies(agentChatId: number): Promise<void> {
+  const since = new Date(Date.now() - DELETE_WINDOW_HOURS * 60 * 60 * 1000);
+  const replies = await prisma.botReply.findMany({
+    where: { deleted: false, sentAt: { gte: since } },
+    orderBy: { sentAt: "desc" },
+    take: RECENT_LIMIT,
+    select: {
+      id: true,
+      text: true,
+      sentAt: true,
+      issue: { select: { groupName: true } },
+    },
+  });
+
+  if (replies.length === 0) {
+    await sendTelegramMessage(
+      agentChatId,
+      `За последние ${DELETE_WINDOW_HOURS} часов бот в группы ничего не писал.\n\n${USAGE}`
+    );
+    return;
+  }
+
+  const lines = replies.map((reply, index) => {
+    const flat = reply.text.replace(/\s+/g, " ").trim();
+    const short = flat.length > 120 ? `${flat.slice(0, 120)}…` : flat;
+    return `${index + 1}. ${reply.issue.groupName} · ${formatDateTimeAlmaty(reply.sentAt)}\n«${short}»`;
+  });
+
+  await sendTelegramMessage(
+    agentChatId,
+    `🤖 Последние сообщения бота:\n\n${lines.join("\n\n")}\n\nНужно другое — пришли ссылку: /delete <ссылка>`,
+    replies.map((reply, index) => [
+      {
+        text: `🗑 Удалить ${index + 1}`,
+        callback_data: `${BOT_REPLY_DELETE_PREFIX}${reply.id}`,
+      },
+    ])
+  );
+}
+
 export async function startBotMessageDelete(agentChatId: number, argText: string): Promise<void> {
   const target = parseMessageLink(argText);
   if (!target) {
+    // Команда без аргумента — показываем последние сообщения бота. Кривую
+    // ссылку так не глотаем: там человек ошибся, и подсказка про формат
+    // полезнее списка.
+    if (!argText.trim()) {
+      await showRecentBotReplies(agentChatId);
+      return;
+    }
     await sendTelegramMessage(agentChatId, USAGE);
     return;
   }
