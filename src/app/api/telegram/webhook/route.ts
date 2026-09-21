@@ -35,8 +35,12 @@ import {
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
+  // Секрет обязателен. Раньше сравнивались просто два значения, и при пустой
+  // переменной окружения запрос с пустым заголовком проходил как «совпало» —
+  // то есть забытая настройка открывала вебхук наружу.
+  const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
   const secret = request.headers.get("x-telegram-bot-api-secret-token");
-  if (secret !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+  if (!expected || secret !== expected) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

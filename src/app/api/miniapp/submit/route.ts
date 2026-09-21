@@ -143,9 +143,13 @@ export async function POST(request: NextRequest) {
   // не записан. Сначала запись, потом подсчёт — параллельные попытки видят
   // друг друга, и лишние отсекаются.
   const now = Date.now();
-  await prisma.miniAppAttempt.create({ data: { telegramUserId: user.id } });
+  await prisma.miniAppAttempt.create({ data: { telegramUserId: user.id, kind: "submit" } });
   const attempts = await prisma.miniAppAttempt.count({
-    where: { telegramUserId: user.id, createdAt: { gte: new Date(now - 60 * 60 * 1000) } },
+    where: {
+      telegramUserId: user.id,
+      kind: "submit",
+      createdAt: { gte: new Date(now - 60 * 60 * 1000) },
+    },
   });
   if (attempts > MAX_ATTEMPTS_PER_HOUR) {
     console.warn(`[miniapp] лимит попыток: user=${user.id}, ${attempts} за час`);

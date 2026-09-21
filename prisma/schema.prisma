@@ -486,6 +486,12 @@ model PendingCuratorMessage {
 model MiniAppAttempt {
   id             String   @id @default(cuid())
   telegramUserId BigInt
+  // Что именно делал куратор: "submit" — отправка обращения, "check" —
+  // проверка, занят ли новый номер/почта на платформе. Лимиты у них разные:
+  // обращений в час немного, а проверок при наборе номера может быть
+  // десяток, и мешать их в один счётчик значит блокировать форму на ровном
+  // месте. Старые записи (до появления проверок) — это отправки.
+  kind           String   @default("submit")
   createdAt      DateTime @default(now())
 
   @@index([telegramUserId, createdAt])

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
 import { platformEnabled, searchStudents } from "@/lib/platform";
 
@@ -27,6 +28,12 @@ import { platformEnabled, searchStudents } from "@/lib/platform";
 // куска имени.
 const MIN_DIGITS = 9;
 const MIN_QUERY = 5;
+
+// Проверок в час на куратора. Щедро для набора номера (форма спрашивает не
+// чаще раза в 600 мс и только с девяти цифр), но закрывает главное: маршрут
+// отвечает, есть ли на платформе такой ученик, и без счётчика по нему можно
+// было бы перебирать номера и почты чужих людей.
+const MAX_CHECKS_PER_HOUR = 60;
 
 // В поиск уходит нормализованный номер, а не то, что видно в поле: форма
 // показывает «+7 (777) 777 77 77», а на платформе тот же номер может лежать
@@ -56,6 +63,25 @@ export async function POST(request: NextRequest) {
   }
 
   if (!platformEnabled()) return NextResponse.json({ available: false });
+
+  // Сначала запись, потом подсчёт — параллельные проверки видят друг друга.
+  const now = Date.now();
+  await prisma.miniAppAttempt.create({
+    data: { telegramUserId: check.user.id, kind: "check" },
+  });
+  const checks = await prisma.miniAppAttempt.count({
+    where: {
+      telegramUserId: check.user.id,
+      kind: "check",
+      createdAt: { gte: new Date(now - 60 * 60 * 1000) },
+    },
+  });
+  if (checks > MAX_CHECKS_PER_HOUR) {
+    console.warn(`[miniapp] лимит проверок контакта: user=${check.user.id}, ${checks} за час`);
+    // Для формы это то же самое, что «проверить не смогли»: она покажет
+    // ручной вопрос вместо молчания.
+    return NextResponse.json({ available: false });
+  }
 
   const contact = typeof body?.contact === "string" ? body.contact.trim().slice(0, 200) : "";
   const digits = contact.replace(/\D/g, "");
