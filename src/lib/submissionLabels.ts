@@ -103,15 +103,21 @@ const SCREENSHOT: LabelField = {
   minPhotos: 1,
 };
 
-// Как искать ученика сейчас — по старому номеру или по почте. Раньше это было
-// одно поле «номер немесе почта», и в нём нельзя форматировать телефон: под
-// маску попала бы и почта. Выбор разводит их на два поля, и номер получает
-// свою маску (+7 (777) 777 77 77).
-function oldContactFields(): LabelField[] {
+// «Номер или почта» одним полем не спросить: в текстовое поле нельзя вложить
+// маску телефона — под неё попала бы и почта. Поэтому сначала выбор, потом
+// нужное поле. Нужно и для старого контакта ученика, и для обоих концов
+// переноса платежа, поэтому вынесено сюда.
+function contactChoiceFields(opts: {
+  prefix: string;
+  kindLabel: string;
+  phoneLabel: string;
+  emailLabel: string;
+}): LabelField[] {
+  const kindId = `${opts.prefix}Kind`;
   return [
     {
-      id: "oldKind",
-      label: "Оқушының ескі байланысы",
+      id: kindId,
+      label: opts.kindLabel,
       type: "select",
       required: true,
       service: true,
@@ -121,23 +127,31 @@ function oldContactFields(): LabelField[] {
       ],
     },
     {
-      id: "oldPhone",
-      label: "Ескі номер",
+      id: `${opts.prefix}Phone`,
+      label: opts.phoneLabel,
       type: "phone",
       required: true,
       placeholder: "+7 (777) 777 77 77",
-      showIf: { field: "oldKind", equals: ["phone"] },
+      showIf: { field: kindId, equals: ["phone"] },
     },
     {
-      id: "oldEmail",
-      label: "Ескі почта",
+      id: `${opts.prefix}Email`,
+      label: opts.emailLabel,
       type: "email",
       required: true,
       placeholder: "student@gmail.com",
-      showIf: { field: "oldKind", equals: ["email"] },
+      showIf: { field: kindId, equals: ["email"] },
     },
   ];
 }
+
+const oldContactFields = (): LabelField[] =>
+  contactChoiceFields({
+    prefix: "old",
+    kindLabel: "Оқушының ескі байланысы",
+    phoneLabel: "Ескі номер",
+    emailLabel: "Ескі почта",
+  });
 
 // «Занят ли новый контакт» — один и тот же разговор для номера и для почты:
 // если на новом контакте уже есть пользователь, дежурный должен знать, что с
@@ -349,6 +363,53 @@ const SALES: SubmissionLabel[] = [
         showIf: { field: "channel", equals: ["email"] },
       },
       { ...SCREENSHOT, label: "Келмегені туралы скрин" },
+    ],
+  },
+  {
+    id: "payment-merge",
+    emoji: "🧾",
+    title: "Төлем біріктіру",
+    hint: "Бірнеше төлемді бір аккаунтқа жинау",
+    fields: [
+      ...contactChoiceFields({
+        prefix: "student",
+        kindLabel: "Оқушының байланысы",
+        phoneLabel: "Оқушының номері",
+        emailLabel: "Оқушының поштасы",
+      }),
+      {
+        ...SCREENSHOT,
+        label: "Қай төлемді қайсыға біріктіру керегі көрінетін скрин",
+      },
+      { ...DESCRIPTION, label: "Қосымша түсініктеме", required: false },
+    ],
+  },
+  {
+    id: "payment-transfer",
+    emoji: "🔁",
+    title: "Басқа аккаунтқа төлем ауыстыру",
+    hint: "Төлем басқа аккаунтта тұр",
+    fields: [
+      ...contactChoiceFields({
+        prefix: "from",
+        kindLabel: "Төлем тұрған аккаунт",
+        phoneLabel: "Төлем тұрған номер",
+        emailLabel: "Төлем тұрған почта",
+      }),
+      ...contactChoiceFields({
+        prefix: "to",
+        kindLabel: "Ауыстыру керек аккаунт",
+        phoneLabel: "Ауыстыру керек номер",
+        emailLabel: "Ауыстыру керек почта",
+      }),
+      { ...SCREENSHOT, label: "Төлем көрінетін скрин" },
+      {
+        id: "reason",
+        label: "Себебі",
+        type: "textarea",
+        required: true,
+        placeholder: "Неліктен ауыстыру керек",
+      },
     ],
   },
   SUGGESTION_LABEL,
