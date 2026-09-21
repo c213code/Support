@@ -44,7 +44,7 @@ export type IssueFormInitial = Partial<{
     // Какую типовую проблему выбрал куратор и что заполнил в её полях
     // (lib/submissionLabels.ts). Пусто у обращений до появления ярлыков.
     labelTitle?: string | null;
-    details?: string;
+    fields?: Array<{ label: string; value: string; service: boolean }>;
   } | null;
 }>;
 
@@ -349,10 +349,15 @@ export function IssueForm({
             <p className="break-words">👤 {initial.submission.studentContact}</p>
             {/* Ответы на поля ярлыка: то, что раньше приходилось выспрашивать
                 в переписке, форма собрала сразу. */}
-            {initial.submission.details && (
-              <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-5 text-slate-600">
-                {initial.submission.details}
-              </pre>
+            {initial.submission.fields && initial.submission.fields.length > 0 && (
+              <div className="space-y-1">
+                {initial.submission.fields.map((f) => (
+                  <p key={f.label} className="break-words">
+                    <span className="text-slate-400">{f.label}: </span>
+                    <span className="font-medium text-slate-700">{f.value}</span>
+                  </p>
+                ))}
+              </div>
             )}
             {/^https?:\/\//i.test(initial.submission.lessonLink) ? (
               <a

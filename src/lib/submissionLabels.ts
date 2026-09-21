@@ -60,6 +60,10 @@ export type LabelField = {
   // Поле заполняется автопроверкой и показывается, только когда та не
   // сработала.
   autoFilled?: boolean;
+  // Служебный выбор, который только разветвляет форму: на карточке доски его
+  // не показываем — там место дорогое, а следующая строка говорит то же
+  // самое («Оқушының ескі байланысы: Номер» перед «Ескі номер: …»).
+  service?: boolean;
 };
 
 export type SubmissionLabel = {
@@ -110,6 +114,7 @@ function oldContactFields(): LabelField[] {
       label: "Оқушының ескі байланысы",
       type: "select",
       required: true,
+      service: true,
       options: [
         { value: "phone", label: "Номер" },
         { value: "email", label: "Почта" },
@@ -662,14 +667,15 @@ export function buildSummary(
   return text ? `${label.title} — ${text}` : label.title;
 }
 
-// Полная расшифровка полей — для дежурного: в ней всё, что спросил ярлык, в
-// том порядке, в каком спрашивал. Скриншоты сюда не попадают, они и так на
-// карточке отдельными миниатюрами.
-export function buildDetails(
+// Заполненные поля парами «подпись — значение»: ими карточка объясняет
+// дежурному, что есть что. Без подписей два номера в обращении о смене
+// выглядят одинаково, и непонятно, какой из них менять на какой.
+// Скриншоты сюда не попадают — они и так на карточке миниатюрами.
+export function describeFields(
   label: SubmissionLabel,
   values: Record<string, string | string[]>
-): string {
-  const lines: string[] = [label.title];
+): Array<{ label: string; value: string; service: boolean }> {
+  const out: Array<{ label: string; value: string; service: boolean }> = [];
   for (const field of label.fields) {
     if (field.type === "photos") continue;
     if (!fieldVisible(field, values)) continue;
@@ -677,9 +683,20 @@ export function buildDetails(
     if (raw === undefined) continue;
     const text = displayValue(field, raw).trim();
     if (!text) continue;
-    lines.push(`${field.label}: ${text}`);
+    out.push({ label: field.label, value: text, service: Boolean(field.service) });
   }
-  return lines.join("\n");
+  return out;
+}
+
+// То же самое текстом — для rawText заявки и подсказок карточки.
+export function buildDetails(
+  label: SubmissionLabel,
+  values: Record<string, string | string[]>
+): string {
+  return [
+    label.title,
+    ...describeFields(label, values).map((f) => `${f.label}: ${f.value}`),
+  ].join("\n");
 }
 
 // Контакт ученика и ссылка на урок нужны отдельно: по ним считаются зацепки

@@ -10,7 +10,7 @@ import { detectEmailChangeRequest } from "@/lib/emailChangeRequest";
 import { mentionsUntTest } from "@/lib/untResetRequest";
 import { platformEnabled } from "@/lib/platform";
 import { unreadReplyCounts } from "@/lib/submissionChat";
-import { findLabel } from "@/lib/submissionLabels";
+import { describeFields, findLabel } from "@/lib/submissionLabels";
 
 export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
@@ -87,6 +87,7 @@ export async function GET(request: NextRequest) {
       authorName: true,
       rawText: true,
       labelId: true,
+      labelFields: true,
       studentContact: true,
       lessonLink: true,
       photoFileIds: true,
@@ -109,6 +110,8 @@ export async function GET(request: NextRequest) {
     issues: issues.map((issue) => {
       const issueSubmissions = submissionsByIssue.get(issue.id) ?? [];
       const submission = issueSubmissions[0];
+      const label =
+        submission?.labelId ? findLabel(issue.groupName, submission.labelId) : null;
       // Исходные (сырые) тексты обращения: и в hints, и в распознавании смены
       // почты нужен именно сырой текст — в description почты уже вычищены.
       // Ссылку на урок из формы сюда намеренно не кладём: длинный числовой id
@@ -143,10 +146,15 @@ export async function GET(request: NextRequest) {
               // Что за типовая проблема и что куратор заполнил в её полях.
               // Дежурному это заменяет переспрашивание: форма уже собрала
               // почту, номер и остальное (см. lib/submissionLabels.ts).
-              labelTitle: submission.labelId
-                ? (findLabel(issue.groupName, submission.labelId)?.title ?? null)
-                : null,
-              details: submission.rawText,
+              labelTitle: label?.title ?? null,
+              // Поля парами «подпись — значение»: карточке нужно показать,
+              // какой номер старый, а какой новый, иначе они неразличимы.
+              fields: label
+                ? describeFields(
+                    label,
+                    (submission.labelFields ?? {}) as Record<string, string | string[]>
+                  )
+                : [],
             }
           : null,
       };

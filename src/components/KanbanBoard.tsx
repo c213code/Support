@@ -333,9 +333,10 @@ export function KanbanBoard({
                         "мәселе суретте тұр" без самой картинки не значит
                         ничего. Показываем прямо тут, чтобы не ходить в
                         Telegram за каждым тикетом. */}
-                    {(issue.hints?.emails.length ||
-                      issue.hints?.phones.length ||
-                      issue.hints?.hasAttachment) && (
+                    {!issue.submission?.fields.length &&
+                      (issue.hints?.emails.length ||
+                        issue.hints?.phones.length ||
+                        issue.hints?.hasAttachment) && (
                       <div className="mt-1 flex flex-wrap items-center gap-1">
                         {issue.hints.emails.map((email) => (
                           <button
@@ -433,22 +434,39 @@ export function KanbanBoard({
                             </span>
                           )}
                         </p>
-                        {!issue.hints?.emails.length && !issue.hints?.phones.length && (
-                          <p className="break-words">👤 {issue.submission.studentContact}</p>
-                        )}
-                        {/^https?:\/\//i.test(issue.submission.lessonLink) ? (
-                          <a
-                            href={issue.submission.lessonLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="block truncate text-accent-600 hover:underline"
-                          >
-                            🔗 Урок / задание
-                          </a>
+                        {issue.submission.fields.length > 0 ? (
+                          <div className="space-y-0.5">
+                            {issue.submission.fields
+                              .filter((f) => !f.service)
+                              .map((f) => (
+                                /* Не flex: длинная подпись в колонке доски
+                                   выдавливала значение за край карточки. */
+                                <p key={f.label} className="break-words">
+                                  <span className="text-slate-400">{f.label}: </span>
+                                  <span className="font-medium text-slate-700">{f.value}</span>
+                                </p>
+                              ))}
+                          </div>
                         ) : (
-                          <p className="break-words">🔗 {issue.submission.lessonLink}</p>
+                          !issue.hints?.emails.length &&
+                          !issue.hints?.phones.length && (
+                            <p className="break-words">👤 {issue.submission.studentContact}</p>
+                          )
                         )}
+                        {issue.submission.fields.length === 0 &&
+                          (/^https?:\/\//i.test(issue.submission.lessonLink) ? (
+                            <a
+                              href={issue.submission.lessonLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="block truncate text-accent-600 hover:underline"
+                            >
+                              🔗 Урок / задание
+                            </a>
+                          ) : (
+                            <p className="break-words">🔗 {issue.submission.lessonLink}</p>
+                          ))}
                         <SubmissionPhoto
                           issueId={issue.id}
                           count={issue.submission.photoCount}

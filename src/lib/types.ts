@@ -64,7 +64,8 @@ export type IssueDTO = {
     // Название выбранной типовой проблемы и расшифровка её полей. null —
     // обращение подано до появления ярлыков (lib/submissionLabels.ts).
     labelTitle: string | null;
-    details: string;
+    // Что куратор заполнил в полях ярлыка, с подписями: «Ескі номер» → «…».
+    fields: Array<{ label: string; value: string; service: boolean }>;
   } | null;
 };
 
