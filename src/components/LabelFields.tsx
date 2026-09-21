@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fieldVisible, type SubmissionLabel } from "@/lib/submissionLabels";
+import { fieldVisible, type LabelField, type SubmissionLabel } from "@/lib/submissionLabels";
 import { currentInitData, haptic } from "@/lib/miniappClient";
 import styles from "./SubmissionForm.module.css";
 
@@ -11,7 +11,12 @@ import styles from "./SubmissionForm.module.css";
 type CheckState =
   | { status: "loading" }
   | { status: "free" }
-  | { status: "taken"; name: string | null }
+  | {
+      status: "taken";
+      name: string | null;
+      email: string | null;
+      phone: string | null;
+    }
   | { status: "unavailable" };
 
 // Пауза перед запросом: номер набирают по цифре, и без неё запрос уходил бы
@@ -114,6 +119,8 @@ export function LabelFields({
             available?: boolean;
             taken?: boolean;
             name?: string | null;
+            email?: string | null;
+            phone?: string | null;
           } | null;
           if (cancelled) return;
           if (!data?.available) {
@@ -123,7 +130,12 @@ export function LabelFields({
           setChecks((prev) => ({
             ...prev,
             [field.id]: data.taken
-              ? { status: "taken", name: data.name ?? null }
+              ? {
+                  status: "taken",
+                  name: data.name ?? null,
+                  email: data.email ?? null,
+                  phone: data.phone ?? null,
+                }
               : { status: "free" },
           }));
           // Ответ платформы — это и есть ответ на вопрос «бар ма?»: по нему
@@ -153,8 +165,8 @@ export function LabelFields({
   });
 
   // Что показать под проверяемым полем.
-  function checkNote(id: string) {
-    const state = checks[id];
+  function checkNote(field: LabelField) {
+    const state = checks[field.id];
     if (!state) return null;
     if (state.status === "loading") {
       return <p className={styles.footer}>Тексерілуде…</p>;
@@ -169,9 +181,19 @@ export function LabelFields({
         <p className={`${styles.footer} ${styles.footerOk}`}>Бос — қолданушы жоқ</p>
       );
     }
+    // Кто занимает. Имя на платформе часто мусорное («kkkkkkk ppppoo»),
+    // поэтому называем встречный контакт: у занятого номера — почту, у
+    // занятой почты — номер. Имя остаётся запасным вариантом.
+    const checkingEmail = field.type === "email";
+    const owner = checkingEmail
+      ? (state.phone ?? state.name)
+      : (state.email ?? state.name);
+    const subject = checkingEmail ? "Бұл почтаны" : "Бұл номерді";
     return (
       <p className={`${styles.footer} ${styles.footerError}`}>
-        Бос емес{state.name ? ` — ${state.name}` : ""}
+        {owner
+          ? `${subject} ${owner} қолданушысы қолданады`
+          : `${subject} басқа қолданушы қолданады`}
       </p>
     );
   }
@@ -300,7 +322,7 @@ export function LabelFields({
                 />
               )}
             </div>
-            {field.checkOccupancy && checkNote(field.id)}
+            {field.checkOccupancy && checkNote(field)}
             {field.hint && <p className={styles.footer}>{field.hint}</p>}
             {invalid && <p className={`${styles.footer} ${styles.footerError}`}>Толтырыңыз</p>}
           </section>
