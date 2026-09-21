@@ -99,6 +99,41 @@ const SCREENSHOT: LabelField = {
   minPhotos: 1,
 };
 
+// Как искать ученика сейчас — по старому номеру или по почте. Раньше это было
+// одно поле «номер немесе почта», и в нём нельзя форматировать телефон: под
+// маску попала бы и почта. Выбор разводит их на два поля, и номер получает
+// свою маску (+7 (777) 777 77 77).
+function oldContactFields(): LabelField[] {
+  return [
+    {
+      id: "oldKind",
+      label: "Оқушының ескі байланысы",
+      type: "select",
+      required: true,
+      options: [
+        { value: "phone", label: "Номер" },
+        { value: "email", label: "Почта" },
+      ],
+    },
+    {
+      id: "oldPhone",
+      label: "Ескі номер",
+      type: "phone",
+      required: true,
+      placeholder: "+7 (777) 777 77 77",
+      showIf: { field: "oldKind", equals: ["phone"] },
+    },
+    {
+      id: "oldEmail",
+      label: "Ескі почта",
+      type: "email",
+      required: true,
+      placeholder: "student@gmail.com",
+      showIf: { field: "oldKind", equals: ["email"] },
+    },
+  ];
+}
+
 // «Занят ли новый контакт» — один и тот же разговор для номера и для почты:
 // если на новом контакте уже есть пользователь, дежурный должен знать, что с
 // ним делать, иначе смена упрётся в занятый логин и вернётся переспрашиванием.
@@ -163,13 +198,7 @@ const SALES: SubmissionLabel[] = [
     title: "Номер өзгерту",
     hint: "Оқушының телефон нөмірін ауыстыру",
     fields: [
-      {
-        id: "oldContact",
-        label: "Ескі номер немесе почта",
-        type: "text",
-        required: true,
-        placeholder: "+7 (777) 777 77 77 немесе почта",
-      },
+      ...oldContactFields(),
       {
         id: "newPhone",
         label: "Жаңа номер",
@@ -188,13 +217,7 @@ const SALES: SubmissionLabel[] = [
     title: "Почта өзгерту",
     hint: "Оқушының поштасын ауыстыру",
     fields: [
-      {
-        id: "oldContact",
-        label: "Ескі почта немесе номер",
-        type: "text",
-        required: true,
-        placeholder: "почта немесе +7 700 000 00 00",
-      },
+      ...oldContactFields(),
       {
         id: "newEmail",
         label: "Жаңа почта",
@@ -660,6 +683,8 @@ const CONTACT_FIELDS = [
   "studentContact",
   "newPhone",
   "newEmail",
+  "oldPhone",
+  "oldEmail",
   "oldContact",
   "parentEmail",
   "curatorEmail",
