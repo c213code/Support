@@ -299,6 +299,7 @@ const METHODOLOGY: SubmissionLabel[] = [
           { value: "interactive", label: "Интерактив видео" },
           { value: "theory", label: "Теория сабақ" },
           { value: "homework", label: "Үй жұмысы" },
+          { value: "test", label: "Тест" },
           { value: "ubt", label: "ҰБТ" },
           { value: "quiz", label: "Куиз гейм" },
         ],
