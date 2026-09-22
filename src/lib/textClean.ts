@@ -166,45 +166,8 @@ function stripNoise(raw: string): string {
   // схлопываем соседние разделители в один.
   text = text.replace(/[ \t]*,(?:[ \t]*,)+/g, ",");
 
-  const lines = text.split("\n");
-  const keep = new Array<boolean>(lines.length).fill(true);
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (!trimmed) continue;
-    if (BARE_CREDENTIAL_LINE.test(trimmed)) {
-      keep[i] = false;
-      continue;
-    }
-    if (CREDENTIAL_LABEL_LINE.test(trimmed)) {
-      // "логин" одним словом на своей строке — значение почти всегда на
-      // следующей строке ("логин\nBalausa10").
-      keep[i] = false;
-      if (i + 1 < lines.length) keep[i + 1] = false;
-      continue;
-    }
-    const withoutPair = trimmed
-      .replace(CREDENTIAL_PAIR, "")
-      .replace(/^[\s,.:!–-]+|[\s,.:!–-]+$/g, "")
-      .trim();
-    // Убираем строку целиком только если метка+значение и были всей
-    // строкой ("Balausa10 пароль") — если после вырезания пары остаётся
-    // ещё текст, значит метка встретилась внутри обычного предложения
-    // ("пароль не подходит") и трогать её рискованно.
-    //
-    // Исключение — остаток, который сам выглядит учётной записью. Строка
-    // "+77024890282 и пароль: Zhaneeka_1" после вырезания номера и пары
-    // "и пароль" оставляла "Zhaneeka_1": формально текст есть, а по сути
-    // это тот же пароль, и он утекал в описание тикета (а оттуда в репорт).
-    if (
-      withoutPair !== trimmed &&
-      (withoutPair.length === 0 || BARE_CREDENTIAL_LINE.test(withoutPair))
-    ) {
-      keep[i] = false;
-    }
-  }
-
+  const lines = stripCredentials(text).split("\n");
   return lines
-    .filter((_, i) => keep[i])
     .map((line) =>
       line
         .replace(/[ \t]{2,}/g, " ")
@@ -261,6 +224,55 @@ export function maskSensitiveForAi(raw: string): string {
     .replace(MIXED_CASE_TOKEN, (token) => (looksLikeGeneratedPassword(token) ? "<скрыто>" : token))
     .replace(/[ \t]{2,}/g, " ")
     .trim();
+}
+
+// Логины и пароли из текста — насовсем.
+//
+// Вынесено из чистки описания, потому что то же самое нужно разбору
+// пересланной переписки (lib/forwardFill.ts): куратор пересылает пароль
+// отдельной строкой, а хранить его нам незачем ни в описании, ни в полях.
+// Правило одно на оба места — разойдись они, пароль остался бы где-то ещё.
+export function stripCredentials(text: string): string {
+  const lines = text.split("\n");
+  const keep = new Array<boolean>(lines.length).fill(true);
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    if (BARE_CREDENTIAL_LINE.test(trimmed)) {
+      keep[i] = false;
+      continue;
+    }
+    if (CREDENTIAL_LABEL_LINE.test(trimmed)) {
+      // "логин" одним словом на своей строке — значение почти всегда на
+      // следующей строке ("логин\nBalausa10").
+      keep[i] = false;
+      if (i + 1 < lines.length) keep[i + 1] = false;
+      continue;
+    }
+    const withoutPair = trimmed
+      .replace(CREDENTIAL_PAIR, "")
+      .replace(/^[\s,.:!–-]+|[\s,.:!–-]+$/g, "")
+      .trim();
+    // Убираем строку целиком только если метка+значение и были всей
+    // строкой ("Balausa10 пароль") — если после вырезания пары остаётся
+    // ещё текст, значит метка встретилась внутри обычного предложения
+    // ("пароль не подходит") и трогать её рискованно.
+    //
+    // Исключение — остаток, который сам выглядит учётной записью. Строка
+    // "+77024890282 и пароль: Zhaneeka_1" после вырезания номера и пары
+    // "и пароль" оставляла "Zhaneeka_1": формально текст есть, а по сути
+    // это тот же пароль, и он утекал в описание тикета (а оттуда в репорт).
+    if (
+      withoutPair !== trimmed &&
+      (withoutPair.length === 0 || BARE_CREDENTIAL_LINE.test(withoutPair))
+    ) {
+      keep[i] = false;
+    }
+  }
+
+  return lines
+    .filter((_, i) => keep[i])
+    .join("\n");
 }
 
 export function cleanTicketDescription(raw: string): string {
