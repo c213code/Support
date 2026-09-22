@@ -733,11 +733,29 @@ const PRODUCT: SubmissionLabel[] = [
       },
       LESSON_LINK,
       {
-        id: "studentEmail",
-        label: "Оқушылардың поштасы",
+        // Пара — это всегда два куратора: своих учеников в ЖЖ сводят они, и
+        // дежурному нужно знать обоих, иначе половину пары не найти.
+        id: "curatorEmail",
+        label: "Кураторлардың поштасы",
         type: "email",
         required: true,
         repeatable: true,
+        hint: "Жұптағы оқушылардың кураторларын жазыңыз",
+        showIf: {
+          field: "issueKind",
+          equals: ["pairs-not-visible", "test-error", "change-pairs"],
+        },
+      },
+      {
+        // Не email, а текст: ученика в ЖЖ зовут по имени («Айдана мен
+        // Нұрсұлтан»), почта есть не всегда под рукой, а поле для почты имя
+        // вписать не даст вовсе.
+        id: "studentContact",
+        label: "Оқушының аты немесе поштасы",
+        type: "text",
+        required: true,
+        repeatable: true,
+        placeholder: "Айдана немесе student@gmail.com",
         hint: "Жұптың екі оқушысын да жазыңыз",
         showIf: {
           field: "issueKind",
