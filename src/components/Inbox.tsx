@@ -929,6 +929,11 @@ export function Inbox() {
                 enabled: bot.submissionToGroup,
                 onToggle: bot.toggleSubmissionToGroup,
                 color: "bg-indigo-600",
+                // Выключено — не тишина, а репетиция: то же сообщение уходит
+                // в служебный канал, где сидим только мы.
+                note: bot.submissionToGroup
+                  ? null
+                  : "Пока выключено — уходит в служебный канал с пометкой ТЕСТ",
               },
               {
                 key: "chatintent",

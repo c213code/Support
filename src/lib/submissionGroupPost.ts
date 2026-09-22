@@ -23,6 +23,14 @@ import { isSubmissionToGroupEnabled } from "@/lib/settings";
 //
 // Отправка не обязана удасться: тикет уже создан, и обращение куратора
 // пропасть не может. Любой отказ — строка в лог и null.
+//
+// Пока рубильник выключен, сообщение уходит не в рабочую группу, а в
+// служебный канал (TELEGRAM_STORAGE_CHAT_ID) с пометкой «ТЕСТ» и названием
+// той группы, куда оно ушло бы по-настоящему. Там сидим только мы, поэтому
+// это единственное место, где можно посмотреть на живое сообщение — со
+// ссылками, упоминанием и скринами — и не показать его коллегам. Без
+// такой репетиции выбор был бы только «включить всем сразу» или «не
+// увидеть вообще».
 // Ссылки в сообщении группы — одним словом, а не полным адресом.
 //
 // Ссылка на урок у платформы — это сто двадцать символов с двумя uuid и
@@ -70,18 +78,24 @@ export async function postSubmissionToGroup(opts: {
   details: string;
   photoFileIds: string[];
 }): Promise<string | null> {
-  if (!(await isSubmissionToGroupEnabled())) return null;
+  const live = await isSubmissionToGroupEnabled();
 
   const preset = await prisma.groupPreset.findUnique({
     where: { name: opts.groupName },
     select: { chatId: true },
   });
-  if (!preset?.chatId) {
+  if (live && !preset?.chatId) {
     // Группу к чату ещё не привязали — отправлять некуда. Не ошибка: так
     // выглядит новая группа до первой настройки.
     console.warn(`[submission] «${opts.groupName}» не привязана к чату — обращение в группу не ушло`);
     return null;
   }
+
+  // Выключено — репетиция в служебный канал. Нет и его — значит форма и так
+  // не работает (без него не грузятся фото), молчим.
+  const storageChatId = process.env.TELEGRAM_STORAGE_CHAT_ID?.trim();
+  const chatId = live ? preset!.chatId! : storageChatId;
+  if (!chatId) return null;
 
   // Подпись к фото у Telegram — 1024 символа, у сообщения — 4096. Режем
   // сами поля ДО сборки html: обрезать готовую разметку нельзя, оборванный
@@ -91,20 +105,28 @@ export async function postSubmissionToGroup(opts: {
   const { masked, urls } = extractLinks(opts.details);
   const details = masked.slice(0, room);
   const mention = `<a href="tg://user?id=${opts.telegramUserId}">${escapeHtml(opts.authorName)}</a>`;
-  const html = `📨 Жаңа өтініш · ${mention}\n${restoreLinks(escapeHtml(details), urls, true)}`;
+  // В тесте сразу видно, куда бы это ушло по-настоящему: без названия
+  // группы репетиция бессмысленна, проверяют как раз адресата.
+  const head = live
+    ? "📨 Жаңа өтініш"
+    : `🧪 ТЕСТ · ${escapeHtml(opts.groupName)} · Жаңа өтініш`;
+  const html = `${head} · ${mention}\n${restoreLinks(escapeHtml(details), urls, true)}`;
   // То же самое без разметки — для записи о сообщении бота и для списка
   // «удалить ответ», где разметка только мешает читать. Адрес и там не
   // нужен: в списке важно узнать своё сообщение, а не прочитать ссылку.
-  const plain = `📨 Жаңа өтініш · ${opts.authorName}\n${restoreLinks(details, urls, false)}`;
+  const plainHead = live ? "📨 Жаңа өтініш" : `🧪 ТЕСТ · ${opts.groupName} · Жаңа өтініш`;
+  const plain = `${plainHead} · ${opts.authorName}\n${restoreLinks(details, urls, false)}`;
 
   // С фото текст уходит подписью к альбому: отдельным сообщением он
   // оторвался бы от скриншотов, а в группе между ними успевает влезть
   // чужая реплика.
   const sent = withPhotos
-    ? await sendStoredPhotos(preset.chatId, opts.photoFileIds, html, "HTML")
-    : await sendTelegramMessage(preset.chatId, html, undefined, undefined, "HTML");
+    ? await sendStoredPhotos(chatId, opts.photoFileIds, html, "HTML")
+    : await sendTelegramMessage(chatId, html, undefined, undefined, "HTML");
   if (!sent) {
-    console.warn(`[submission] не отправилось в «${opts.groupName}» (чат ${preset.chatId})`);
+    console.warn(
+      `[submission] не отправилось ${live ? `в «${opts.groupName}»` : "в тест-канал"} (чат ${chatId})`
+    );
     return null;
   }
 
@@ -115,12 +137,15 @@ export async function postSubmissionToGroup(opts: {
   await prisma.botReply.create({
     data: {
       issueId: opts.issueId,
-      chatId: preset.chatId,
+      chatId,
       messageId: sent.message_id,
-      kind: "SUBMISSION",
+      // Разные виды: тестовое сообщение на карточке подписано по-другому,
+      // и удалять его после репетиции — обычное дело, а не правка ответа
+      // коллегам.
+      kind: live ? "SUBMISSION" : "SUBMISSION_TEST",
       text: plain.slice(0, CAPTION_LIMIT),
     },
   });
 
-  return buildMessageLink(Number(preset.chatId), sent.message_id);
+  return buildMessageLink(Number(chatId), sent.message_id);
 }

@@ -3,8 +3,10 @@
 import { useState } from "react";
 import type { BotReplyDTO } from "@/lib/types";
 
-// Публикация обращения в рабочей группе (см. lib/submissionGroupPost.ts).
+// Публикация обращения (см. lib/submissionGroupPost.ts): в рабочей группе
+// или, пока рубильник выключен, в служебном канале — репетицией.
 const SUBMISSION_KIND = "SUBMISSION";
+const SUBMISSION_TEST_KIND = "SUBMISSION_TEST";
 
 // Что бот сказал в рабочей группе по этому тикету — прямо на карточке,
 // чтобы было видно, что уже прозвучало коллегам, и не написать им то же
@@ -82,20 +84,28 @@ export function BotReplies({
           ) : (
             <div className="flex items-start gap-1">
               <span className="shrink-0 text-slate-400">
-                {reply.kind === SUBMISSION_KIND ? "📨" : "🤖"}
+                {reply.kind === SUBMISSION_KIND
+                  ? "📨"
+                  : reply.kind === SUBMISSION_TEST_KIND
+                    ? "🧪"
+                    : "🤖"}
               </span>
               {/* Публикация самого обращения — это тот же текст, что уже
                   расписан полями выше: карточка показывала его дважды и
                   вырастала вдвое. Здесь нужен только факт «в группе оно
                   есть» и кнопка убрать. */}
               <span className="flex-1 text-slate-600">
-                {reply.kind === SUBMISSION_KIND ? "Обращение отправлено в группу" : reply.text}
+                {reply.kind === SUBMISSION_KIND
+                  ? "Обращение отправлено в группу"
+                  : reply.kind === SUBMISSION_TEST_KIND
+                    ? "Тест: обращение ушло в служебный канал, не в группу"
+                    : reply.text}
               </span>
               {/* Кнопки видны всегда, а не по наведению: основное
                   устройство дежурного — телефон, где наведения нет вовсе,
                   и спрятанное под hover там просто не существует. */}
               <span className="flex shrink-0 gap-1.5">
-                {reply.kind !== SUBMISSION_KIND && (
+                {reply.kind !== SUBMISSION_KIND && reply.kind !== SUBMISSION_TEST_KIND && (
                   <button
                     onClick={() => {
                       setEditingId(reply.id);
