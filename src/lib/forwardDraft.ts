@@ -83,7 +83,7 @@ export async function collectForwardedMessage(
   // первому сообщению — мешает разбору. Первой пересылкой обычно и идёт
   // голый номер или почта, и с приставкой «Айханым:» такая строка
   // перестаёт быть только контактом (см. lib/forwardFill.ts).
-  const line = fresh || !author ? body : [`${author}:`, body].filter(Boolean).join("\n");
+  const line = fresh || !author ? body : [author, body].filter(Boolean).join("\n");
 
   const photo = largestPhotoFileId(message);
   const photos = [...(fresh?.photoFileIds ?? []), ...(photo ? [photo] : [])].slice(0, MAX_PHOTOS);

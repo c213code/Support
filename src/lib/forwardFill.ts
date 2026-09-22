@@ -1,4 +1,5 @@
 import { extractTicketHints } from "@/lib/ticketHints";
+import { isBareCredentialLine } from "@/lib/textClean";
 import { formatKzPhone } from "@/lib/phone";
 import type { LabelField, SubmissionLabel } from "@/lib/submissionLabels";
 
@@ -24,6 +25,9 @@ const URL_RE = /https?:\/\/\S+/g;
 // нельзя, а куратор шлёт то одно, то другое.
 const CONTACT_FIELD_IDS = ["studentContact", "oldContact", "contact"];
 
+// Поле под голый пароль («talgataibynjuz40password2010» отдельной строкой).
+const PASSWORD_FIELD_IDS = ["studentPassword", "password"];
+
 // Строка, в которой кроме самого контакта ничего нет, — из описания уходит:
 // значение уже стоит в своём поле, и второй раз читать его незачем. Строку
 // с текстом вокруг контакта оставляем как есть: там контекст.
@@ -44,12 +48,16 @@ export function fillFromForward(
 ): Record<string, string | string[]> {
   const { emails, phones } = extractTicketHints([text]);
   const urls = Array.from(new Set(text.match(URL_RE) ?? []));
+  // Пароль присылают отдельной строкой следом за номером — тем же
+  // признаком, которым чистка описания выкидывает его из репорта.
+  const passwords = text.split("\n").map((l) => l.trim()).filter(isBareCredentialLine);
 
   // Каждое значение уходит в одно поле: у ярлыка смены почты два поля типа
   // email, и обе почты из переписки должны встать по разным, а не по одному.
   const freeEmails = [...emails];
   const freePhones = [...phones];
   const freeUrls = [...urls];
+  const freePasswords = [...passwords];
   const used: string[] = [];
 
   const values: Record<string, string | string[]> = {};
@@ -69,6 +77,10 @@ export function fillFromForward(
       used.push(value);
     };
 
+    if (field.type === "text" && PASSWORD_FIELD_IDS.includes(field.id)) {
+      if (freePasswords.length > 0) put(freePasswords.shift()!);
+      continue;
+    }
     if (field.type === "text" && CONTACT_FIELD_IDS.includes(field.id)) {
       // Почта понятнее номера (по ней дежурный ищет ученика), поэтому она
       // первая; номер — если почты в переписке не было.

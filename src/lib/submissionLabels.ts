@@ -392,12 +392,30 @@ const OTHER_STUDENT_CONTACT: LabelField = {
   hint: "Мәселе нақты оқушыға қатысты болса",
 };
 
+// Пароль в описании — это данные, а не мысль: он засоряет текст, который
+// потом читают и в тикете, и (после чистки) в репорте. Своё поле его
+// оттуда убирает, но не теряет: поля ярлыка видит дежурный на карточке, а
+// в репорт они не попадают никогда.
+const OTHER_STUDENT_PASSWORD: LabelField = {
+  id: "studentPassword",
+  label: "Құпия сөз",
+  type: "text",
+  required: false,
+  placeholder: "Керек болса",
+  hint: "Кіріп тексеру үшін",
+};
+
 const OTHER_LABEL: SubmissionLabel = {
   id: "other",
   emoji: "📝",
   title: "Басқа мәселе",
   hint: "Тізімде жоқ жағдай",
-  fields: [DESCRIPTION, OTHER_STUDENT_CONTACT, { ...SCREENSHOT, required: false, minPhotos: 0 }],
+  fields: [
+    DESCRIPTION,
+    OTHER_STUDENT_CONTACT,
+    OTHER_STUDENT_PASSWORD,
+    { ...SCREENSHOT, required: false, minPhotos: 0 },
+  ],
 };
 
 // «Басқа мәселе» для групп, где бывает привязка к уроку.
@@ -406,6 +424,7 @@ const OTHER_WITH_LESSON: SubmissionLabel = {
   fields: [
     DESCRIPTION,
     OTHER_STUDENT_CONTACT,
+    OTHER_STUDENT_PASSWORD,
     { ...LESSON_LINK, required: false },
     { ...SCREENSHOT, required: false, minPhotos: 0 },
   ],

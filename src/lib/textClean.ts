@@ -114,6 +114,14 @@ const CREDENTIAL_LABEL_LINE = new RegExp(
 // цифро-буквенным не будет.
 const BARE_CREDENTIAL_LINE = /^(?=[^\s]*\p{L})(?=[^\s]*\d)[\p{L}\p{N}._-]{6,32}$/u;
 
+// Тот же признак — разбору пересланной переписки (lib/forwardFill.ts): там
+// такую строку не выбрасывают, а кладут в поле «Құпия сөз». Правило одно на
+// оба места намеренно: разойдись они, пароль или остался бы в описании (а
+// значит, в репорте), или пропал бы вовсе.
+export function isBareCredentialLine(line: string): boolean {
+  return BARE_CREDENTIAL_LINE.test(line.trim());
+}
+
 const CREDENTIAL_PAIR = new RegExp(
   `[^\\s,]+\\s+(?:${CREDENTIAL_LABEL_WORDS})(?![\\p{L}\\p{N}])` +
     `|(?<![\\p{L}\\p{N}])(?:${CREDENTIAL_LABEL_WORDS})\\s*[:\\-]?\\s*[^\\s,]+`,
