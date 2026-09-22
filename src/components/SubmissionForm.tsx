@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { OFFICIAL_GROUPS } from "@/lib/groups";
 import { LabelFields } from "@/components/LabelFields";
+import { fillFromForward } from "@/lib/forwardFill";
 import {
   buildSummary,
   fieldVisible,
@@ -696,12 +697,11 @@ export function SubmissionForm({
                     setLabelId(item.id);
                     // Ответы прошлого ярлыка новому не подходят: у него свои
                     // поля, и старые значения выглядели бы как заполненные.
-                    // Текст из пересылки — исключение: он и есть само
-                    // обращение, ради него форму и открыли.
-                    const hasDescription = item.fields.some((f) => f.id === "description");
-                    setValues(
-                      forward && hasDescription ? { description: forward.text } : {}
-                    );
+                    // Пересылка — исключение: она и есть само обращение,
+                    // ради него форму и открыли. Раскладываем её по полям
+                    // выбранного ярлыка (см. lib/forwardFill.ts), а не
+                    // сваливаем целиком в описание.
+                    setValues(forward ? fillFromForward(item, forward.text) : {});
                     setShowErrors(false);
                   }}
                 >
