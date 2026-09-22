@@ -10,6 +10,8 @@
 // переменная, а не переиспользование той: OWN_AGENT_TELEGRAM_IDS уже
 // работает в проде как список для фильтрации, и незачем требовать сразу
 // поменять её формат ради новой фичи.
+import { ownAgentTelegramIdList } from "@/lib/telegram";
+
 const AGENT_TELEGRAM_IDS_ENV = "AGENT_TELEGRAM_IDS";
 
 function parseAgentTelegramIds(): Array<[string, number]> {
@@ -43,4 +45,17 @@ export function telegramIdToAgent(id: number): string | null {
 export function agentTelegramId(name: string): number | null {
   const entry = parseAgentTelegramIds().find(([agentName]) => agentName === name);
   return entry?.[1] ?? null;
+}
+
+// Наш ли это человек — по Telegram-id того, кто открыл мини-апп.
+//
+// Смотрим оба списка: AGENT_TELEGRAM_IDS (с именами, нужен для личек) и
+// OWN_AGENT_TELEGRAM_IDS (голые id, по ним вебхук отличает свои сообщения от
+// обращений). Второй в проде задан всегда, первый могли и не заполнить, а
+// право удалять чужое не должно зависеть от того, какую из двух переменных
+// вспомнили настроить.
+export function isAgentTelegramId(id: bigint | number): boolean {
+  const numeric = typeof id === "bigint" ? Number(id) : id;
+  if (telegramIdToAgent(numeric) !== null) return true;
+  return ownAgentTelegramIdList().some((own) => own === BigInt(numeric));
 }

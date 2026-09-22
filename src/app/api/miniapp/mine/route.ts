@@ -5,6 +5,7 @@ import { describeFields, findLabel } from "@/lib/submissionLabels";
 import type { IssueStatus } from "@/lib/status";
 import type { MySubmission } from "@/lib/miniappClient";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
+import { isAgentTelegramId } from "@/lib/agentTelegram";
 
 // За сколько показывать обращения: месяц — достаточно, чтобы увидеть всё
 // недавнее, и список не растёт бесконечно.
@@ -39,9 +40,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Дежурный (его Telegram-id в списке наших) может смотреть все обращения,
+  // а не только свои: ему с телефона нужно видеть поток целиком — и чтобы
+  // было что удалить, если куратор подал заявку дважды или не в ту группу.
+  const agent = isAgentTelegramId(check.user.id);
+  const all = agent && body?.scope === "all";
+
   const rows = await prisma.issueSubmission.findMany({
     where: {
-      telegramUserId: check.user.id,
+      ...(all ? {} : { telegramUserId: check.user.id }),
       createdAt: { gte: new Date(Date.now() - WINDOW_MS) },
     },
     orderBy: { createdAt: "desc" },
@@ -50,6 +57,8 @@ export async function POST(request: NextRequest) {
       id: true,
       createdAt: true,
       rawText: true,
+      authorName: true,
+      telegramUserId: true,
       labelId: true,
       labelFields: true,
       photoFileId: true,
@@ -103,11 +112,17 @@ export async function POST(request: NextRequest) {
     // («Ұсыныс», «Басқа мәселе»), раньше выходила единица, карточка
     // просила несуществующее фото и показывала «не загрузилось».
     photoCount: row.photoFileIds.length || (row.photoFileId ? 1 : 0),
+    authorName: row.authorName,
+    // Кто и что может удалить (проверяется заново на сервере, см.
+    // /api/miniapp/delete): дежурный — любое, куратор — только своё и
+    // только пока его никто не взял в работу.
+    canDelete:
+      agent || (row.telegramUserId === check.user.id && row.issue.status === "SENT"),
   }));
 
   // Нерешённые сверху: это то, за чем куратор открыл список. Сортировка
   // стабильная, так что внутри каждой группы остаётся «сначала новые».
   items.sort((a, b) => Number(a.status === "RESOLVED") - Number(b.status === "RESOLVED"));
 
-  return NextResponse.json({ items });
+  return NextResponse.json({ items, isAgent: agent });
 }

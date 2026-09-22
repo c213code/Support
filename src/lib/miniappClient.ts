@@ -20,6 +20,9 @@ export type MySubmission = {
   note: string | null;
   history: Array<{ status: IssueStatus; at: string }>;
   photoCount: number;
+  // Имя подавшего — видно дежурному в режиме «все обращения».
+  authorName: string;
+  canDelete: boolean;
 };
 
 // Минимум Telegram WebApp API, которым пользуется мини-апп

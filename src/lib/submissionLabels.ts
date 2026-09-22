@@ -374,18 +374,37 @@ const PLATFORM_ERROR_LABEL: SubmissionLabel = {
   ],
 };
 
+// Почта ученика и у свободного «Басқа мәселе»: именно по нему дежурный чаще
+// всего переспрашивает «чей аккаунт», потому что ярлык ничего не подсказал.
+// Необязательная: сюда попадают и вопросы без ученика вообще (как что
+// устроено, доступ для самого куратора) — требовать почту там значило бы
+// заставить вписать любую.
+const OTHER_STUDENT_EMAIL: LabelField = {
+  id: "studentEmail",
+  label: "Оқушының поштасы",
+  type: "email",
+  required: false,
+  placeholder: "student@gmail.com",
+  hint: "Мәселе нақты оқушыға қатысты болса",
+};
+
 const OTHER_LABEL: SubmissionLabel = {
   id: "other",
   emoji: "📝",
   title: "Басқа мәселе",
   hint: "Тізімде жоқ жағдай",
-  fields: [DESCRIPTION, { ...SCREENSHOT, required: false, minPhotos: 0 }],
+  fields: [DESCRIPTION, OTHER_STUDENT_EMAIL, { ...SCREENSHOT, required: false, minPhotos: 0 }],
 };
 
 // «Басқа мәселе» для групп, где бывает привязка к уроку.
 const OTHER_WITH_LESSON: SubmissionLabel = {
   ...OTHER_LABEL,
-  fields: [DESCRIPTION, { ...LESSON_LINK, required: false }, { ...SCREENSHOT, required: false, minPhotos: 0 }],
+  fields: [
+    DESCRIPTION,
+    OTHER_STUDENT_EMAIL,
+    { ...LESSON_LINK, required: false },
+    { ...SCREENSHOT, required: false, minPhotos: 0 },
+  ],
 };
 
 const SALES: SubmissionLabel[] = [

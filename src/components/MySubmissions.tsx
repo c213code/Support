@@ -77,10 +77,19 @@ export function MySubmissions({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  // «Все обращения» доступны только дежурному — сервер решает это сам по
+  // Telegram-id и присылает isAgent; кнопка лишь отражает его ответ.
+  const [isAgent, setIsAgent] = useState(false);
+  const [scope, setScope] = useState<"mine" | "all">("mine");
+  // Тот же выбор, но для загрузчика: если читать его прямо из состояния,
+  // load() начинает зависеть от рендера, и эффекты требуют себе load в
+  // зависимости — то есть перезагрузку на каждый рендер.
+  const scopeRef = useRef<"mine" | "all">("mine");
+  const [busyId, setBusyId] = useState<string | null>(null);
   const loadedAtRef = useRef(0);
   const inFlightRef = useRef(false);
 
-  async function load() {
+  async function load(nextScope: "mine" | "all" = scopeRef.current) {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setLoading(true);
@@ -89,7 +98,7 @@ export function MySubmissions({
       const res = await fetch("/api/miniapp/mine", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData: currentInitData() }),
+        body: JSON.stringify({ initData: currentInitData(), scope: nextScope }),
         signal: timeoutSignal(),
       });
       const data = await res.json().catch(() => null);
@@ -98,6 +107,7 @@ export function MySubmissions({
         return;
       }
       setItems(data.items);
+      setIsAgent(Boolean(data.isAgent));
       loadedAtRef.current = Date.now();
     } catch {
       setError("Байланыс жоқ — интернетті тексеріп, жаңартыңыз");
@@ -140,6 +150,47 @@ export function MySubmissions({
     load();
   }
 
+  function switchScope(next: "mine" | "all") {
+    if (next === scope) return;
+    haptic("select");
+    scopeRef.current = next;
+    setScope(next);
+    setOpenId(null);
+    loadedAtRef.current = 0;
+    load(next);
+  }
+
+  // Удаление обращения. Право сервер проверяет заново (см.
+  // /api/miniapp/delete): здесь кнопка лишь не мозолит глаза там, где всё
+  // равно откажут.
+  async function remove(item: MySubmission) {
+    if (!window.confirm("Өтінішті өшіру керек пе? Қайтару мүмкін емес.")) return;
+    setBusyId(item.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/miniapp/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: currentInitData(), submissionId: item.id }),
+        signal: timeoutSignal(),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? `Өшіру мүмкін болмады (қате ${res.status})`);
+        return;
+      }
+      haptic("tap");
+      // Убираем из списка сразу, не дожидаясь перезагрузки: на телефоне
+      // лишний запрос — это секунда, в которую удалённое ещё видно.
+      setItems((prev) => prev?.filter((row) => row.id !== item.id) ?? prev);
+      setOpenId(null);
+    } catch {
+      setError("Байланыс жоқ — интернетті тексеріп, қайталаңыз");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (env === "browser") {
     return (
       <p className={styles.notice}>
@@ -173,6 +224,22 @@ export function MySubmissions({
         </button>
       </div>
 
+      {isAgent && (
+        <div className={styles.scopeSwitch} role="group" aria-label="Кімнің өтініштері">
+          {([["mine", "Менікі"], ["all", "Барлығы"]] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={scope === value}
+              className={`${styles.scopeButton} ${scope === value ? styles.scopeButtonActive : ""}`}
+              onClick={() => switchScope(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -204,6 +271,9 @@ export function MySubmissions({
             <SubmissionItem
               key={item.id}
               item={item}
+              showAuthor={scope === "all"}
+              busy={busyId === item.id}
+              onDelete={() => remove(item)}
               open={openId === item.id}
               onToggle={() => {
                 haptic("select");
@@ -220,11 +290,17 @@ export function MySubmissions({
 function SubmissionItem({
   item,
   open,
+  showAuthor,
+  busy,
   onToggle,
+  onDelete,
 }: {
   item: MySubmission;
   open: boolean;
+  showAuthor: boolean;
+  busy: boolean;
   onToggle: () => void;
+  onDelete: () => void;
 }) {
   const panelId = `submission-${item.id}`;
   return (
@@ -250,6 +326,7 @@ function SubmissionItem({
 
       {open && (
         <div id={panelId} className={styles.submissionBody}>
+          {showAuthor && <p className={styles.authorLine}>👤 {item.authorName}</p>}
           {item.fields.some((f) => !f.service) && (
             <div className={styles.fields}>
               {item.fields
@@ -286,6 +363,17 @@ function SubmissionItem({
           </ol>
 
           <SubmissionPhotos submissionId={item.id} count={item.photoCount} />
+
+          {item.canDelete && (
+            <button
+              type="button"
+              className={styles.dangerButton}
+              disabled={busy}
+              onClick={onDelete}
+            >
+              {busy ? "Өшірілуде…" : "🗑 Өтінішті өшіру"}
+            </button>
+          )}
         </div>
       )}
     </li>

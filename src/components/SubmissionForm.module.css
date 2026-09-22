@@ -891,3 +891,51 @@
 .fieldLabel {
   color: var(--hint);
 }
+
+/* Удаление обращения — действие без отката, поэтому отдельным цветом и
+   отдельно от остальных кнопок карточки. */
+.dangerButton {
+  align-self: flex-start;
+  margin-top: 12px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--danger, #e5484d);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.dangerButton:disabled {
+  color: var(--hint);
+}
+
+/* Переключатель «свои / все» — виден только дежурному. */
+.scopeSwitch {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.scopeButton {
+  padding: 4px 10px;
+  border: 0.5px solid var(--separator);
+  border-radius: 999px;
+  background: none;
+  color: var(--hint);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.scopeButtonActive {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.authorLine {
+  margin: 0 0 6px;
+  color: var(--hint);
+  font-size: 13px;
+}
