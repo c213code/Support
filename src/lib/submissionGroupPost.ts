@@ -23,6 +23,42 @@ import { isSubmissionToGroupEnabled } from "@/lib/settings";
 //
 // Отправка не обязана удасться: тикет уже создан, и обращение куратора
 // пропасть не может. Любой отказ — строка в лог и null.
+// Ссылки в сообщении группы — одним словом, а не полным адресом.
+//
+// Ссылка на урок у платформы — это сто двадцать символов с двумя uuid и
+// параметрами; в чате она разворачивалась на шесть строк и отодвигала всё
+// остальное за экран. Смысла в этих символах для читающего нет: нужен
+// переход, а не текст адреса.
+//
+// Порядок важен: сначала адреса вынимаются в плейсхолдеры, и только потом
+// текст режется по лимиту и экранируется. Иначе обрезка попадала бы в
+// середину адреса, а экранирование превращало «&» в «&amp;» внутри самого
+// href — Telegram отклонил бы такую разметку.
+const URL_RE = /https?:\/\/\S+/g;
+const LINK_LABEL = "🔗 сілтеме";
+
+function extractLinks(text: string): { masked: string; urls: string[] } {
+  const urls: string[] = [];
+  const masked = text.replace(URL_RE, (url) => {
+    urls.push(url);
+    return `\u0000${urls.length - 1}\u0000`;
+  });
+  return { masked, urls };
+}
+
+// Плейсхолдер → ссылка (для чата) или само слово (для сохранённой копии).
+// Обрезанный по лимиту «хвост» плейсхолдера убираем: висящий \u0000 в тексте
+// не нужен никому.
+function restoreLinks(masked: string, urls: string[], asHtml: boolean): string {
+  return masked
+    .replace(/\u0000(\d+)\u0000/g, (_, index) => {
+      const url = urls[Number(index)];
+      if (!url) return LINK_LABEL;
+      return asHtml ? `<a href="${escapeHtml(url)}">${LINK_LABEL}</a>` : LINK_LABEL;
+    })
+    .replace(/\u0000\d*$/, "");
+}
+
 export async function postSubmissionToGroup(opts: {
   issueId: string;
   groupName: string;
@@ -52,12 +88,14 @@ export async function postSubmissionToGroup(opts: {
   // тег Telegram не примет вовсе.
   const withPhotos = opts.photoFileIds.length > 0;
   const room = (withPhotos ? CAPTION_LIMIT : 4096) - opts.authorName.length - 40;
-  const details = opts.details.slice(0, room);
+  const { masked, urls } = extractLinks(opts.details);
+  const details = masked.slice(0, room);
   const mention = `<a href="tg://user?id=${opts.telegramUserId}">${escapeHtml(opts.authorName)}</a>`;
-  const html = `📨 Жаңа өтініш · ${mention}\n${escapeHtml(details)}`;
+  const html = `📨 Жаңа өтініш · ${mention}\n${restoreLinks(escapeHtml(details), urls, true)}`;
   // То же самое без разметки — для записи о сообщении бота и для списка
-  // «удалить ответ», где разметка только мешает читать.
-  const plain = `📨 Жаңа өтініш · ${opts.authorName}\n${details}`;
+  // «удалить ответ», где разметка только мешает читать. Адрес и там не
+  // нужен: в списке важно узнать своё сообщение, а не прочитать ссылку.
+  const plain = `📨 Жаңа өтініш · ${opts.authorName}\n${restoreLinks(details, urls, false)}`;
 
   // С фото текст уходит подписью к альбому: отдельным сообщением он
   // оторвался бы от скриншотов, а в группе между ними успевает влезть
