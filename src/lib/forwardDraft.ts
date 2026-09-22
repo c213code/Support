@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { miniAppUrl } from "@/lib/miniapp";
+import { FORWARD_RESET } from "@/lib/telegramCallbacks";
 import {
   editMessageText,
   largestPhotoFileId,
@@ -16,11 +17,15 @@ import {
 // копится здесь, а мини-апп открывается уже с текстом и фотографиями, и
 // куратору остаётся выбрать группу и тип проблемы.
 
-// Сколько черновик «живёт» между пересылками. Цепочку пересылают за
-// секунды, но человек может отвлечься на поиск нужного сообщения — полчаса
-// с запасом. Пересылка после паузы начинает новый черновик: иначе к
-// сегодняшнему запросу прилипла бы вчерашняя переписка.
-const DRAFT_WINDOW_MS = 30 * 60 * 1000;
+// Сколько черновик «живёт» между пересылками. Цепочку пересылают залпом,
+// за секунды: Telegram отправляет отмеченные сообщения подряд. Пауза
+// больше этой — уже другой разговор, и прилеплять его к прежнему нельзя.
+//
+// Полчаса, стоявшие здесь сначала, оказались именно такой ошибкой: куратор
+// переслал одну цепочку, через десять минут — вторую, и получил «11
+// хабарлама» в одном черновике. Две минуты покрывают залп с запасом на
+// «доскроллил, нашёл ещё одно», но не склеивают разные запросы.
+const DRAFT_WINDOW_MS = 2 * 60 * 1000;
 
 // Столько же, сколько принимает форма (MAX_PHOTOS в submit).
 const MAX_PHOTOS = 5;
@@ -54,7 +59,8 @@ function buildPrompt(text: string, photoCount: number): string {
   return (
     `📥 Жіберілген хабарламалар жиналды: ${parts.join(", ")}.\n\n` +
     "«Өтініш жасау» батырмасын басыңыз — мәтін мен суреттер формаға өзі қойылады, " +
-    "сізге тек топ пен мәселе түрін таңдау қалады."
+    "сізге тек топ пен мәселе түрін таңдау қалады.\n\n" +
+    "Басқа мәселе бойынша жіберсеңіз — «Жаңадан бастау»."
   );
 }
 
@@ -105,12 +111,15 @@ export async function collectForwardedMessage(
   if (draft.promptChatId && draft.promptMessageId) {
     const edited = await editMessageText(draft.promptChatId, draft.promptMessageId, prompt, [
       [{ text: "📝 Өтініш жасау", web_app: { url } }],
+      [{ text: "🆕 Жаңадан бастау", callback_data: FORWARD_RESET }],
     ]);
     if (edited) return;
   }
 
   const chatId = String(message.chat.id);
-  const sent = await sendWebAppButton(message.chat.id, prompt, "📝 Өтініш жасау", url);
+  const sent = await sendWebAppButton(message.chat.id, prompt, "📝 Өтініш жасау", url, [
+    [{ text: "🆕 Жаңадан бастау", callback_data: FORWARD_RESET }],
+  ]);
   await prisma.forwardDraft.update({
     where: { id: draft.id },
     data: {
@@ -118,4 +127,21 @@ export async function collectForwardedMessage(
       promptMessageId: sent ? sent.message_id : null,
     },
   });
+}
+
+// Куратор нажал «Жаңадан бастау»: прежний черновик больше не нужен, и
+// следующая пересылка начнёт новый. Сообщение с кнопкой переписываем —
+// плодить экраны ради подтверждения незачем.
+export async function resetForwardDraft(userId: bigint): Promise<void> {
+  const draft = await prisma.forwardDraft.findUnique({ where: { telegramUserId: userId } });
+  if (!draft) return;
+  await prisma.forwardDraft.delete({ where: { id: draft.id } });
+  if (draft.promptChatId && draft.promptMessageId) {
+    await editMessageText(
+      draft.promptChatId,
+      draft.promptMessageId,
+      "🆕 Жаңадан бастаймыз. Келесі мәселе бойынша хабарламаларды жіберіңіз.",
+      null
+    );
+  }
 }

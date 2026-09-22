@@ -502,12 +502,17 @@ export async function sendWebAppButton(
   chatId: number | string,
   text: string,
   buttonText: string,
-  url: string
+  url: string,
+  // Дополнительные ряды под кнопкой мини-аппа — например «Жаңадан бастау»
+  // под черновиком пересылки.
+  extraRows?: InlineKeyboard
 ): Promise<{ message_id: number } | null> {
   const data = (await callBotApi("sendMessage", {
     chat_id: chatId,
     text,
-    reply_markup: { inline_keyboard: [[{ text: buttonText, web_app: { url } }]] },
+    reply_markup: {
+      inline_keyboard: [[{ text: buttonText, web_app: { url } }], ...(extraRows ?? [])],
+    },
   })) as { result?: { message_id?: number } } | null;
 
   return typeof data?.result?.message_id === "number"

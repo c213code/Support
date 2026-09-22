@@ -3,6 +3,7 @@ import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
 import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
+import { resetForwardDraft } from "@/lib/forwardDraft";
 import { SHARED_AGENT } from "@/lib/agents";
 import {
   advanceReviewSession,
@@ -50,6 +51,7 @@ import {
   BROADCAST_CANCEL_PREFIX,
   BOT_REPLIES_PREFIX,
   BOT_REPLY_DELETE_PREFIX,
+  FORWARD_RESET,
 } from "@/lib/telegramCallbacks";
 import {
   AUTO_ISSUE_CREATOR,
@@ -649,6 +651,14 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
   // удаления у каждого сообщения. На сайте это же есть на карточке, но
   // дежурный сидит в телефоне — значит и убрать неудачный ответ надо уметь
   // отсюда.
+  // «Жаңадан бастау» под черновиком пересылки: следующая пересылка
+  // начнёт новый черновик, а не допишет прежний.
+  if (data === FORWARD_RESET) {
+    await answerCallbackQuery(query.id, "Жаңадан бастаймыз");
+    if (query.from?.id != null) await resetForwardDraft(BigInt(query.from.id));
+    return;
+  }
+
   if (data.startsWith(BOT_REPLIES_PREFIX)) {
     const issueId = data.slice(BOT_REPLIES_PREFIX.length);
     const replies = await prisma.botReply.findMany({
