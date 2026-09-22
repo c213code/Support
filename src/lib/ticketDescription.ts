@@ -54,7 +54,15 @@ export async function buildDescription(
 
   if (await isAiCleaningEnabled()) {
     const aiResult = await rewriteTicketDescriptionWithAI(contextual);
-    if (aiResult) return isAiSkip(aiResult) ? null : aiResult;
+    if (aiResult) {
+      if (isAiSkip(aiResult)) return null;
+      // Промпт запрещает оставлять почту, телефон и пароль, но модель это
+      // правило иногда нарушает («aigerim@mail.ru оқушысына тест
+      // ашылмайды»), а описание уходит в репорт руководству. Та же
+      // regex-чистка поверх ответа — последний заслон; если после неё не
+      // осталось ничего, берём ответ как есть (лучше с почтой, чем пустой).
+      return cleanTicketDescription(aiResult) || aiResult;
+    }
   }
   return cleanTicketDescription(contextual);
 }
