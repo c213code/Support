@@ -117,6 +117,24 @@ export function MySubmissions({
     return () => clearTimeout(t);
   }, [active, env]);
 
+  // Вернулись в мини-апп — перечитываем список, не глядя на STALE_MS.
+  //
+  // Telegram не закрывает мини-апп при переходе в чат, а держит его в
+  // фоне: открытый список мог пролежать там час. За это время дежурный
+  // успевает и решить обращение, и удалить тикет — тогда сама заявка
+  // исчезает вместе с ним (внешний ключ с каскадом), а в мини-аппе она
+  // продолжала висеть как ни в чём не бывало, пока куратор не нажмёт
+  // «Жаңарту». Возврат в приложение — это ровно тот момент, когда человек
+  // смотрит на список и ждёт, что он свежий.
+  useEffect(() => {
+    if (!active || env === "loading" || env === "browser") return;
+    function onVisible() {
+      if (document.visibilityState === "visible") load();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [active, env]);
+
   function refresh() {
     haptic("tap");
     load();
