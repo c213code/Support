@@ -50,8 +50,13 @@ AREAS = [
         r"^app/miniapp/",
         r"^app/api/miniapp/",
         r"^app/api/issues/\[id\]/photo/",
-        r"^components/(MiniApp|SubmissionForm|MySubmissions|SubmissionPhoto)\.tsx$",
-        r"^lib/(miniapp|miniappClient|statusKk|submitterNotify|telegramPhoto)\.ts$",
+        r"^components/(MiniApp|SubmissionForm|MySubmissions|SubmissionPhoto|LabelFields"
+        r"|SubmissionChat)\.tsx$",
+        # Ярлыки формы, переписка с куратором, публикация обращения в группу
+        # и черновик из пересланной переписки — всё это путь обращения из
+        # мини-аппа, даже когда вызывает его вебхук (forwardDraft).
+        r"^lib/(miniapp|miniappClient|statusKk|submitterNotify|telegramPhoto|submissionLabels"
+        r"|submissionChat|submissionGroupPost|forwardDraft|forwardFill|phone)\.ts$",
     ]),
     ("ИИ (Groq)", [
         r"^app/api/ai/",

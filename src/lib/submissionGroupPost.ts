@@ -147,5 +147,10 @@ export async function postSubmissionToGroup(opts: {
     },
   });
 
-  return buildMessageLink(Number(chatId), sent.message_id);
+  // Ссылку отдаём только на настоящую публикацию: её пишут в telegramLink
+  // тикета, а ссылки тикета печатаются в репорт руководству
+  // (generateReportText → issueLinks). Ссылка на ТЕСТ-сообщение в закрытом
+  // служебном канале там была бы битой для всех, кроме нас. Тестовое
+  // сообщение с карточки и так достижимо — через запись BotReply.
+  return live ? buildMessageLink(Number(chatId), sent.message_id) : null;
 }

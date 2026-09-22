@@ -7,7 +7,7 @@ import { changeIssueStatus } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { advanceReviewSession } from "@/lib/dailyReview";
 import { handleBotCommand } from "@/lib/webhook/commands";
-import { ensureMiniAppMenuButton } from "@/lib/miniapp";
+import { ensureMiniAppMenuButton, submissionFormEnabled } from "@/lib/miniapp";
 import { handleCallbackQuery } from "@/lib/webhook/callbacks";
 import { createAutoIssue, sendAcknowledgement } from "@/lib/webhook/acknowledge";
 import { intakeCuratorMessage } from "@/lib/submissionChat";
@@ -220,7 +220,15 @@ export async function POST(request: NextRequest) {
   // сообщение во «Входящие»: кураторы пересылают готовую цепочку из своего
   // чата вместо того, чтобы набирать запрос заново. Собираем её в черновик
   // и даём кнопку «Өтініш жасау» (см. lib/forwardDraft.ts).
-  if (message.chat.type === "private" && isForwarded(message) && fromId !== null) {
+  // Только при включённой форме: без неё собирать черновик некуда
+  // (collectForwardedMessage молча выходит без адреса мини-аппа), и
+  // пересланное пропадало бы бесследно — ни черновика, ни «Входящих».
+  if (
+    message.chat.type === "private" &&
+    isForwarded(message) &&
+    fromId !== null &&
+    submissionFormEnabled()
+  ) {
     await collectForwardedMessage(message, fromId);
     return NextResponse.json({ ok: true });
   }
