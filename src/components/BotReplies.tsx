@@ -3,6 +3,9 @@
 import { useState } from "react";
 import type { BotReplyDTO } from "@/lib/types";
 
+// Публикация обращения в рабочей группе (см. lib/submissionGroupPost.ts).
+const SUBMISSION_KIND = "SUBMISSION";
+
 // Что бот сказал в рабочей группе по этому тикету — прямо на карточке,
 // чтобы было видно, что уже прозвучало коллегам, и не написать им то же
 // самое второй раз руками.
@@ -78,22 +81,32 @@ export function BotReplies({
             </div>
           ) : (
             <div className="flex items-start gap-1">
-              <span className="shrink-0 text-slate-400">🤖</span>
-              <span className="flex-1 text-slate-600">{reply.text}</span>
+              <span className="shrink-0 text-slate-400">
+                {reply.kind === SUBMISSION_KIND ? "📨" : "🤖"}
+              </span>
+              {/* Публикация самого обращения — это тот же текст, что уже
+                  расписан полями выше: карточка показывала его дважды и
+                  вырастала вдвое. Здесь нужен только факт «в группе оно
+                  есть» и кнопка убрать. */}
+              <span className="flex-1 text-slate-600">
+                {reply.kind === SUBMISSION_KIND ? "Обращение отправлено в группу" : reply.text}
+              </span>
               {/* Кнопки видны всегда, а не по наведению: основное
                   устройство дежурного — телефон, где наведения нет вовсе,
                   и спрятанное под hover там просто не существует. */}
               <span className="flex shrink-0 gap-1.5">
-                <button
-                  onClick={() => {
-                    setEditingId(reply.id);
-                    setDraft(reply.text);
-                  }}
-                  title="Исправить сообщение в группе"
-                  className="rounded px-1 py-0.5 text-slate-400 hover:bg-white hover:text-brand-600"
-                >
-                  ✎
-                </button>
+                {reply.kind !== SUBMISSION_KIND && (
+                  <button
+                    onClick={() => {
+                      setEditingId(reply.id);
+                      setDraft(reply.text);
+                    }}
+                    title="Исправить сообщение в группе"
+                    className="rounded px-1 py-0.5 text-slate-400 hover:bg-white hover:text-brand-600"
+                  >
+                    ✎
+                  </button>
+                )}
                 <button
                   disabled={busy}
                   onClick={() => {

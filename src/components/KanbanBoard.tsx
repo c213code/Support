@@ -440,10 +440,27 @@ export function KanbanBoard({
                               .filter((f) => !f.service)
                               .map((f) => (
                                 /* Не flex: длинная подпись в колонке доски
-                                   выдавливала значение за край карточки. */
-                                <p key={f.label} className="break-words">
+                                   выдавливала значение за край карточки.
+                                   line-clamp: описание на полстраницы и
+                                   ссылка на урок в сто символов растягивали
+                                   карточку на весь экран — целиком они
+                                   видны в окне тикета. */
+                                <p key={f.label} className="line-clamp-3 break-words">
                                   <span className="text-slate-400">{f.label}: </span>
-                                  <span className="font-medium text-slate-700">{f.value}</span>
+                                  {/^https?:\/\//i.test(f.value.trim()) ? (
+                                    <a
+                                      href={f.value.trim()}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title={f.value}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-accent-600 hover:underline"
+                                    >
+                                      🔗 ссылка
+                                    </a>
+                                  ) : (
+                                    <span className="font-medium text-slate-700">{f.value}</span>
+                                  )}
                                 </p>
                               ))}
                           </div>
