@@ -19,6 +19,11 @@ import type { LabelField, SubmissionLabel } from "@/lib/submissionLabels";
 
 const URL_RE = /https?:\/\/\S+/g;
 
+// Поля, которые принимают любой контакт — и почту, и номер (у «Басқа
+// мәселе» он один такой). Тип у них text: в поле для почты номер вписать
+// нельзя, а куратор шлёт то одно, то другое.
+const CONTACT_FIELD_IDS = ["studentContact", "oldContact", "contact"];
+
 // Строка, в которой кроме самого контакта ничего нет, — из описания уходит:
 // значение уже стоит в своём поле, и второй раз читать его незачем. Строку
 // с текстом вокруг контакта оставляем как есть: там контекст.
@@ -64,6 +69,21 @@ export function fillFromForward(
       used.push(value);
     };
 
+    if (field.type === "text" && CONTACT_FIELD_IDS.includes(field.id)) {
+      // Почта понятнее номера (по ней дежурный ищет ученика), поэтому она
+      // первая; номер — если почты в переписке не было.
+      if (freeEmails.length > 0) {
+        put(freeEmails.shift()!);
+        continue;
+      }
+      if (freePhones.length > 0) {
+        const phone = freePhones.shift()!;
+        values[field.id] = formatKzPhone(phone, "");
+        used.push(phone);
+        continue;
+      }
+      continue;
+    }
     if (field.type === "email" && freeEmails.length > 0) {
       put(freeEmails.shift()!);
       continue;

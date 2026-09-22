@@ -78,9 +78,12 @@ export async function collectForwardedMessage(
   // в описании это мусор.
   const body = (message.text ?? message.caption ?? "").trim();
   const author = originName(message);
-  // Имя автора пишем один раз, в начале черновика: в цепочке из шести
-  // сообщений оно у всех одно и то же.
-  const line = fresh || !author ? body : [`${author}:`, body].filter(Boolean).join(" ");
+  // Имя автора пишем один раз, отдельной строкой в начале черновика: в
+  // цепочке из шести сообщений оно у всех одно и то же, а приклеенное к
+  // первому сообщению — мешает разбору. Первой пересылкой обычно и идёт
+  // голый номер или почта, и с приставкой «Айханым:» такая строка
+  // перестаёт быть только контактом (см. lib/forwardFill.ts).
+  const line = fresh || !author ? body : [`${author}:`, body].filter(Boolean).join("\n");
 
   const photo = largestPhotoFileId(message);
   const photos = [...(fresh?.photoFileIds ?? []), ...(photo ? [photo] : [])].slice(0, MAX_PHOTOS);

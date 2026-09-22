@@ -379,12 +379,16 @@ const PLATFORM_ERROR_LABEL: SubmissionLabel = {
 // Необязательная: сюда попадают и вопросы без ученика вообще (как что
 // устроено, доступ для самого куратора) — требовать почту там значило бы
 // заставить вписать любую.
-const OTHER_STUDENT_EMAIL: LabelField = {
-  id: "studentEmail",
-  label: "Оқушының поштасы",
-  type: "email",
+// У свободного ярлыка спрашиваем контакт одним полем: кураторы шлют то
+// почту, то номер, и выбор «что именно» здесь только лишний тап. Поэтому
+// тип text, а не email — номер в поле для почты телефон не даст ввести
+// вовсе. Необязательное: сюда попадают и вопросы без ученика.
+const OTHER_STUDENT_CONTACT: LabelField = {
+  id: "studentContact",
+  label: "Оқушының поштасы немесе нөмірі",
+  type: "text",
   required: false,
-  placeholder: "student@gmail.com",
+  placeholder: "student@gmail.com немесе +7 (777) 777 77 77",
   hint: "Мәселе нақты оқушыға қатысты болса",
 };
 
@@ -393,7 +397,7 @@ const OTHER_LABEL: SubmissionLabel = {
   emoji: "📝",
   title: "Басқа мәселе",
   hint: "Тізімде жоқ жағдай",
-  fields: [DESCRIPTION, OTHER_STUDENT_EMAIL, { ...SCREENSHOT, required: false, minPhotos: 0 }],
+  fields: [DESCRIPTION, OTHER_STUDENT_CONTACT, { ...SCREENSHOT, required: false, minPhotos: 0 }],
 };
 
 // «Басқа мәселе» для групп, где бывает привязка к уроку.
@@ -401,7 +405,7 @@ const OTHER_WITH_LESSON: SubmissionLabel = {
   ...OTHER_LABEL,
   fields: [
     DESCRIPTION,
-    OTHER_STUDENT_EMAIL,
+    OTHER_STUDENT_CONTACT,
     { ...LESSON_LINK, required: false },
     { ...SCREENSHOT, required: false, minPhotos: 0 },
   ],
@@ -923,6 +927,7 @@ export function buildDetails(
 const CONTACT_FIELDS = [
   "studentEmail",
   "studentContact",
+  "studentPhone",
   "newPhone",
   "newEmail",
   "oldPhone",
