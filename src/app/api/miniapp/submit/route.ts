@@ -174,7 +174,22 @@ export async function POST(request: NextRequest) {
 
   const photos = form.getAll("photo").filter((p): p is File => p instanceof File && p.size > 0);
 
-  if (missingFields(label, values, photos.length).length > 0) return reply(400, T.incomplete);
+  // Фото из пересланной переписки уже лежат в Telegram: их file_id пришли в
+  // черновик (см. lib/forwardDraft.ts), и грузить их второй раз незачем —
+  // ни телефону, ни нам. Берём их до проверки полноты: для ярлыка со
+  // обязательным скрином они такие же приложенные фото, как и выбранные.
+  const useForward = field(form, "useForward", 4) === "1";
+  const forwardDraft = useForward
+    ? await prisma.forwardDraft.findUnique({
+        where: { telegramUserId: user.id },
+        select: { id: true, photoFileIds: true },
+      })
+    : null;
+  const forwardPhotoIds = forwardDraft?.photoFileIds ?? [];
+
+  if (missingFields(label, values, photos.length + forwardPhotoIds.length).length > 0) {
+    return reply(400, T.incomplete);
+  }
   if (photos.length > MAX_PHOTOS) return reply(400, T.tooManyPhotos);
   if (photos.some((photo) => !photo.type.startsWith("image/"))) return reply(400, T.notImage);
   if (photos.reduce((sum, photo) => sum + photo.size, 0) > MAX_PHOTOS_BYTES) {
@@ -234,7 +249,9 @@ export async function POST(request: NextRequest) {
     }
     return reply(502, upload.kind === "photo" ? T.photoRejected : T.photoNetwork);
   }
-  const photoFileIds = upload.fileIds;
+  // Пересланные фото идут первыми: в цепочке скрин обычно и есть суть, а
+  // то, что куратор доснял в форме, — уточнение.
+  const photoFileIds = [...forwardPhotoIds, ...upload.fileIds].slice(0, MAX_PHOTOS);
 
   const preset = await prisma.groupPreset.findUnique({
     where: { name: group.name },
@@ -257,6 +274,12 @@ export async function POST(request: NextRequest) {
       labelId: label.id,
       labelFields: values,
     });
+    // Черновик пересылки своё отработал: оставить его — значит подставить
+    // ту же переписку в следующее обращение.
+    if (forwardDraft) {
+      await prisma.forwardDraft.delete({ where: { id: forwardDraft.id } }).catch(() => {});
+    }
+
     // Обращение — в ту рабочую группу, которую куратор выбрал первым
     // экраном (если рубильник включён). После тикета, а не вместо: отправка
     // может не удаться, и терять из-за этого само обращение нельзя.

@@ -11,6 +11,7 @@ import { ensureMiniAppMenuButton } from "@/lib/miniapp";
 import { handleCallbackQuery } from "@/lib/webhook/callbacks";
 import { createAutoIssue, sendAcknowledgement } from "@/lib/webhook/acknowledge";
 import { intakeCuratorMessage } from "@/lib/submissionChat";
+import { collectForwardedMessage, isForwarded } from "@/lib/forwardDraft";
 import {
   applyAgentIntent,
   attachReplyToBotMessage,
@@ -212,6 +213,15 @@ export async function POST(request: NextRequest) {
     message.chat.type === "private" &&
     (await intakeCuratorMessage(message, chatId, text))
   ) {
+    return NextResponse.json({ ok: true });
+  }
+
+  // Переписка, пересланная боту в личку, — это заготовка обращения, а не
+  // сообщение во «Входящие»: кураторы пересылают готовую цепочку из своего
+  // чата вместо того, чтобы набирать запрос заново. Собираем её в черновик
+  // и даём кнопку «Өтініш жасау» (см. lib/forwardDraft.ts).
+  if (message.chat.type === "private" && isForwarded(message) && fromId !== null) {
+    await collectForwardedMessage(message, fromId);
     return NextResponse.json({ ok: true });
   }
 

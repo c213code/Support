@@ -38,7 +38,11 @@ export type TelegramCallbackQuery = {
   };
 };
 
-export type InlineKeyboardButton = { text: string; callback_data: string };
+export type InlineKeyboardButton =
+  | { text: string; callback_data: string }
+  // Кнопка, открывающая мини-апп. Живёт в той же клавиатуре, что и
+  // обычные: у сообщения с черновиком пересылки она одна.
+  | { text: string; web_app: { url: string } };
 export type InlineKeyboard = InlineKeyboardButton[][];
 
 export type TelegramMessagePayload = {
@@ -63,6 +67,17 @@ export type TelegramMessagePayload = {
   // как и у фото из формы мини-аппа.
   photo?: Array<{ file_id?: string }>;
   sticker?: { emoji?: string };
+  // Пересланное сообщение. forward_origin — нынешний формат Bot API, а
+  // forward_date остаётся у старых клиентов: проверяем оба, иначе часть
+  // пересылок выглядела бы как обычные сообщения.
+  forward_origin?: {
+    type?: string;
+    sender_user?: { first_name?: string; last_name?: string };
+    sender_user_name?: string;
+    chat?: { title?: string };
+  };
+  forward_date?: number;
+  forward_sender_name?: string;
   document?: { file_name?: string };
   voice?: unknown;
   video?: unknown;
@@ -488,13 +503,16 @@ export async function sendWebAppButton(
   text: string,
   buttonText: string,
   url: string
-): Promise<boolean> {
-  const data = await callBotApi("sendMessage", {
+): Promise<{ message_id: number } | null> {
+  const data = (await callBotApi("sendMessage", {
     chat_id: chatId,
     text,
     reply_markup: { inline_keyboard: [[{ text: buttonText, web_app: { url } }]] },
-  });
-  return data !== null;
+  })) as { result?: { message_id?: number } } | null;
+
+  return typeof data?.result?.message_id === "number"
+    ? { message_id: data.result.message_id }
+    : null;
 }
 
 // Кнопка меню бота (синяя слева от поля ввода) открывает мини-апп в одно

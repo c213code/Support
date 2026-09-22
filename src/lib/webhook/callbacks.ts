@@ -750,7 +750,10 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
       const remainingRows = (
         query.message.reply_markup?.inline_keyboard ?? []
       ).filter(
-        (row) => !row.some((btn) => btn.callback_data.startsWith(START_REVIEW_PREFIX))
+        // Кнопка мини-аппа callback_data не имеет — она и не может нести
+        // этот префикс, поэтому просто не трогаем такие.
+        (row) =>
+          !row.some((btn) => "callback_data" in btn && btn.callback_data.startsWith(START_REVIEW_PREFIX))
       );
       await editMessageReplyMarkup(
         query.message.chat.id,
@@ -773,7 +776,8 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
       const remainingRows = (
         query.message.reply_markup?.inline_keyboard ?? []
       ).filter(
-        (row) => !row.some((btn) => btn.callback_data.startsWith(START_DEDUPE_PREFIX))
+        (row) =>
+          !row.some((btn) => "callback_data" in btn && btn.callback_data.startsWith(START_DEDUPE_PREFIX))
       );
       await editMessageReplyMarkup(
         query.message.chat.id,

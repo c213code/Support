@@ -939,3 +939,18 @@
   color: var(--hint);
   font-size: 13px;
 }
+
+/* Плашка «форма заполнена из пересылки»: куратор должен видеть, откуда
+   взялся текст, и мочь от него отказаться. */
+.forwardNote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--section-bg, rgba(127, 127, 127, 0.12));
+  color: var(--hint);
+  font-size: 13px;
+}

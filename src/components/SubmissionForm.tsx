@@ -187,6 +187,9 @@ export function SubmissionForm({
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [compressing, setCompressing] = useState(false);
   const [submissionId, setSubmissionId] = useState(newSubmissionId);
+  // Пересланная боту переписка, собранная в черновик (lib/forwardDraft.ts):
+  // её текст подставляется в описание, а фото уходят в тикет как есть.
+  const [forward, setForward] = useState<{ text: string; photoCount: number } | null>(null);
 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +231,31 @@ export function SubmissionForm({
     }, 0);
     return () => clearTimeout(t);
   }, []);
+
+  // Черновик из пересылки — с сервера, по подписи Telegram. Грузим один
+  // раз при открытии: пересылают до того, как открыть форму, а не после.
+  useEffect(() => {
+    if (env === "loading" || env === "browser" || sent) return;
+    let cancelled = false;
+    async function loadForward() {
+      try {
+        const res = await fetch("/api/miniapp/forward-draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData: currentInitData() }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!cancelled && data?.draft) setForward(data.draft);
+      } catch {
+        // Нет связи — форма просто откроется пустой, как раньше.
+      }
+    }
+    const t = setTimeout(loadForward, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [env, sent]);
 
   useEffect(() => {
     if (!restored || sent) return;
@@ -377,7 +405,9 @@ export function SubmissionForm({
   const missing: string[] = [
     ...(!groupName ? ["group"] : []),
     ...(groupName && !label ? ["label"] : []),
-    ...(label ? missingFields(label, values, photos.length) : []),
+    ...(label
+      ? missingFields(label, values, photos.length + (forward?.photoCount ?? 0))
+      : []),
   ];
   const isMissing = (id: string) => showErrors && missing.includes(id);
   const fieldElementId = (id: string) =>
@@ -411,6 +441,9 @@ export function SubmissionForm({
       // Описание собирает сервер из этих же полей — клиенту тут доверять
       // нечего, а формат текста должен быть одинаковым для всех отправок.
       form.append("labelFields", JSON.stringify(values));
+      // Фото из пересылки уже лежат в Telegram — сервер возьмёт их по
+      // file_id из черновика, заново грузить нечего.
+      if (forward) form.append("useForward", "1");
       photos.forEach((photo, index) => form.append("photo", photo.blob, `photo-${index + 1}.jpg`));
       const res = await fetch("/api/miniapp/submit", {
         method: "POST",
@@ -437,6 +470,7 @@ export function SubmissionForm({
       }
       writeStorage(DRAFT_KEY, null);
       writeStorage(LAST_GROUP_KEY, groupName);
+      setForward(null);
       setSent({ groupName, description: label ? buildSummary(label, values) : "" });
       haptic("success");
       window.scrollTo({ top: 0 });
@@ -552,6 +586,32 @@ export function SubmissionForm({
         </p>
       )}
 
+      {forward && (
+        <div className={styles.forwardNote}>
+          <span>
+            📥 Жіберілген хабарламалардан толтырылды
+            {forward.photoCount > 0 ? ` · ${forward.photoCount} сурет` : ""}
+          </span>
+          <button
+            type="button"
+            className={styles.labelClear}
+            aria-label="Жіберілгенді тазалау"
+            onClick={() => {
+              haptic("select");
+              setForward(null);
+              setValues((prev) => ({ ...prev, description: "" }));
+              fetch("/api/miniapp/forward-draft", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ initData: currentInitData() }),
+              }).catch(() => {});
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <section className={styles.section} id={FIELD_IDS.group}>
         <span className={styles.sectionHeader} id="group-label">
           Қай топқа жіберу
@@ -636,7 +696,12 @@ export function SubmissionForm({
                     setLabelId(item.id);
                     // Ответы прошлого ярлыка новому не подходят: у него свои
                     // поля, и старые значения выглядели бы как заполненные.
-                    setValues({});
+                    // Текст из пересылки — исключение: он и есть само
+                    // обращение, ради него форму и открыли.
+                    const hasDescription = item.fields.some((f) => f.id === "description");
+                    setValues(
+                      forward && hasDescription ? { description: forward.text } : {}
+                    );
                     setShowErrors(false);
                   }}
                 >
@@ -726,10 +791,15 @@ export function SubmissionForm({
               : "Қатенің скриншотын тіркеңіз"
             : photos.length > 0
               ? `${photos.length} сурет · ${formatSize(totalBytes)} · ${MAX_PHOTOS} суретке дейін`
-              : (photoField?.hint ??
-                (photoField?.required
-                  ? "Телефонда сығылады — бірнеше сурет тіркеуге болады"
-                  : "Қаласаңыз, скрин тіркеңіз"))}
+              // Скрины из пересылки уже приложены, но в этом блоке их не
+              // видно: без этой строки на ярлыке с обязательным скрином
+              // кажется, что надо тіркеу ещё раз.
+              : forward && forward.photoCount > 0
+                ? `Жіберілгеннен ${forward.photoCount} сурет тіркеледі`
+                : (photoField?.hint ??
+                  (photoField?.required
+                    ? "Телефонда сығылады — бірнеше сурет тіркеуге болады"
+                    : "Қаласаңыз, скрин тіркеңіз"))}
         </p>
       </section>
       )}
