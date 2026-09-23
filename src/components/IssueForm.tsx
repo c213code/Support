@@ -204,7 +204,22 @@ export function IssueForm({
       if (escalatedTeam) {
         setNote(`${escalatedTeam} шешті`);
       } else if (author) {
-        setNote(`${author} шешті`);
+        const fallback = `${author} шешті`;
+        setNote(fallback);
+        // Кто ответил в чате — его имя и подставляем, как только узнаем
+        // (см. suggest-note ?only=resolver). Поверх того, что человек успел
+        // набрать, не пишем: меняем, только пока там наш же дефолт.
+        if (initial?.id) {
+          fetch(`/api/issues/${initial.id}/suggest-note?only=resolver`)
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (typeof data?.resolver === "string" && data.resolver) {
+                const resolverNote = `${data.resolver} шешті`;
+                setNote((prev) => (prev === fallback ? resolverNote : prev));
+              }
+            })
+            .catch(() => {});
+        }
       }
     }
   }

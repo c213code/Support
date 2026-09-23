@@ -1,3 +1,4 @@
+import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { prisma } from "@/lib/prisma";
 import { ownAgentTelegramIdList, QUOTE_MAX_LENGTH } from "@/lib/telegram";
 import { maskSensitiveForAi } from "@/lib/textClean";
@@ -101,6 +102,12 @@ const MAX_REPLY_HOPS = 4;
 export type ResolutionContext = {
   // Реплики наших агентов, относящиеся к тикету, в порядке написания.
   agentTexts: string[];
+  // Кто ответил в чате — автор последней реплики, надёжно привязанной к
+  // тикету. Его имя, а не того, кто перетащил карточку, идёт в «X шешті»:
+  // закрыть мог Ерош, а ответить — Алпа. У догадки по окну времени (exact:
+  // false) автора нет — ошибиться с именем в отчёте боссам хуже, чем
+  // оставить того, кто закрыл.
+  resolver: { fromId: bigint | null; authorName: string | null } | null;
   // true — реплику удалось привязать к тикету (надёжно), false — взята
   // просто из окна времени (догадка). Влияет на то, что показываем: по
   // догадке подсказку помечаем как менее уверенную.
@@ -128,6 +135,7 @@ export type ResolutionContextResult =
 type ChatMessage = {
   messageId: number;
   fromId: bigint | null;
+  authorName: string | null;
   text: string | null;
   replyToMessageId: number | null;
   usedForIssueId: string | null;
@@ -138,6 +146,7 @@ type ChatMessage = {
 const MESSAGE_FIELDS = {
   messageId: true,
   fromId: true,
+  authorName: true,
   text: true,
   replyToMessageId: true,
   usedForIssueId: true,
@@ -323,6 +332,7 @@ export async function collectResolutionContext(
     return stripReplyQuote(target.text, null);
   }
 
+  let lastLinked: ChatMessage | null = null;
   for (const message of ordered) {
     // Реплики уходят внешней модели — почты, телефоны и пароли маскируем.
     const text = message.text
@@ -330,7 +340,10 @@ export async function collectResolutionContext(
       : "";
     if (!text) continue;
     const owner = ownerOf(message);
-    if (owner === "ours") linked.push(text);
+    if (owner === "ours") {
+      linked.push(text);
+      lastLinked = message;
+    }
     // "other" отбрасываем совсем: за час в чате проходит несколько обращений,
     // и решение соседнего тикета в нашей заметке — прямая ошибка в репорте.
     else if (owner === "unknown") loose.push(text);
@@ -342,15 +355,37 @@ export async function collectResolutionContext(
   if (linked.length > 0) {
     return {
       ok: true,
-      context: { agentTexts: linked.slice(-MAX_AGENT_MESSAGES), exact: true },
+      context: {
+        agentTexts: linked.slice(-MAX_AGENT_MESSAGES),
+        exact: true,
+        resolver: lastLinked
+          ? { fromId: lastLinked.fromId, authorName: lastLinked.authorName }
+          : null,
+      },
     };
   }
   if (loose.length > 0) {
     return {
       ok: true,
-      context: { agentTexts: loose.slice(-MAX_AGENT_MESSAGES), exact: false },
+      context: { agentTexts: loose.slice(-MAX_AGENT_MESSAGES), exact: false, resolver: null },
     };
   }
 
   return { ok: false, reason: "no-agent-messages" };
+}
+
+// Как назвать того, кто ответил, в «X шешті». Сначала — имя аккаунта по его
+// Telegram-id («Алпа»), как пишут в отчёте. Если id не сопоставлен
+// (сменный под «Дежурным», или AGENT_TELEGRAM_IDS не заполнен) — имя из
+// Telegram до первой «|»: у своих оно вида «Тикош | сервис қолдау», и в
+// отчёт должно попасть «Тикош», а не должность.
+export function resolverName(context: ResolutionContext): string | null {
+  const resolver = context.resolver;
+  if (!resolver) return null;
+  if (resolver.fromId != null) {
+    const agent = telegramIdToAgent(Number(resolver.fromId));
+    if (agent) return agent;
+  }
+  const shown = resolver.authorName?.split("|")[0]?.trim();
+  return shown || null;
 }

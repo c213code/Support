@@ -55,6 +55,9 @@ export function ResolveDialog({
   const [chatSuggestion, setChatSuggestion] = useState<{
     text: string;
     exact: boolean;
+    // Кто ответил в чате (см. resolverName) — чтобы подпись не говорила
+    // «из твоего ответа», когда отвечал коллега.
+    resolver: string | null;
   } | null>(null);
   const [loadingSuggestion, setLoadingSuggestion] = useState(true);
   // Почему подсказки нет. Пустое место на её месте неотличимо от поломки:
@@ -106,11 +109,20 @@ export function ResolveDialog({
           setChatSuggestion({
             text: data.suggestion,
             exact: Boolean(data.exact),
+            resolver: typeof data.resolver === "string" && data.resolver ? data.resolver : null,
           });
           // Подставляем, только если человек ещё ничего не менял: набранное
           // руками важнее любой подсказки.
           if (!touchedRef.current) setNote(data.suggestion);
           return;
+        }
+        // Подсказки нет, но известно, кто ответил в чате, — имя в «X шешті»
+        // берём его, а не того, кто перетащил карточку: закрыть мог один,
+        // а решить — другой. Только поверх нетронутого дефолта: заметку,
+        // которую уже написали (или имя команды у «Передано»), не трогаем.
+        if (typeof data.resolver === "string" && data.resolver && !touchedRef.current) {
+          const resolverNote = `${data.resolver} шешті`;
+          setNote((prev) => (prev === `${currentAgent} шешті` ? resolverNote : prev));
         }
         setNoSuggestionReason(NO_SUGGESTION_TEXT[data.reason] ?? null);
         setCanRetrySuggestion(data.reason === "ai-error");
@@ -120,7 +132,7 @@ export function ResolveDialog({
         setCanRetrySuggestion(true);
       })
       .finally(() => setLoadingSuggestion(false));
-  }, [issue.id]);
+  }, [issue.id, currentAgent]);
 
   useEffect(() => {
     loadSuggestion();
@@ -261,7 +273,9 @@ export function ResolveDialog({
           {chatSuggestion && note === chatSuggestion.text && (
             <p className="text-[11px] text-slate-400">
               {chatSuggestion.exact
-                ? "🤖 Из твоего ответа в чате — проверь и поправь"
+                ? chatSuggestion.resolver && chatSuggestion.resolver !== currentAgent
+                  ? `🤖 Из ответа в чате (${chatSuggestion.resolver}) — проверь и поправь`
+                  : "🤖 Из твоего ответа в чате — проверь и поправь"
                 : "🤖 Собрано по переписке в чате — проверь, там мог обсуждаться и соседний тикет"}
             </p>
           )}

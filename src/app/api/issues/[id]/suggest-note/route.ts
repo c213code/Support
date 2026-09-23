@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
-import { collectResolutionContext } from "@/lib/resolutionNote";
+import { collectResolutionContext, resolverName } from "@/lib/resolutionNote";
 import { summarizeResolutionNote } from "@/lib/ai";
 import { isAiCleaningEnabled } from "@/lib/settings";
 
@@ -19,7 +19,7 @@ type Params = { params: Promise<{ id: string }> };
 // Всегда 200 с `suggestion: null`, если подсказки нет (ИИ выключен, реплик
 // в чате не нашлось, модель ответила SKIP): для модалки это не ошибка — она
 // просто оставит прежний дефолт "<Имя> шешті".
-export async function GET(_request: NextRequest, { params }: Params) {
+export async function GET(request: NextRequest, { params }: Params) {
   const identity = await getCurrentIdentity();
   if (!identity) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -34,16 +34,26 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "issue not found" }, { status: 404 });
   }
 
-  if (!(await isAiCleaningEnabled())) {
-    return NextResponse.json({ suggestion: null, exact: false, reason: "ai-off" });
+  // Переписку поднимаем до проверки ИИ: «кто ответил в чате» нужен и без
+  // модели — это имя идёт в «X шешті» вместо того, кто перетащил карточку.
+  const result = await collectResolutionContext(id);
+  const resolver = result.ok ? resolverName(result.context) : null;
+
+  // ?only=resolver — окну тикета нужно только имя, без запроса к модели.
+  if (request.nextUrl.searchParams.get("only") === "resolver") {
+    return NextResponse.json({ resolver });
   }
 
-  const result = await collectResolutionContext(id);
+  if (!(await isAiCleaningEnabled())) {
+    return NextResponse.json({ suggestion: null, exact: false, reason: "ai-off", resolver });
+  }
+
   if (!result.ok) {
     return NextResponse.json({
       suggestion: null,
       exact: false,
       reason: result.reason,
+      resolver,
     });
   }
 
@@ -59,13 +69,15 @@ export async function GET(_request: NextRequest, { params }: Params) {
       suggestion: null,
       exact: false,
       reason: summary.reason === "skip" ? "no-outcome" : "ai-error",
+      resolver,
     });
   }
 
-  // Имя дописываем кодом, а не моделью: в репорте оно значит "кто закрыл", и
-  // выдуманное моделью имя коллеги — худшее, что может попасть в отчёт
-  // боссам. Формат тот же, что дежурные пишут руками: "Ерош шешті, ...".
-  const suggestion = `${identity.name} шешті, ${summary.note}`;
+  // Имя дописываем кодом, а не моделью: выдуманное моделью имя коллеги —
+  // худшее, что может попасть в отчёт боссам. И это имя того, кто ответил в
+  // чате, а не того, кто закрыл карточку на сайте: перетащить мог Ерош, а
+  // решила Алпа. Не нашли, кто отвечал, — остаётся тот, кто закрывает.
+  const suggestion = `${resolver ?? identity.name} шешті, ${summary.note}`;
 
-  return NextResponse.json({ suggestion, exact: result.context.exact });
+  return NextResponse.json({ suggestion, exact: result.context.exact, resolver });
 }
