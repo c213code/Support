@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { agentTelegramId } from "@/lib/agentTelegram";
 import { findLabel } from "@/lib/submissionLabels";
+import { collectPendingMessage } from "@/lib/forwardDraft";
 import { SUBMISSION_PICK_PREFIX } from "@/lib/telegramCallbacks";
 import {
   answerCallbackQuery,
@@ -416,12 +417,15 @@ export async function handleCuratorChoiceCallback(
     await answerCallbackQuery(query.id, "Жаңа өтініш");
     // Заводить тикет из личной переписки бот не умеет и не должен: у заявки
     // есть обязательные поля (ученик, сілтеме, скриншот), которые собирает
-    // форма. Поэтому отправляем туда же, откуда пришла первая заявка.
-    await editMessageText(
-      query.message.chat.id,
-      query.message.message_id,
-      "➕ Жаңа өтініш үшін төмендегі мәзір батырмасынан форманы ашыңыз."
-    );
+    // форма. Но написанное не выбрасываем, как раньше: оно ложится в
+    // черновик, и форма откроется уже заполненной (lib/forwardDraft.ts).
+    await editMessageText(query.message.chat.id, query.message.message_id, "➕ Жаңа өтініш");
+    await collectPendingMessage({
+      userId: pending.telegramUserId,
+      chatId: query.message.chat.id,
+      text: pending.text,
+      photoFileIds: pending.photoFileIds,
+    });
     return;
   }
 

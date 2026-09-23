@@ -613,6 +613,10 @@ export function SubmissionForm({
         </div>
       )}
 
+      {forward && forward.photoCount > 0 && (
+        <ForwardPhotos count={forward.photoCount} />
+      )}
+
       <section className={styles.section} id={FIELD_IDS.group}>
         <span className={styles.sectionHeader} id="group-label">
           Қай топқа жіберу
@@ -821,5 +825,52 @@ export function SubmissionForm({
         </button>
       )}
     </>
+  );
+}
+
+// Фото из черновика (пересылка или сообщение боту) — миниатюрами над формой:
+// куратор видит, что именно приложится к обращению, и не досылает те же
+// скриншоты ещё раз. Грузим через наш сервер — ссылка на файл Telegram
+// содержит токен бота.
+function ForwardPhotos({ count }: { count: number }) {
+  const [urls, setUrls] = useState<Array<string | null>>(() => Array(count).fill(null));
+
+  useEffect(() => {
+    let cancelled = false;
+    const made: string[] = [];
+    async function load(index: number) {
+      try {
+        const res = await fetch("/api/miniapp/draft-photo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData: currentInitData(), index }),
+        });
+        if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) return;
+        const url = URL.createObjectURL(await res.blob());
+        made.push(url);
+        if (!cancelled) setUrls((prev) => prev.map((u, i) => (i === index ? url : u)));
+      } catch {
+        // Не загрузилось — останется серый квадрат: фото всё равно
+        // приложится, это лишь предпросмотр.
+      }
+    }
+    for (let i = 0; i < count; i++) load(i);
+    return () => {
+      cancelled = true;
+      made.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [count]);
+
+  return (
+    <div className={`${styles.photoRow} ${styles.forwardPhotos}`} aria-label="Жіберілген суреттер">
+      {urls.map((url, index) =>
+        url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={index} src={url} alt={`Сурет ${index + 1}`} className={styles.photoThumb} />
+        ) : (
+          <span key={index} className={styles.photoThumb} aria-hidden="true" />
+        )
+      )}
+    </div>
   );
 }

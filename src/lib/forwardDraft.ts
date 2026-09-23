@@ -53,50 +53,57 @@ function originName(message: TelegramMessagePayload): string {
   );
 }
 
-function buildPrompt(text: string, photoCount: number): string {
+function buildPrompt(text: string, photoCount: number, direct: boolean): string {
   const parts = [`${text.split("\n").filter(Boolean).length} хабарлама`];
   if (photoCount > 0) parts.push(`${photoCount} сурет`);
+  // Написали боту напрямую — сначала говорим, куда такое принимают: иначе
+  // куратор так и будет писать в личку, а дежурный узнавать об этом
+  // случайно, из «Входящих» без группы.
+  const lead = direct
+    ? "📝 Мәселені мини-апп арқылы жіберіңіз — жазғаныңыз сақталды: "
+    : "📥 Жіберілген хабарламалар жиналды: ";
   return (
-    `📥 Жіберілген хабарламалар жиналды: ${parts.join(", ")}.\n\n` +
+    `${lead}${parts.join(", ")}.\n\n` +
     "«Өтініш жасау» батырмасын басыңыз — мәтін мен суреттер формаға өзі қойылады, " +
     "сізге тек топ пен мәселе түрін таңдау қалады.\n\n" +
     "Басқа мәселе бойынша жіберсеңіз — «Жаңадан бастау»."
   );
 }
 
-// Собирает очередное пересланное сообщение в черновик куратора и показывает
-// ему одну и ту же кнопку, редактируя своё прежнее сообщение — новых
-// экранов на каждую пересылку не появляется.
-export async function collectForwardedMessage(
-  message: TelegramMessagePayload,
-  userId: bigint
-): Promise<void> {
+// Кусок текста и фото → черновик куратора, и одно сообщение бота с кнопкой
+// формы, которое правится на каждое следующее поступление — новых экранов
+// не появляется. Общая точка для пересылки, прямого сообщения боту и
+// кнопки «➕ Жаңа өтініш».
+async function addToDraft(opts: {
+  userId: bigint;
+  chatId: number;
+  body: string;
+  photoFileIds: string[];
+  // Имя автора пересланного — одной строкой в начале нового черновика.
+  author?: string;
+  direct: boolean;
+}): Promise<void> {
   const url = miniAppUrl();
   if (!url) return;
 
   const existing = await prisma.forwardDraft.findUnique({
-    where: { telegramUserId: userId },
+    where: { telegramUserId: opts.userId },
   });
   const fresh =
     existing && Date.now() - existing.updatedAt.getTime() < DRAFT_WINDOW_MS ? existing : null;
 
-  // Голый плейсхолдер «[Фото]» в текст не кладём: фото и так приложены, а
-  // в описании это мусор.
-  const body = (message.text ?? message.caption ?? "").trim();
-  const author = originName(message);
   // Имя автора пишем один раз, отдельной строкой в начале черновика: в
   // цепочке из шести сообщений оно у всех одно и то же, а приклеенное к
   // первому сообщению — мешает разбору. Первой пересылкой обычно и идёт
   // голый номер или почта, и с приставкой «Айханым:» такая строка
   // перестаёт быть только контактом (см. lib/forwardFill.ts).
-  const line = fresh || !author ? body : [author, body].filter(Boolean).join("\n");
+  const line = fresh || !opts.author ? opts.body : [opts.author, opts.body].filter(Boolean).join("\n");
 
-  const photo = largestPhotoFileId(message);
-  const photos = [...(fresh?.photoFileIds ?? []), ...(photo ? [photo] : [])].slice(0, MAX_PHOTOS);
+  const photos = [...(fresh?.photoFileIds ?? []), ...opts.photoFileIds].slice(0, MAX_PHOTOS);
   const text = [fresh?.text ?? "", line].filter(Boolean).join("\n").slice(0, MAX_TEXT);
 
   const draft = await prisma.forwardDraft.upsert({
-    where: { telegramUserId: userId },
+    where: { telegramUserId: opts.userId },
     update: {
       text,
       photoFileIds: photos,
@@ -104,10 +111,10 @@ export async function collectForwardedMessage(
       // него больше не отвечаем, покажем новое.
       ...(fresh ? {} : { promptChatId: null, promptMessageId: null }),
     },
-    create: { telegramUserId: userId, text, photoFileIds: photos },
+    create: { telegramUserId: opts.userId, text, photoFileIds: photos },
   });
 
-  const prompt = buildPrompt(text, photos.length);
+  const prompt = buildPrompt(text, photos.length, opts.direct);
   if (draft.promptChatId && draft.promptMessageId) {
     const edited = await editMessageText(draft.promptChatId, draft.promptMessageId, prompt, [
       [{ text: "📝 Өтініш жасау", web_app: { url } }],
@@ -116,17 +123,72 @@ export async function collectForwardedMessage(
     if (edited) return;
   }
 
-  const chatId = String(message.chat.id);
-  const sent = await sendWebAppButton(message.chat.id, prompt, "📝 Өтініш жасау", url, [
+  const sent = await sendWebAppButton(opts.chatId, prompt, "📝 Өтініш жасау", url, [
     [{ text: "🆕 Жаңадан бастау", callback_data: FORWARD_RESET }],
   ]);
   await prisma.forwardDraft.update({
     where: { id: draft.id },
     data: {
-      promptChatId: sent ? chatId : null,
+      promptChatId: sent ? String(opts.chatId) : null,
       promptMessageId: sent ? sent.message_id : null,
     },
   });
+}
+
+// Голый плейсхолдер «[Фото]» в текст не кладём: фото и так приложены, а в
+// описании это мусор. Поэтому берём сам текст или подпись, а не extractText.
+function ownText(message: TelegramMessagePayload): string {
+  return (message.text ?? message.caption ?? "").trim();
+}
+
+function photosOf(message: TelegramMessagePayload): string[] {
+  const photo = largestPhotoFileId(message);
+  return photo ? [photo] : [];
+}
+
+// Пересланное сообщение — в черновик.
+export async function collectForwardedMessage(
+  message: TelegramMessagePayload,
+  userId: bigint
+): Promise<void> {
+  await addToDraft({
+    userId,
+    chatId: message.chat.id,
+    body: ownText(message),
+    photoFileIds: photosOf(message),
+    author: originName(message),
+    direct: false,
+  });
+}
+
+// Куратор написал боту сам, а не через форму. Заводить из этого тикет бот
+// не должен — у заявки есть обязательные поля, которые собирает форма, — но
+// и терять написанное нельзя: раньше оно тихо ложилось во «Входящие» без
+// группы. Теперь текст и фото копятся тем же черновиком, а бот просит
+// отправить их формой, где всё уже будет заполнено.
+export async function collectDirectMessage(
+  message: TelegramMessagePayload,
+  userId: bigint
+): Promise<void> {
+  await addToDraft({
+    userId,
+    chatId: message.chat.id,
+    body: ownText(message),
+    photoFileIds: photosOf(message),
+    direct: true,
+  });
+}
+
+// То же для сообщения, которое бот держал до ответа на «Қай өтініш бойынша
+// жазып отырсыз?», когда куратор выбрал «➕ Жаңа өтініш»: раньше оно на этом
+// месте пропадало.
+export async function collectPendingMessage(opts: {
+  userId: bigint;
+  chatId: number;
+  text: string;
+  photoFileIds: string[];
+}): Promise<void> {
+  await addToDraft({ ...opts, body: opts.text.trim(), direct: true });
 }
 
 // Куратор нажал «Жаңадан бастау»: прежний черновик больше не нужен, и

@@ -11,7 +11,9 @@ import { ensureMiniAppMenuButton, submissionFormEnabled } from "@/lib/miniapp";
 import { handleCallbackQuery } from "@/lib/webhook/callbacks";
 import { createAutoIssue, sendAcknowledgement } from "@/lib/webhook/acknowledge";
 import { intakeCuratorMessage } from "@/lib/submissionChat";
-import { collectForwardedMessage, isForwarded } from "@/lib/forwardDraft";
+import { collectDirectMessage, collectForwardedMessage, isForwarded } from "@/lib/forwardDraft";
+import { isAgentTelegramId } from "@/lib/agentTelegram";
+import { isNoiseOnly } from "@/lib/textClean";
 import {
   applyAgentIntent,
   attachReplyToBotMessage,
@@ -230,6 +232,27 @@ export async function POST(request: NextRequest) {
     submissionFormEnabled()
   ) {
     await collectForwardedMessage(message, fromId);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Куратор написал боту сам. Сюда доходит, только если это не ответ в
+  // переписке по заявке и у него нет заявок, о которых спросить «про какую
+  // это» (всё это забрал intakeCuratorMessage выше). Раньше такое тихо
+  // ложилось во «Входящие» без группы — теперь копится черновиком, а бот
+  // просит отправить формой (lib/forwardDraft.ts).
+  //
+  // Агенты сюда не попадают — у них в личке своя работа с ботом. Короткое
+  // «рахмет» / «ок» без фото тоже нет: чаще всего это ответ на уведомление о
+  // статусе, а не новый запрос, и черновик с кнопкой на него — шум.
+  if (
+    message.chat.type === "private" &&
+    fromId !== null &&
+    submissionFormEnabled() &&
+    !isOwnAgentMessage(message.from?.id) &&
+    !isAgentTelegramId(fromId) &&
+    (Boolean(message.photo) || !isNoiseOnly(text))
+  ) {
+    await collectDirectMessage(message, fromId);
     return NextResponse.json({ ok: true });
   }
 
