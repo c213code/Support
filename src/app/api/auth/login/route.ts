@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createSessionToken, SESSION_COOKIE_NAME, verifyAgentPassword } from "@/lib/auth";
-import { SHARED_AGENT } from "@/lib/agents";
+import { resolveAgentLogin, SHARED_AGENT } from "@/lib/agents";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
-  const agent = body?.agent as string | undefined;
+  // Логин набирают руками — приводим его к имени агента здесь же, а не на
+  // странице: правило одно и живёт на сервере.
+  const agent = resolveAgentLogin(String(body?.agent ?? "")) ?? undefined;
   const password = body?.password as string | undefined;
   const displayName = (body?.displayName as string | undefined)?.trim();
 
