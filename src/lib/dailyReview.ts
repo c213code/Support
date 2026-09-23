@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/prisma";
-import { dayRangeUtc } from "@/lib/date";
+import { dayRangeUtc, isWeekendDate } from "@/lib/date";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { agentTelegramEntries } from "@/lib/agentTelegram";
+import { AGENTS, SHARED_AGENT } from "@/lib/agents";
 import {
   sendTelegramMessage,
   editMessageText,
   escapeHtml,
+  ownAgentTelegramIdList,
   type InlineKeyboard,
 } from "@/lib/telegram";
 import { generateReportText } from "@/lib/report";
@@ -487,27 +489,49 @@ async function moveReviewSession(chatId: string, step: 1 | -1): Promise<void> {
 // Экспортируется ещё и для подтверждения автоответов: спрашивать «так ли
 // писать?» нужно у того же человека, кому вечером уходит сводка, —
 // дежурного определяем одинаково.
+//
+// В будни дежурят только постоянные агенты (Ерош/Алпа), и выбираем между
+// ними: иначе сменщик, заглянувший в чат в среду, забирал сводку себе. В
+// выходные дежурит сменщик — там в счёт идут все свои id
+// (OWN_AGENT_TELEGRAM_IDS, куда их и дописывают на выходные).
+//
+// Считаются только привязанные группы: реплики агента в личке с ботом
+// (разбор, заметки) и в посторонних чатах тоже сохраняются как его
+// сообщения, и раньше тот, кто больше переписывался с ботом, считался
+// дежурным.
 export async function pickRecipient(reportDate: string): Promise<number | null> {
-  const entries = agentTelegramEntries();
-  if (entries.length === 0) return null;
+  const permanent = agentTelegramEntries()
+    .filter(([name]) => name !== SHARED_AGENT && (AGENTS as readonly string[]).includes(name))
+    .map(([, id]) => id);
+  const candidates = isWeekendDate(reportDate)
+    ? Array.from(new Set([...permanent, ...ownAgentTelegramIdList().map(Number)]))
+    : permanent;
+  if (candidates.length === 0) return null;
+  // Тихий день без агентской переписки — шлём первому постоянному, чтобы
+  // сводка не потерялась молча.
+  const fallback = permanent[0] ?? candidates[0];
+
+  const linkedChats = await prisma.groupPreset.findMany({
+    where: { chatId: { not: null } },
+    select: { chatId: true },
+  });
+  if (linkedChats.length === 0) return fallback;
 
   const { start, end } = dayRangeUtc(reportDate);
-  const ids = entries.map(([, id]) => BigInt(id));
-
   const counts = await prisma.telegramMessage.groupBy({
     by: ["fromId"],
-    where: { fromId: { in: ids }, receivedAt: { gte: start, lt: end } },
+    where: {
+      fromId: { in: candidates.map((id) => BigInt(id)) },
+      chatId: { in: linkedChats.map((p) => p.chatId!) },
+      receivedAt: { gte: start, lt: end },
+    },
     _count: { _all: true },
   });
 
-  if (counts.length === 0) {
-    // Тихий день без агентской переписки в привязанных чатах — шлём
-    // первому из списка, чтобы сводка не потерялась молча.
-    return entries[0][1];
-  }
+  if (counts.length === 0) return fallback;
 
   const top = counts.reduce((best, row) =>
     row._count._all > best._count._all ? row : best
   );
-  return top.fromId != null ? Number(top.fromId) : entries[0][1];
+  return top.fromId != null ? Number(top.fromId) : fallback;
 }
