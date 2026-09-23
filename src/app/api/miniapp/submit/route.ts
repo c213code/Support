@@ -288,7 +288,8 @@ export async function POST(request: NextRequest) {
       groupName: group.name,
       authorName: user.name,
       telegramUserId: user.id,
-      details,
+      label,
+      values,
       photoFileIds,
     }).catch((err) => {
       console.warn(`[miniapp] обращение не ушло в группу: ${String(err).slice(0, 200)}`);

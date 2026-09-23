@@ -10,6 +10,14 @@ export function proxy(request: NextRequest) {
   }
 
   const loginUrl = new URL("/login", request.url);
+  // Запоминаем, куда шли: ссылка «Өтініш #…» из рабочей группы ведёт на
+  // конкретный тикет, и без этого после входа дежурный оказывался на
+  // главной, а тикет терялся. Только для страниц — у запроса к API
+  // возвращаться некуда.
+  const { pathname, search } = request.nextUrl;
+  if (!pathname.startsWith("/api/") && pathname !== "/") {
+    loginUrl.searchParams.set("next", `${pathname}${search}`);
+  }
   return NextResponse.redirect(loginUrl);
 }
 

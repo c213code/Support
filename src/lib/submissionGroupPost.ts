@@ -7,6 +7,13 @@ import {
   sendTelegramMessage,
 } from "@/lib/telegram";
 import { isSubmissionToGroupEnabled } from "@/lib/settings";
+import { ticketShortCode, ticketUrl } from "@/lib/miniapp";
+import {
+  describeFields,
+  displayValue,
+  fieldVisible,
+  type SubmissionLabel,
+} from "@/lib/submissionLabels";
 
 // Обращение из формы — в ту рабочую группу, которую куратор выбрал первым
 // экраном.
@@ -67,6 +74,96 @@ function restoreLinks(masked: string, urls: string[], asHtml: boolean): string {
     .replace(/\u0000\d*$/, "");
 }
 
+// Поле «что случилось»: если оно есть и отвечено, заголовок берётся из него —
+// «[ЖЖ] Жұпты ауыстыру керек» говорит больше, чем «ЖЖ бойынша мәселе».
+const KIND_FIELD_IDS = ["issueKind", "action"];
+const STATUS_LINE = "Өтініш тіркелді — кезекші қарайды";
+
+// Сообщение об обращении — в том виде, в каком его удобно читать дежурному.
+//
+// Раньше это была стена «подпись: значение» строкой на поле, и суть (слова
+// куратора) терялась среди служебных ответов. Теперь по образцу тикет-ботов:
+//
+//   Өтініш #4JQ9PW: [ЖЖ] Жұпты ауыстыру / алып тастау керек   ← ссылка на тикет
+//
+//   Курстан шыққан, бірақ жжға бөлініп кетіп тұр               ← слова куратора
+//
+//   Сабаққа сілтеме немесе ай-апта: 3-ай 2-апта                ← остальное коротко
+//   Оқушының аты немесе поштасы: meirzhanulbosyn@gmail.com
+//
+//   Кураторы: Ерғанат Жұмақанов · Өтініш тіркелді — кезекші қарайды
+//
+// «Өтініш #…» ведёт на сам тикет на сайте, а короткий номер ищется на доске.
+// Чистая функция — проверяется без Telegram.
+export function buildSubmissionPost(opts: {
+  issueId: string;
+  groupName: string;
+  authorName: string;
+  telegramUserId: bigint;
+  label: SubmissionLabel;
+  values: Record<string, string | string[]>;
+  live: boolean;
+  // Сколько видимых символов Telegram примет: 1024 у подписи к фото, 4096
+  // у сообщения.
+  limit: number;
+}): { html: string; plain: string } {
+  const { label, values } = opts;
+
+  const kindField = label.fields.find(
+    (f) => KIND_FIELD_IDS.includes(f.id) && fieldVisible(f, values)
+  );
+  const kindValue = kindField ? values[kindField.id] : undefined;
+  // «Басқа» в заголовке ничего не говорит — тогда остаётся название ярлыка.
+  const specific =
+    kindField && typeof kindValue === "string" && kindValue && kindValue !== "other"
+      ? displayValue(kindField, kindValue)
+      : null;
+  const title = specific ?? label.title;
+  const tag = specific ? (label.tag ?? label.title) : null;
+
+  const code = `Өтініш #${ticketShortCode(opts.issueId)}`;
+  const url = ticketUrl(opts.issueId);
+  const testLine = opts.live ? null : `🧪 ТЕСТ · ${opts.groupName}`;
+
+  const headPlain = `${code}: ${tag ? `[${tag}] ` : ""}${title}`;
+  const headHtml =
+    `${url ? `<a href="${escapeHtml(url)}">${code}</a>` : code}: ` +
+    `${tag ? `[${escapeHtml(tag)}] ` : ""}<b>${escapeHtml(title)}</b>`;
+
+  const footPlain = `Кураторы: ${opts.authorName} · ${STATUS_LINE}`;
+  const mention = `<a href="tg://user?id=${opts.telegramUserId}">${escapeHtml(opts.authorName)}</a>`;
+  const footHtml = `<i>Кураторы: ${mention} · ${STATUS_LINE}</i>`;
+
+  // Тело: слова куратора абзацем, под ними остальные ответы. Служебные поля
+  // (выбор «номер или почта») и уже вынесенные в заголовок — не повторяем.
+  const description = typeof values.description === "string" ? values.description.trim() : "";
+  const rest = describeFields(label, values)
+    .filter((f) => !f.service && f.id !== "description" && f.id !== kindField?.id)
+    .map((f) => `${f.label}: ${f.value}`);
+  const body = [description, rest.join("\n")].filter(Boolean).join("\n\n");
+
+  // Режем только тело и только до разметки (см. extractLinks). Слово-ссылка
+  // длиннее своего плейсхолдера, поэтому видимую длину проверяем уже после
+  // подстановки и при перелёте подрезаем ещё.
+  const frame = [testLine, headPlain, footPlain].filter(Boolean).join("\n\n").length + 8;
+  const { masked, urls } = extractLinks(body);
+  let room = Math.max(0, opts.limit - frame);
+  let cut = masked.slice(0, room);
+  while (room > 0 && restoreLinks(cut, urls, false).length > opts.limit - frame) {
+    room -= restoreLinks(cut, urls, false).length - (opts.limit - frame);
+    cut = masked.slice(0, Math.max(0, room));
+  }
+
+  const bodyPlain = restoreLinks(cut, urls, false).trim();
+  const bodyHtml = restoreLinks(escapeHtml(cut), urls, true).trim();
+
+  const html = [testLine && escapeHtml(testLine), headHtml, bodyHtml, footHtml]
+    .filter(Boolean)
+    .join("\n\n");
+  const plain = [testLine, headPlain, bodyPlain, footPlain].filter(Boolean).join("\n\n");
+  return { html, plain };
+}
+
 export async function postSubmissionToGroup(opts: {
   issueId: string;
   groupName: string;
@@ -75,7 +172,8 @@ export async function postSubmissionToGroup(opts: {
   // куратор получает уведомление, что его заявку видно в группе. Через
   // tg://user, а не @username — юзернейма у половины кураторов нет.
   telegramUserId: bigint;
-  details: string;
+  label: SubmissionLabel;
+  values: Record<string, string | string[]>;
   photoFileIds: string[];
 }): Promise<string | null> {
   const live = await isSubmissionToGroupEnabled();
@@ -97,25 +195,17 @@ export async function postSubmissionToGroup(opts: {
   const chatId = live ? preset!.chatId! : storageChatId;
   if (!chatId) return null;
 
-  // Подпись к фото у Telegram — 1024 символа, у сообщения — 4096. Режем
-  // сами поля ДО сборки html: обрезать готовую разметку нельзя, оборванный
-  // тег Telegram не примет вовсе.
   const withPhotos = opts.photoFileIds.length > 0;
-  const room = (withPhotos ? CAPTION_LIMIT : 4096) - opts.authorName.length - 40;
-  const { masked, urls } = extractLinks(opts.details);
-  const details = masked.slice(0, room);
-  const mention = `<a href="tg://user?id=${opts.telegramUserId}">${escapeHtml(opts.authorName)}</a>`;
-  // В тесте сразу видно, куда бы это ушло по-настоящему: без названия
-  // группы репетиция бессмысленна, проверяют как раз адресата.
-  const head = live
-    ? "📨 Жаңа өтініш"
-    : `🧪 ТЕСТ · ${escapeHtml(opts.groupName)} · Жаңа өтініш`;
-  const html = `${head} · ${mention}\n${restoreLinks(escapeHtml(details), urls, true)}`;
-  // То же самое без разметки — для записи о сообщении бота и для списка
-  // «удалить ответ», где разметка только мешает читать. Адрес и там не
-  // нужен: в списке важно узнать своё сообщение, а не прочитать ссылку.
-  const plainHead = live ? "📨 Жаңа өтініш" : `🧪 ТЕСТ · ${opts.groupName} · Жаңа өтініш`;
-  const plain = `${plainHead} · ${opts.authorName}\n${restoreLinks(details, urls, false)}`;
+  const { html, plain } = buildSubmissionPost({
+    issueId: opts.issueId,
+    groupName: opts.groupName,
+    authorName: opts.authorName,
+    telegramUserId: opts.telegramUserId,
+    label: opts.label,
+    values: opts.values,
+    live,
+    limit: withPhotos ? CAPTION_LIMIT : 4096,
+  });
 
   // С фото текст уходит подписью к альбому: отдельным сообщением он
   // оторвался бы от скриншотов, а в группе между ними успевает влезть

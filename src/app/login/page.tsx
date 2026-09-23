@@ -5,6 +5,17 @@ import { useRouter } from "next/navigation";
 import { AGENTS, SHARED_AGENT } from "@/lib/agents";
 import { Avatar } from "@/components/Avatar";
 
+// Куда вернуться после входа (прокси кладёт сюда ?next=). Только путь на
+// нашем же сайте: «//evil.com» и «https://…» браузер понял бы как чужой
+// адрес, и страница входа стала бы открытым редиректом.
+function safeNext(): string {
+  const next = new URLSearchParams(window.location.search).get("next");
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) {
+    return "/";
+  }
+  return next;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [agent, setAgent] = useState<string | null>(null);
@@ -35,7 +46,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace("/");
+    router.replace(safeNext());
     router.refresh();
   }
 

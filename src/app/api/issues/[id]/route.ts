@@ -10,6 +10,20 @@ import { cleanTicketDescription } from "@/lib/textClean";
 
 type Params = { params: Promise<{ id: string }> };
 
+// Один тикет — для ссылки «Өтініш #…» из рабочей группы (см. ?issue= в
+// Inbox.tsx). Доске для открытия нужны только день и id: карточку и форму она
+// дальше берёт из обычного списка за этот день.
+export async function GET(_request: NextRequest, { params }: Params) {
+  const { id } = await params;
+  const issue = await prisma.issue.findUnique({
+    where: { id },
+    select: { id: true, reportDate: true },
+  });
+  return issue
+    ? NextResponse.json({ issue })
+    : NextResponse.json({ issue: null }, { status: 404 });
+}
+
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { id } = await params;
   const body = await request.json().catch(() => null);

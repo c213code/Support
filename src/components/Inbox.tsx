@@ -669,11 +669,15 @@ export function Inbox() {
   const visibleIssues = useMemo(() => {
     const q = boardQuery.trim().toLowerCase();
     if (!q) return issues;
+    // «#4JQ9PW» — короткий номер из сообщения бота в группе (ticketShortCode):
+    // дежурный видит его там и набирает здесь.
+    const code = q.replace(/^#/, "");
     return issues.filter(
       (i) =>
         i.description.toLowerCase().includes(q) ||
         i.groupName.toLowerCase().includes(q) ||
-        (i.note ?? "").toLowerCase().includes(q)
+        (i.note ?? "").toLowerCase().includes(q) ||
+        (code.length >= 4 && i.id.toLowerCase().endsWith(code))
     );
   }, [issues, boardQuery]);
 
@@ -708,13 +712,40 @@ export function Inbox() {
   // дату на ту, где он реально лежит (доска показывает один день, а тикет
   // может быть из прошлого), открываем его форму и заодно помечаем на
   // доске, чтобы после закрытия было видно, где он лежит.
-  function focusIssue(issue: IssueDTO) {
+  // Нужны только день и id — поэтому и ссылка из группы, где у нас есть
+  // только они, открывает тикет той же функцией.
+  function focusIssue(issue: Pick<IssueDTO, "id" | "reportDate">) {
     setDate(issue.reportDate);
     setTab("board");
     setHighlightId(issue.id);
     setEditingIssueId(issue.id);
     setTimeout(() => setHighlightId(null), 2500);
   }
+
+  // Ссылка «Өтініш #…» из сообщения в рабочей группе ведёт сюда с
+  // ?issue=<id>: открываем именно этот тикет, в какой бы день он ни лежал.
+  // Параметр потом убираем из адреса — иначе обновление страницы открывало
+  // бы тот же тикет снова.
+  useEffect(() => {
+    const issueId = new URLSearchParams(window.location.search).get("issue");
+    if (!issueId) return;
+    let cancelled = false;
+    async function openLinkedIssue(id: string) {
+      const res = await fetch(`/api/issues/${encodeURIComponent(id)}`);
+      const data = res.ok ? await res.json().catch(() => null) : null;
+      if (cancelled) return;
+      window.history.replaceState(null, "", window.location.pathname);
+      if (data?.issue) focusIssue(data.issue as Pick<IssueDTO, "id" | "reportDate">);
+      else toast("Тикет не найден — возможно, его удалили", "error");
+    }
+    const t = setTimeout(() => openLinkedIssue(issueId), 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // focusIssue и toast стабильны по смыслу; ссылку разбираем один раз.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Вставили ссылку на Telegram-сообщение в поиск по доске — ищем тикет,
   // с которого она завелась, глобально по всем датам (не только текущей),

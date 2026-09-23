@@ -73,6 +73,11 @@ export type SubmissionLabel = {
   title: string;
   // Одна строка под заголовком в развёрнутом виде: когда выбирать этот ярлык.
   hint?: string;
+  // Короткая метка в квадратных скобках перед заголовком сообщения в группе
+  // («[ЖЖ] Жұпты ауыстыру керек»). Нужна только ярлыкам, у которых заголовок
+  // берётся из ответа на «Не болды?»: без метки было бы непонятно, про что
+  // этот ответ. Остальным хватает собственного названия.
+  tag?: string;
   fields: LabelField[];
 };
 
@@ -624,6 +629,7 @@ const SERVICE: SubmissionLabel[] = [
     id: "parent-link",
     emoji: "👨‍👩‍👦",
     title: "АА мен оқушы байланысы",
+    tag: "АА",
     hint: "Ата-ана мен оқушы арасындағы байланыс",
     fields: [
       {
@@ -716,6 +722,7 @@ const PRODUCT: SubmissionLabel[] = [
     id: "zhzh",
     emoji: "👥",
     title: "ЖЖ (жұптық жұмыс) бойынша мәселе",
+    tag: "ЖЖ",
     hint: "Жұп көрінбейді, тест ашылмайды, жұпты ауыстыру керек",
     fields: [
       {
@@ -778,6 +785,7 @@ const PRODUCT: SubmissionLabel[] = [
     id: "unt-dt",
     emoji: "🎓",
     title: "ҰБТ / ДТ бойынша мәселе",
+    tag: "ҰБТ / ДТ",
     hint: "Нәтиже шықпады, қайта тапсыру керек",
     fields: [
       {
@@ -918,8 +926,8 @@ export function buildSummary(
 export function describeFields(
   label: SubmissionLabel,
   values: Record<string, string | string[]>
-): Array<{ label: string; value: string; service: boolean }> {
-  const out: Array<{ label: string; value: string; service: boolean }> = [];
+): Array<{ id: string; label: string; value: string; service: boolean }> {
+  const out: Array<{ id: string; label: string; value: string; service: boolean }> = [];
   for (const field of label.fields) {
     if (field.type === "photos") continue;
     if (!fieldVisible(field, values)) continue;
@@ -927,7 +935,7 @@ export function describeFields(
     if (raw === undefined) continue;
     const text = displayValue(field, raw).trim();
     if (!text) continue;
-    out.push({ label: field.label, value: text, service: Boolean(field.service) });
+    out.push({ id: field.id, label: field.label, value: text, service: Boolean(field.service) });
   }
   return out;
 }

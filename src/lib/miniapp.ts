@@ -26,6 +26,12 @@ export function submissionFormEnabled(): boolean {
 // Поэтому неверный адрес ловим здесь и пишем в лог ошибкой, а не надеемся на
 // Telegram. Вызывается только при включённой форме.
 export function miniAppUrl(): string | null {
+  return appUrl("/miniapp");
+}
+
+// Адрес страницы нашего сайта — той же базы, что и у мини-аппа. Нужен и
+// ссылке «Өтініш #…» в рабочей группе: она ведёт дежурного прямо на тикет.
+export function appUrl(path: string): string | null {
   const override = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
   const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL;
   const base = override || (vercel ? `https://${vercel}` : null);
@@ -36,13 +42,25 @@ export function miniAppUrl(): string | null {
     return null;
   }
   try {
-    const url = new URL(`${base}/miniapp`);
+    const url = new URL(`${base}${path}`);
     if (url.protocol !== "https:") throw new Error("не https");
     return url.toString();
   } catch {
     console.error(`[miniapp] неверный адрес мини-аппа "${base}" — нужен полный адрес с https://`);
     return null;
   }
+}
+
+// Ссылка на конкретный тикет на доске (см. разбор ?issue= в Inbox.tsx).
+export function ticketUrl(issueId: string): string | null {
+  return appUrl(`/inbox?issue=${encodeURIComponent(issueId)}`);
+}
+
+// Короткий номер тикета для людей. У тикета нет порядкового номера, а cuid
+// в 25 символов в заголовке сообщения не прочитать; хвост из шести знаков
+// уникален на практике и стабилен — по нему же тикет ищется на доске.
+export function ticketShortCode(issueId: string): string {
+  return issueId.slice(-6).toUpperCase();
 }
 
 // Подпись кнопки меню бота. Коротко: Telegram показывает её в узкой кнопке
