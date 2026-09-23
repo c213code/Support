@@ -58,6 +58,17 @@ export async function resolveAgentTarget(params: {
     // Ответ на своё же сообщение ведёт к тикету, который оно обсуждало.
     const target = replied?.usedForIssueId ?? replied?.agentIssueId ?? null;
     if (target) return { kind: "found", issueId: target, reason: "reply" };
+
+    // Ответ на сообщение самого бота. Их нет в TelegramMessage — Telegram не
+    // присылает боту его же сообщения, — но BotReply помнит, к какому тикету
+    // каждое. Так устроен весь тикет из формы: в группе он и есть пост бота
+    // «Өтініш #…», и дежурный отвечает стрелкой именно на него. Раньше такой
+    // ответ ни к чему не привязывался, и «Как решили?» его не видела.
+    const botPost = await prisma.botReply.findUnique({
+      where: { chatId_messageId: { chatId, messageId: replyToMessageId } },
+      select: { issueId: true },
+    });
+    if (botPost) return { kind: "found", issueId: botPost.issueId, reason: "reply" };
   }
 
   const since = new Date(sentAt.getTime() - WINDOW_MINUTES * 60 * 1000);

@@ -167,14 +167,28 @@ export async function collectResolutionContext(
     select: { chatId: true, messageId: true, fromId: true, receivedAt: true },
     orderBy: { receivedAt: "asc" },
   });
-  if (issueMessages.length === 0) {
+  // Тикет из формы входящих сообщений не имеет вовсе: в группе он — пост
+  // бота «Өтініш #…» (BotReply), и дежурный отвечает стрелкой на него.
+  // Раньше здесь сразу сдавались с «к тикету не привязано сообщение из
+  // чата», хотя ответ в чате был. Теперь опорой служит сам пост: из него
+  // чат и время, а ответ на него находит цепочка ответов ниже (ownerOf).
+  let anchor: { chatId: string; at: Date } | null = issueMessages[0]
+    ? { chatId: issueMessages[0].chatId, at: issueMessages[0].receivedAt }
+    : null;
+  if (!anchor) {
+    const post = await prisma.botReply.findFirst({
+      where: { issueId, deleted: false },
+      orderBy: { sentAt: "asc" },
+      select: { chatId: true, sentAt: true },
+    });
+    if (post) anchor = { chatId: post.chatId, at: post.sentAt };
+  }
+  if (!anchor) {
     return { ok: false, reason: "no-issue-messages" };
   }
 
-  const chatId = issueMessages[0].chatId;
-  const since = new Date(
-    issueMessages[0].receivedAt.getTime() - 60 * 60 * 1000
-  );
+  const chatId = anchor.chatId;
+  const since = new Date(anchor.at.getTime() - 60 * 60 * 1000);
   const until = new Date(since.getTime() + LOOKBACK_HOURS * 60 * 60 * 1000);
   const issueMessageIds = new Set(issueMessages.map((m) => m.messageId));
   // Кто написал обращение. Ответ агента на ЛЮБОЕ сообщение этого человека —
