@@ -1,29 +1,29 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { createSessionToken, SESSION_COOKIE_NAME, verifyAgentPassword } from "@/lib/auth";
-import { resolveAgentLogin, SHARED_AGENT } from "@/lib/agents";
+import { createSessionToken, findAgentByPassword, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { SHARED_AGENT } from "@/lib/agents";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
-  // Логин набирают руками — приводим его к имени агента здесь же, а не на
-  // странице: правило одно и живёт на сервере.
-  const agent = resolveAgentLogin(String(body?.agent ?? "")) ?? undefined;
-  const password = body?.password as string | undefined;
-  const displayName = (body?.displayName as string | undefined)?.trim();
+  // Логин — просто имя человека, доступ решает пароль (см.
+  // findAgentByPassword): у Ероша и Алпы он свой, у сменных — общий пароль
+  // «Дежурного», и тогда введённое имя становится автором в репорте.
+  const name = String(body?.name ?? "").trim().slice(0, 40);
+  const password = typeof body?.password === "string" ? body.password : "";
 
-  if (!agent || !password || !verifyAgentPassword(agent, password)) {
-    return NextResponse.json({ error: "Неверный логин или пароль" }, { status: 401 });
+  if (!name) {
+    return NextResponse.json({ error: "Введите своё имя" }, { status: 400 });
   }
-
-  // Под общим аккаунтом обязательно указать своё имя — оно станет автором.
-  if (agent === SHARED_AGENT && !displayName) {
-    return NextResponse.json({ error: "Укажите своё имя" }, { status: 400 });
+  const agent = findAgentByPassword(password);
+  if (!agent) {
+    return NextResponse.json({ error: "Неверный пароль" }, { status: 401 });
   }
 
   const response = NextResponse.json({ ok: true, agent });
   response.cookies.set(
     SESSION_COOKIE_NAME,
-    createSessionToken(agent, displayName),
+    // Имя из поля нужно только общему аккаунту: у именного автор — он сам.
+    createSessionToken(agent, agent === SHARED_AGENT ? name : undefined),
     {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

@@ -34,14 +34,23 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf);
 }
 
-export function verifyAgentPassword(
-  agent: string,
-  password: string
-): agent is Agent {
-  if (!AGENTS.includes(agent as Agent)) return false;
-  const expected = AGENT_PASSWORDS[agent as Agent];
-  if (!expected || !password) return false;
-  return timingSafeStringEqual(password, expected);
+// Чей это пароль. Логином на странице входа теперь служит просто имя
+// человека, так что аккаунт выбирает пароль: у Ероша и Алпы он свой, у
+// сменных — общий пароль «Дежурного».
+//
+// Сравниваем со всеми паролями, не выходя на первом совпадении: время
+// ответа не должно подсказывать, какой по счёту пароль угадан. Именные
+// аккаунты стоят в AGENTS раньше общего, поэтому при совпадении паролей
+// (так быть не должно) выигрывает именной.
+export function findAgentByPassword(password: string): Agent | null {
+  if (!password) return null;
+  let found: Agent | null = null;
+  for (const agent of AGENTS) {
+    const expected = AGENT_PASSWORDS[agent];
+    const match = Boolean(expected) && timingSafeStringEqual(password, expected!);
+    if (match && found === null) found = agent;
+  }
+  return found;
 }
 
 function sign(value: string): string {

@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { resolveAgentLogin, SHARED_AGENT } from "@/lib/agents";
 import { IconEye, IconEyeOff, IconLock, IconUser } from "@/components/Icons";
 
 // Куда вернуться после входа (прокси кладёт сюда ?next=). Только путь на
@@ -16,29 +15,26 @@ function safeNext(): string {
   return next;
 }
 
-// Вход — обычная пара «логин и пароль», где логин — это имя агента.
+// Вход — имя и пароль. Имя — просто как человека зовут, доступ решает
+// только пароль (см. findAgentByPassword): у Ероша и Алпы он свой, у сменных
+// — общий пароль «Дежурного», и тогда введённое имя уходит автором в репорт
+// («Тикош шешті»).
 //
-// Раньше сначала выбирали аватар, потом вводили пароль. Это выглядело как
-// витрина всех, у кого есть доступ, и ломало менеджеры паролей: поля логина
-// не было, и сохранить пароль «к Ерошу» браузер не мог. Теперь логин
-// набирается руками (регистр не важен, см. resolveAgentLogin), а имя общего
-// аккаунта «Дежурный» открывает ещё одно поле — своё имя, которое уйдёт
-// автором в репорт.
+// Раньше сначала выбирали аватар, потом (для общего аккаунта) отдельно
+// вводили имя. Теперь поле одно на всех, и сменному не нужно знать, что он
+// входит «под Дежурным».
 //
 // «Забыли пароль?» намеренно нет: пароли живут в переменных окружения, и
 // сбросить их со страницы нечем — ссылка вела бы в никуда.
 export default function LoginPage() {
   const router = useRouter();
-  const [login, setLogin] = useState("");
+  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const isShared = resolveAgentLogin(login) === SHARED_AGENT;
-  const canSubmit =
-    !loading && login.trim() !== "" && password !== "" && (!isShared || displayName.trim() !== "");
+  const canSubmit = !loading && name.trim() !== "" && password !== "";
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -49,11 +45,7 @@ export default function LoginPage() {
     const res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agent: login,
-        password,
-        displayName: isShared ? displayName : undefined,
-      }),
+      body: JSON.stringify({ name, password }),
     });
 
     setLoading(false);
@@ -86,12 +78,12 @@ export default function LoginPage() {
           className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl shadow-brand-900/5 ring-1 ring-slate-200/70"
         >
           <h1 className="text-2xl font-bold text-slate-900">Вход</h1>
-          <p className="mt-1 text-sm text-slate-500">Введите логин и пароль</p>
+          <p className="mt-1 text-sm text-slate-500">Введите своё имя и пароль</p>
 
           <div className="mt-6 space-y-4">
             <div>
               <label htmlFor="login" className="mb-1.5 block text-sm font-medium text-slate-700">
-                Логин
+                Имя
               </label>
               <div className="relative">
                 <IconUser className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -101,41 +93,16 @@ export default function LoginPage() {
                   type="text"
                   autoComplete="username"
                   autoFocus
-                  value={login}
+                  value={name}
                   onChange={(e) => {
-                    setLogin(e.target.value);
+                    setName(e.target.value);
                     setError(null);
                   }}
-                  placeholder="Ваше имя, например Ерош"
+                  placeholder="Например: Тикош"
                   className={inputClass}
                 />
               </div>
             </div>
-
-            {isShared && (
-              <div>
-                <label
-                  htmlFor="display-name"
-                  className="mb-1.5 block text-sm font-medium text-slate-700"
-                >
-                  Как вас зовут
-                </label>
-                <div className="relative">
-                  <IconUser className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    id="display-name"
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="Например: Тикош"
-                    className={inputClass}
-                  />
-                </div>
-                <p className="mt-1.5 text-xs text-slate-500">
-                  Общий аккаунт: это имя будет автором в репорте («Тикош шешті»)
-                </p>
-              </div>
-            )}
 
             <div>
               <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">
