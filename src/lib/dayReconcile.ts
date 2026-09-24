@@ -1,4 +1,5 @@
 import { callGroqChat, GROQ_MODEL } from "@/lib/ai";
+import { maskSensitiveForAi } from "@/lib/textClean";
 
 // Вечерний разбор: чем закончился каждый открытый тикет дня — по переписке в
 // рабочем чате, а не по тому, успел ли дежурный передвинуть карточку.
@@ -60,19 +61,40 @@ evidence — дословная короткая цитата из реплик 
 
 Ответ — только JSON с полями status, note, evidence.`;
 
+// Реплики агентов приходят уже замаскированными (collectResolutionContext), а
+// описание — нет: у тикетов из формы и заведённых руками в нём бывает почта
+// ученика. Без маски модель повторяет её в ответе, и почта оседает в журнале.
 function buildUserText(description: string, agentTexts: string[]): string {
+  description = maskSensitiveForAi(description);
   const replies = agentTexts.map((text, i) => `${i + 1}. ${text}`).join("\n");
   return `Обращение: ${description}\n\nРеплики агентов по порядку:\n${replies}`;
 }
 
-// Ответ модели — только если он целиком по схеме: иначе вечерний разбор
-// показал бы дежурному статус, которого не бывает.
+// Последний {…} в тексте. DeepSeek изредка пишет в ответ свои размышления
+// («We need answer JSON…»), а сам JSON — в конце.
+export function lastJsonObject(raw: string): unknown {
+  const end = raw.lastIndexOf("}");
+  if (end < 0) return null;
+  // lastIndexOf с отрицательным fromIndex ищет с нуля, а не «нигде», —
+  // поэтому после нулевой позиции выходим сами, иначе цикл не кончится.
+  for (let start = raw.lastIndexOf("{", end); start >= 0; start = start > 0 ? raw.lastIndexOf("{", start - 1) : -1) {
+    try {
+      return JSON.parse(raw.slice(start, end + 1));
+    } catch {
+      // Не с той скобки — пробуем раньше.
+    }
+  }
+  return null;
+}
+
+// Ответ модели — только если он по схеме: иначе вечерний разбор показал бы
+// дежурному статус, которого не бывает.
 function parseVerdict(raw: string): ReconcileVerdict | null {
   let data: unknown;
   try {
     data = JSON.parse(raw);
   } catch {
-    return null;
+    data = lastJsonObject(raw);
   }
   if (typeof data !== "object" || data === null) return null;
   const { status, note, evidence } = data as Record<string, unknown>;

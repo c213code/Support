@@ -94,11 +94,11 @@ export async function stepRun(runId: string, batch = 3): Promise<{ remaining: nu
     }
 
     let result = await reconcileIssue(provider, verdict.issue.description, context.context.agentTexts);
-    // Сетевой сбой и «модель перегружена» (503) проходят за секунды — один
-    // повтор (на прогоне по прошлым дням Groq ронял так ~6% запросов).
-    // Исчерпанную квоту Gemini (429) повтор не спасёт: такой тикет честно
-    // помечается ошибкой, и его можно разобрать заново позже.
-    if (!result.ok && /^(500|503)|UNAVAILABLE|high demand|overloaded|сеть/i.test(result.error)) {
+    // Сетевой сбой, «модель перегружена» (503) и пустой ответ проходят за
+    // секунды — один повтор (на прогонах по прошлым дням так падало 2–14%
+    // запросов, у GLM чаще всего). Исчерпанную квоту (429) повтор не спасёт:
+    // такой тикет честно помечается ошибкой, его можно разобрать заново позже.
+    if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
       result = await reconcileIssue(provider, verdict.issue.description, context.context.agentTexts);
     }
