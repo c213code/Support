@@ -13,6 +13,7 @@
 import { writeFileSync } from "node:fs";
 import { prisma } from "@/lib/prisma";
 import { collectResolutionContext } from "@/lib/resolutionNote";
+import { GROQ_MODEL } from "@/lib/ai";
 import {
   reconcileIssue,
   type ReconcileProvider,
@@ -100,7 +101,7 @@ function stableKey(id: string): number {
   const report: Record<string, unknown[]> = {};
   const summary: string[] = [];
   for (const provider of PROVIDERS) {
-    const name = provider.kind === "groq" ? "groq (gpt-oss-120b)" : provider.model;
+    const name = provider.kind === "groq" ? `groq (${GROQ_MODEL})` : provider.model;
     const rows: Array<{ id: string; truth: string; got: string | null; note: string; evidence: string; agentNote: string | null; error?: string; ms: number; inTok: number; outTok: number }> = [];
     for (const [index, issue] of sample.entries()) {
       const result = await withRetry(() => reconcileIssue(provider, issue.description, issue.agentTexts));
