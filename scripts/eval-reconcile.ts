@@ -31,6 +31,10 @@ const TO = arg("to", "2026-09-15");
 const LIMIT = Number(arg("limit", "60"));
 const DELAY_MS = Number(arg("delay", "4000"));
 const OUT = arg("out", "");
+// --set=dev — другая, не пересекающаяся выборка того же размера: на ней
+// подбирают промпт, а итог проверяют на обычной (test). Иначе правила
+// подгоняются под те самые тикеты, по которым их потом оценивают.
+const SET = arg("set", "test");
 const PROVIDERS: ReconcileProvider[] = arg("models", "gemini:gemini-3.8-flash,groq")
   .split(",")
   .map((spec) => {
@@ -57,7 +61,7 @@ async function withRetry(call: () => Promise<ReconcileResult>): Promise<Reconcil
   }
   // Как в проде (stepRun): любой сбой, кроме квоты, — ещё один повтор.
   if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
-    await sleep(3000);
+    await sleep(15_000);
     result = await call();
   }
   return result;
@@ -101,10 +105,15 @@ function stableKey(id: string): number {
   const resolved = withContext.filter((i) => i.status === "RESOLVED").sort((a, b) => stableKey(a.id) - stableKey(b.id));
   const open = withContext.filter((i) => i.status !== "RESOLVED").sort((a, b) => stableKey(a.id) - stableKey(b.id));
   const half = Math.floor(LIMIT / 2);
-  const sample = [...resolved.slice(0, half), ...open.slice(0, LIMIT - Math.min(half, resolved.length))];
+  const skipResolved = SET === "dev" ? half : 0;
+  const skipOpen = SET === "dev" ? LIMIT - half : 0;
+  const sample = [
+    ...resolved.slice(skipResolved, skipResolved + half),
+    ...open.slice(skipOpen, skipOpen + LIMIT - half),
+  ];
   console.log(
     `тикетов ${FROM}…${TO}: ${issues.length}, с точно привязанной перепиской: ${withContext.length} ` +
-      `(решено ${resolved.length}, открыто ${open.length}); в прогоне: ${sample.length}\n`
+      `(решено ${resolved.length}, открыто ${open.length}); в прогоне: ${sample.length} (${SET})\n`
   );
 
   const report: Record<string, unknown[]> = {};

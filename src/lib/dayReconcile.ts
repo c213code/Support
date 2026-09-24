@@ -1,5 +1,6 @@
 import { callGroqChat, GROQ_MODEL } from "@/lib/ai";
 import { maskSensitiveForAi } from "@/lib/textClean";
+import { buildReconcileMessages, reasoningParams, RECONCILE_RULES } from "@/lib/reconcilePrompt";
 
 // Вечерний разбор: чем закончился каждый открытый тикет дня — по переписке в
 // рабочем чате, а не по тому, успел ли дежурный передвинуть карточку.
@@ -42,24 +43,7 @@ export type ReconcileResult =
 
 export type ReconcileProvider = { kind: "gemini" | "groq" | "openrouter"; model: string };
 
-// Правила «сделано / в работе / ждём» — те же, на которых держится подсказка
-// «Как решили?» (RESOLUTION_NOTE_SYSTEM_PROMPT в ai.ts), только с выбором
-// статуса. Слово «JSON» в тексте обязательно: без него Groq отклоняет
-// json_object целиком.
-const RECONCILE_PROMPT = `Ты помогаешь дежурному поддержки онлайн-школы JUZ40 закрыть рабочий день. Тебе дают обращение и реплики наших агентов в рабочем чате по нему, по порядку. Почты, телефоны и пароли замаскированы (<почта>, <телефон>, <скрыто>). Реши, в каком состоянии обращение сейчас, и ответь JSON.
-
-status — одно из:
-- RESOLVED — по репликам видно, что проблему решили: действие в прошедшем времени ("ауыстырылды", "өшірілді", "ашылды", "жөнделді", "берілді", "жасалды", "дайын", "готово", "сделал"); агент дал недостающее — правильные данные для входа, ссылку, объяснение, как сделать; агент исправил и просит проверить ("кіріп көріңізші", "тексеріп көресіз бе", "проверьте").
-- IN_PROGRESS — взяли в работу, но результата в репликах нет ("қарап жатырмыз", "тексеремін", "қазір", "смотрим").
-- PENDING — ждём данных или ответа от куратора или ученика: агент попросил почту, скрин, уточнение, и дальше ничего.
-- ESCALATED — передали другой команде: бэкенд, мобайл, разработчики, методисты.
-- UNCLEAR — по репликам не понять: только вложения, реплики о другом, противоречие.
-Смотри прежде всего на ПОСЛЕДНИЕ реплики — чем закончился разговор. Намерение ("ауыстырамын", "қарап беремін") — это ещё не результат. Ничего не придумывай.
-
-note — строка для отчёта руководству, 2-7 слов: что сделали (у RESOLVED) или что происходит. На языке реплик агента: казахский — строго по-казахски, без русских слов. Без имени агента и без слова "шешті".
-evidence — дословная короткая цитата из реплик агента (до 100 символов), на которой основан вывод; для UNCLEAR — пустая строка.
-
-Ответ — только JSON с полями status, note, evidence.`;
+// Сами правила и подача под каждую модель — в lib/reconcilePrompt.ts.
 
 // Реплики агентов приходят уже замаскированными (collectResolutionContext), а
 // описание — нет: у тикетов из формы и заведённых руками в нём бывает почта
@@ -124,7 +108,7 @@ async function askGemini(model: string, userText: string): Promise<ReconcileResu
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: RECONCILE_PROMPT }] },
+        systemInstruction: { parts: [{ text: RECONCILE_RULES }] },
         contents: [{ role: "user", parts: [{ text: userText }] }],
         generationConfig: {
           // Схема ответа — на стороне API: невалидного JSON не придёт.
@@ -180,14 +164,14 @@ async function askGroq(userText: string): Promise<ReconcileResult> {
   const data = (await callGroqChat(
     {
       model: GROQ_MODEL,
-      messages: [
-        { role: "system", content: RECONCILE_PROMPT },
-        { role: "user", content: userText },
-      ],
+      messages: buildReconcileMessages(GROQ_MODEL, userText),
+      ...reasoningParams("groq", GROQ_MODEL),
       response_format: { type: "json_object" },
       // Модель reasoning-типа: маленький лимит съедают размышления, и ответ
-      // приходит пустым (см. грабли в CLAUDE.md).
-      max_tokens: 2000,
+      // приходит пустым (см. грабли в CLAUDE.md). С reasoning_effort high
+      // размышления бывают длиннее 2000 токенов — Groq тогда отвечает
+      // json_validate_failed с пустым ответом (так падало 15 тикетов из 50).
+      max_tokens: 4000,
     },
     30_000
   )) as {
@@ -223,10 +207,8 @@ async function askOpenRouter(model: string, userText: string): Promise<Reconcile
     signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
     body: JSON.stringify({
       model,
-      messages: [
-        { role: "system", content: RECONCILE_PROMPT },
-        { role: "user", content: userText },
-      ],
+      messages: buildReconcileMessages(model, userText),
+      ...reasoningParams("openrouter", model),
       response_format: { type: "json_object" },
       // Почти все свежие модели — reasoning-типа: лимит с запасом на размышления.
       max_tokens: 4000,

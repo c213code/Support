@@ -64,6 +64,50 @@ const SKIP_REASON: Record<"no-agent-ids" | "no-issue-messages" | "no-agent-messa
   "no-agent-messages": "в чате по нему никто из агентов не отвечал",
 };
 
+type PendingVerdict = { id: string; issueId: string; issue: { description: string } };
+
+// Суждение по одному тикету запуска — пишет результат в его строку журнала.
+async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider): Promise<void> {
+  const context = await collectResolutionContext(verdict.issueId);
+  // Судим только по точно привязанным репликам: найденные догадкой по окну
+  // времени могут быть о соседнем тикете, а ошибка тут уходит в репорт.
+  if (!context.ok || !context.context.exact) {
+    await prisma.reconcileVerdict.update({
+      where: { id: verdict.id },
+      data: {
+        state: "skipped",
+        proposed: "UNCLEAR",
+        error: context.ok ? "переписка найдена только догадкой — судить рискованно" : SKIP_REASON[context.reason],
+      },
+    });
+    return;
+  }
+
+  let result = await reconcileIssue(provider, verdict.issue.description, context.context.agentTexts);
+  // Сетевой сбой, «модель перегружена» (503), пустой ответ и минутный лимит
+  // Groq проходят сами — один повтор (на прогонах по прошлым дням так падало
+  // 2–14% запросов). Groq считает лимит поминутно (8000 токенов на ключ,
+  // с рассуждениями high это 3 тикета) — ему пауза 15 секунд; у остальных
+  // сбой случайный, хватит 3. Исчерпанную дневную квоту Gemini повтор не
+  // спасёт: такой тикет помечается ошибкой, его можно разобрать заново позже.
+  if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
+    await new Promise((resolve) => setTimeout(resolve, provider.kind === "groq" ? 15_000 : 3000));
+    result = await reconcileIssue(provider, verdict.issue.description, context.context.agentTexts);
+  }
+  await prisma.reconcileVerdict.update({
+    where: { id: verdict.id },
+    data: result.ok
+      ? {
+          state: "done",
+          proposed: result.verdict.status,
+          note: result.verdict.note,
+          evidence: result.verdict.evidence,
+          resolver: resolverName(context.context),
+        }
+      : { state: "error", error: result.error.slice(0, 300) },
+  });
+}
+
 // Разобрать следующие несколько тикетов запуска.
 export async function stepRun(runId: string, batch = 3): Promise<{ remaining: number }> {
   const run = await prisma.reconcileRun.findUnique({ where: { id: runId }, select: { id: true } });
@@ -77,44 +121,10 @@ export async function stepRun(runId: string, batch = 3): Promise<{ remaining: nu
   });
   const provider = reconcileProvider();
 
-  for (const verdict of pending) {
-    const context = await collectResolutionContext(verdict.issueId);
-    // Судим только по точно привязанным репликам: найденные догадкой по окну
-    // времени могут быть о соседнем тикете, а ошибка тут уходит в репорт.
-    if (!context.ok || !context.context.exact) {
-      await prisma.reconcileVerdict.update({
-        where: { id: verdict.id },
-        data: {
-          state: "skipped",
-          proposed: "UNCLEAR",
-          error: context.ok ? "переписка найдена только догадкой — судить рискованно" : SKIP_REASON[context.reason],
-        },
-      });
-      continue;
-    }
-
-    let result = await reconcileIssue(provider, verdict.issue.description, context.context.agentTexts);
-    // Сетевой сбой, «модель перегружена» (503) и пустой ответ проходят за
-    // секунды — один повтор (на прогонах по прошлым дням так падало 2–14%
-    // запросов, у GLM чаще всего). Исчерпанную квоту (429) повтор не спасёт:
-    // такой тикет честно помечается ошибкой, его можно разобрать заново позже.
-    if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      result = await reconcileIssue(provider, verdict.issue.description, context.context.agentTexts);
-    }
-    await prisma.reconcileVerdict.update({
-      where: { id: verdict.id },
-      data: result.ok
-        ? {
-            state: "done",
-            proposed: result.verdict.status,
-            note: result.verdict.note,
-            evidence: result.verdict.evidence,
-            resolver: resolverName(context.context),
-          }
-        : { state: "error", error: result.error.slice(0, 300) },
-    });
-  }
+  // Тикеты шага — одновременно: модель отвечает по 1–6 секунд, и по очереди
+  // вечер в 40 тикетов ждал бы минуты. Три параллельных запроса Groq
+  // укладываются в его минутный лимит, а упёршийся ключ сменяет следующий.
+  await Promise.all(pending.map((verdict) => judgeVerdict(verdict, provider)));
 
   const remaining = await prisma.reconcileVerdict.count({ where: { runId, state: "pending" } });
   if (remaining === 0) {

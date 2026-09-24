@@ -3,8 +3,9 @@ import type { NextRequest } from "next/server";
 import { getCurrentIdentity } from "@/lib/auth";
 import { stepRun } from "@/lib/reconcileRun";
 
-// Модели отвечают по 3–8 секунд на тикет, с повтором при перегрузке — дольше.
-export const maxDuration = 120;
+// Шаг — 3 тикета. Модели отвечают по 3–8 секунд, но в худшем случае тикет —
+// это таймаут 30 с, пауза 15 с и повтор ещё 30 с: 3 × 75 = 225 секунд.
+export const maxDuration = 300;
 
 type Params = { params: Promise<{ runId: string }> };
 
