@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { collectResolutionContext, type ThreadLine } from "@/lib/resolutionNote";
 import { GROQ_MODEL } from "@/lib/ai";
 import {
+  buildUserText,
   reconcileIssue,
   type ReconcileProvider,
   type ReconcileResult,
@@ -120,7 +121,7 @@ function stableKey(id: string): number {
   const summary: string[] = [];
   for (const provider of PROVIDERS) {
     const name = provider.kind === "groq" ? `groq (${GROQ_MODEL})` : provider.model;
-    const rows: Array<{ id: string; truth: string; got: string | null; note: string; evidence: string; agentNote: string | null; error?: string; ms: number; inTok: number; outTok: number; cost: number }> = [];
+    const rows: Array<{ id: string; truth: string; got: string | null; note: string; evidence: string; reason: string; input: string; agentNote: string | null; error?: string; ms: number; inTok: number; outTok: number; cost: number }> = [];
     for (const [index, issue] of sample.entries()) {
       const result = await withRetry(() => reconcileIssue(provider, issue.description, issue.thread));
       rows.push({
@@ -129,6 +130,8 @@ function stableKey(id: string): number {
         got: result.ok ? result.verdict.status : null,
         note: result.ok ? result.verdict.note : "",
         evidence: result.ok ? result.verdict.evidence : "",
+        reason: result.ok ? result.verdict.reason : "",
+        input: buildUserText(issue.description, issue.thread),
         agentNote: issue.note,
         error: result.ok ? undefined : result.error,
         ms: result.ms,
@@ -180,6 +183,15 @@ function stableKey(id: string): number {
     }
     const errors = rows.filter((r) => r.error).slice(0, 3);
     for (const r of errors) console.log(`  ошибка: ${r.error}`);
+
+    // --misses: все расхождения с эталоном целиком — что видела модель, что
+    // ответила и почему. По ним и правится промпт (на --set=dev).
+    if (process.argv.includes("--misses")) {
+      console.log(`\n── ${name}: расхождения с эталоном ──`);
+      for (const r of answered.filter((x) => truthResolved(x) !== saidResolved(x))) {
+        console.log(`\n[эталон ${r.truth} → модель ${r.got}] ${r.note}\n  почему: ${r.reason}\n${r.input.replace(/^/gm, "  | ")}`);
+      }
+    }
   }
 
   console.log("\n════════ итог ════════");
