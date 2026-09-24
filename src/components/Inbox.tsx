@@ -10,6 +10,7 @@ import { GlossaryPanel } from "@/components/GlossaryPanel";
 import { GroqStatusPanel } from "@/components/GroqStatusPanel";
 import { ResolveDialog } from "@/components/ResolveDialog";
 import { AutoReportDialog } from "@/components/AutoReportDialog";
+import { useAutoReportRun } from "@/components/useAutoReportRun";
 import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
 import { AttachToIssuePicker } from "@/components/AttachToIssuePicker";
 import { Modal } from "@/components/Modal";
@@ -99,6 +100,13 @@ export function Inbox() {
   const [resolvingIssueId, setResolvingIssueId] = useState<string | null>(null);
   // Окно «Авто-репорт» (см. AutoReportDialog): ИИ разбирает переписку дня.
   const [autoReportOpen, setAutoReportOpen] = useState(false);
+  // Ход разбора — здесь, а не в окне: окно можно закрыть, разбор идёт.
+  const autoReport = useAutoReportRun();
+  const autoRunning = Boolean(
+    autoReport.run && !autoReport.run.finishedAt && !autoReport.run.failed
+  );
+  // «✓ готово» на кнопке — пока результат не открыли.
+  const [seenRunId, setSeenRunId] = useState<string | null>(null);
   const [escalatingIssueId, setEscalatingIssueId] = useState<string | null>(
     null
   );
@@ -1138,11 +1146,31 @@ export function Inbox() {
                 Новый тикет
               </button>
               <button
-                onClick={() => setAutoReportOpen(true)}
+                onClick={() => {
+                  setAutoReportOpen(true);
+                  if (autoReport.run?.finishedAt) setSeenRunId(autoReport.run.runId);
+                }}
                 title="ИИ читает переписку по открытым тикетам дня и предлагает статусы и заметки для репорта"
-                className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+                className="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700"
               >
                 🤖 Авто-репорт
+                {autoRunning && autoReport.run && (
+                  <span className="flex items-center gap-1 rounded-full bg-brand-50 px-1.5 py-0.5 tabular-nums text-brand-700">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75 motion-safe:animate-ping" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-600" />
+                    </span>
+                    {autoReport.run.done}/{autoReport.run.total}
+                  </span>
+                )}
+                {!autoRunning &&
+                  !autoReportOpen &&
+                  autoReport.run?.finishedAt &&
+                  seenRunId !== autoReport.run.runId && (
+                  <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
+                    ✓ готово
+                  </span>
+                )}
               </button>
               {issues.length >= 2 && (
                 <button
@@ -1368,10 +1396,16 @@ export function Inbox() {
       {autoReportOpen && (
         <AutoReportDialog
           date={date}
-          onClose={() => setAutoReportOpen(false)}
+          onClose={() => {
+            setAutoReportOpen(false);
+            if (autoReport.run?.finishedAt) setSeenRunId(autoReport.run.runId);
+          }}
           onApplied={() => loadIssues(date)}
           onEscalate={(issueId) => setEscalatingIssueId(issueId)}
           refreshToken={issues}
+          autoRun={autoReport.run}
+          onStart={() => autoReport.start(date)}
+          onResume={(runId) => void autoReport.resume(runId, date)}
         />
       )}
 

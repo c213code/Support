@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/Modal";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
+import { AutoReportProgress } from "@/components/AutoReportProgress";
+import { countVerdicts, type AutoRunState } from "@/components/useAutoReportRun";
 
 // «Авто-репорт»: ИИ читает переписку по открытым тикетам дня и предлагает, чем
 // каждый закончился (см. lib/dayReconcile.ts). Сам ничего не меняет — человек
@@ -101,10 +103,18 @@ export function AutoReportDialog({
   onApplied,
   onEscalate,
   refreshToken,
+  autoRun,
+  onStart,
+  onResume,
 }: {
   date: string;
   onClose: () => void;
   onApplied: () => void;
+  // Ход разбора держит доска (useAutoReportRun) — окно его только
+  // показывает, поэтому закрытое окно разбор не останавливает.
+  autoRun: AutoRunState | null;
+  onStart: () => Promise<string | null>;
+  onResume: (runId: string) => void;
   // Открыть окно передачи с доски (выбор команды) для этого тикета.
   onEscalate?: (issueId: string) => void;
   // Меняется, когда доска перечитала тикеты (например, после передачи) —
@@ -113,7 +123,6 @@ export function AutoReportDialog({
 }) {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Статус, выбранный человеком вместо предложенного моделью.
   const [choice, setChoice] = useState<Record<string, IssueStatus>>({});
@@ -152,50 +161,60 @@ export function AutoReportDialog({
     return () => clearTimeout(t);
   }, [refreshToken, loadRuns]);
 
+  // Разбор этого дня, идущий прямо сейчас.
+  const live = autoRun && autoRun.date === date ? autoRun : null;
+  const running = Boolean(live && !live.finishedAt && !live.failed);
+  const liveRunId = live?.runId ?? null;
+  const liveDone = live?.done ?? 0;
+  const liveFinished = live?.finishedAt ?? null;
+
+  // Пошёл новый разбор — показываем его; каждый шаг — перечитываем журнал;
+  // закончился — отмечаем уверенные решения.
+  useEffect(() => {
+    if (!liveRunId) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const list = await loadRuns();
+      if (cancelled) return;
+      setActiveRunId(liveRunId);
+      if (liveFinished) {
+        const run = list.find((r) => r.id === liveRunId);
+        setSelected(new Set(run?.verdicts.filter(preselect).map((v) => v.id) ?? []));
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [liveRunId, liveDone, liveFinished, loadRuns]);
+
   const activeRun = runs?.find((r) => r.id === activeRunId) ?? null;
+  // Незаконченный запуск, который эта вкладка не гонит: страницу обновили
+  // посреди разбора — или его прямо сейчас ведёт коллега в своём браузере.
+  // Отличить нельзя, поэтому без слова «прервался»: показываем, где он, и
+  // даём продолжить (повторный шаг по тем же тикетам только перезапишет их).
+  const stalled: AutoRunState | null =
+    activeRun && !activeRun.finishedAt && activeRun.id !== liveRunId
+      ? (() => {
+          const { done, counts } = countVerdicts(activeRun.verdicts);
+          return {
+            runId: activeRun.id,
+            date,
+            total: activeRun.verdicts.length,
+            done,
+            counts,
+            startedAt: new Date(activeRun.createdAt).getTime(),
+            finishedAt: null,
+            failed: "Разбор не закончен",
+          };
+        })()
+      : null;
+  const progressRun = live && live.runId === activeRunId ? live : stalled;
 
   async function start() {
-    setBusy(true);
     setError(null);
-    try {
-      const res = await fetch("/api/reconcile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reportDate: date }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.runId) {
-        setError(data?.error ?? "Не удалось запустить разбор");
-        return;
-      }
-      const runId: string = data.runId;
-      setActiveRunId(runId);
-      let list = await loadRuns();
-      const total = list.find((r) => r.id === runId)?.verdicts.length ?? 0;
-      setProgress({ done: 0, total });
-
-      // Разбор идёт шагами по несколько тикетов — так виден прогресс и ничего
-      // не упирается в лимит времени запроса.
-      for (;;) {
-        const step = await fetch(`/api/reconcile/${runId}/step`, { method: "POST" });
-        const stepData = await step.json().catch(() => null);
-        if (!step.ok) {
-          setError("Разбор прервался — можно запустить заново");
-          break;
-        }
-        list = await loadRuns();
-        const run = list.find((r) => r.id === runId);
-        const pending = run?.verdicts.filter((v) => v.state === "pending").length ?? 0;
-        setProgress({ done: total - pending, total });
-        if ((stepData?.remaining ?? 0) === 0) {
-          setSelected(new Set(run?.verdicts.filter(preselect).map((v) => v.id) ?? []));
-          break;
-        }
-      }
-    } finally {
-      setBusy(false);
-      setProgress(null);
-    }
+    const failure = await onStart();
+    if (failure) setError(failure);
   }
 
   async function apply() {
@@ -272,10 +291,8 @@ export function AutoReportDialog({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-3">
-          {progress && (
-            <p className="mb-3 text-sm text-slate-600">
-              Разбираю переписку… {progress.done} из {progress.total}
-            </p>
+          {progressRun && (
+            <AutoReportProgress run={progressRun} onResume={() => onResume(progressRun.runId)} />
           )}
           {error && (
             <p role="alert" className="mb-3 text-sm text-red-600">
@@ -284,7 +301,7 @@ export function AutoReportDialog({
           )}
 
           {runs === null && <p className="text-sm text-slate-400">Загружаю журнал…</p>}
-          {runs?.length === 0 && !busy && (
+          {runs?.length === 0 && !running && (
             <p className="text-sm text-slate-500">
               За этот день разбора ещё не было. Нажмите «Разобрать день».
             </p>
@@ -447,10 +464,10 @@ export function AutoReportDialog({
           <button
             type="button"
             onClick={start}
-            disabled={busy}
+            disabled={busy || running}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
-            {busy && progress ? "Разбираю…" : "Разобрать день"}
+            {running ? "Разбираю…" : "Разобрать день"}
           </button>
           <button
             type="button"
