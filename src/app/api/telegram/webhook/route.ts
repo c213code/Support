@@ -29,6 +29,7 @@ import {
   buildMessageLink,
   extractAuthorName,
   extractReplyContextLine,
+  captionAttachmentMarker,
   extractText,
   isOwnAgentMessage,
   sendTelegramMessage,
@@ -88,6 +89,11 @@ export async function POST(request: NextRequest) {
     message.reply_to_message.from.id === message.from.id;
   const skipAutoCreate = repliesToOwnAgent || isSelfReply;
   const contextualText = replyContext ? `${replyContext}\n${text}` : text;
+  // Для решения «тикет или нет» — с пометкой вложения: подпись к скриншоту
+  // без него выглядит вопросом (см. captionAttachmentMarker). В базу и во
+  // «Входящие» по-прежнему ложится сам текст.
+  const attachment = captionAttachmentMarker(message);
+  const textForTicket = attachment ? `${attachment}\n${contextualText}` : contextualText;
 
   const authorName = extractAuthorName(message.from);
   const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
@@ -399,7 +405,7 @@ export async function POST(request: NextRequest) {
         preset.name,
         preset.emoji,
         mergedOwn,
-        mergedContextual,
+        [recent.text, textForTicket].filter(Boolean).join("\n"),
         recent.messageLink,
         skipSeries
       );
@@ -513,7 +519,7 @@ export async function POST(request: NextRequest) {
       preset.name,
       preset.emoji,
       text,
-      contextualText,
+      textForTicket,
       messageLink,
       skipAutoCreate
     );

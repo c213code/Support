@@ -170,6 +170,19 @@ export function extractText(message: TelegramMessagePayload): string | null {
   return null;
 }
 
+// Пометка вложения для сообщения С подписью. extractText в этом случае
+// отдаёт только подпись, и вложение для классификатора пропадает: «мына
+// қателік не себепті шығып тұр?» без скриншота читается как вопрос, и тикет
+// не заводился (24.09 так потерялось обращение про «Invalid grade value»).
+// Без подписи пометку уже вернул extractText — тут null.
+export function captionAttachmentMarker(message: TelegramMessagePayload): string | null {
+  if (!message.caption) return null;
+  if (message.photo) return "[Фото]";
+  if (message.video) return "[Видео]";
+  if (message.document) return `[Файл: ${message.document.file_name ?? ""}]`.trim();
+  return null;
+}
+
 // file_id самого крупного размера присланного фото. Telegram шлёт один
 // снимок несколькими размерами по возрастанию, последний — оригинал; мелкие
 // нужны ленте чатов, а не нам: на скриншоте куратора важно прочитать текст

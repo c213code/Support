@@ -55,6 +55,7 @@ const PROPOSED_LABEL: Record<string, string> = {
 // «Непонятно», «Передано» и совпадающее с текущим — без галочки.
 function preselect(verdict: Verdict): boolean {
   return (
+    untouched(verdict) &&
     verdict.state === "done" &&
     !verdict.appliedAt &&
     Boolean(verdict.proposed) &&
@@ -62,6 +63,21 @@ function preselect(verdict: Verdict): boolean {
     verdict.proposed !== verdict.statusBefore
   );
 }
+
+// Статус тикета не меняли с начала разбора — только тогда решение ещё
+// актуально (сервер проверяет то же самое, см. applyVerdicts).
+function untouched(verdict: Verdict): boolean {
+  return !verdict.appliedAt && verdict.issue.status === verdict.statusBefore;
+}
+
+// Что человек может поставить сам. «Передано» — не здесь: для него нужна
+// команда, и открывается обычное окно передачи (onEscalate).
+const CHOICES: { value: IssueStatus; label: string }[] = [
+  { value: "RESOLVED", label: "✅ Решено" },
+  { value: "IN_PROGRESS", label: "🔄 В работе" },
+  { value: "PENDING", label: "⚠️ Пендинг" },
+];
+const ESCALATE = "ESCALATE";
 
 function time(iso: string): string {
   return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
@@ -83,15 +99,24 @@ export function AutoReportDialog({
   date,
   onClose,
   onApplied,
+  onEscalate,
+  refreshToken,
 }: {
   date: string;
   onClose: () => void;
   onApplied: () => void;
+  // Открыть окно передачи с доски (выбор команды) для этого тикета.
+  onEscalate?: (issueId: string) => void;
+  // Меняется, когда доска перечитала тикеты (например, после передачи) —
+  // тогда и здесь перечитываем журнал, чтобы увидеть новый статус.
+  refreshToken?: unknown;
 }) {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Статус, выбранный человеком вместо предложенного моделью.
+  const [choice, setChoice] = useState<Record<string, IssueStatus>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,6 +144,13 @@ export function AutoReportDialog({
       cancelled = true;
     };
   }, [loadRuns]);
+
+  // Доска перечитала тикеты — перечитываем журнал, не сбрасывая отметки.
+  useEffect(() => {
+    if (refreshToken === undefined) return;
+    const t = setTimeout(() => void loadRuns(), 0);
+    return () => clearTimeout(t);
+  }, [refreshToken, loadRuns]);
 
   const activeRun = runs?.find((r) => r.id === activeRunId) ?? null;
 
@@ -174,7 +206,9 @@ export function AutoReportDialog({
       const res = await fetch(`/api/reconcile/${activeRun.id}/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verdictIds: [...selected] }),
+        body: JSON.stringify({
+          items: [...selected].map((verdictId) => ({ verdictId, status: choice[verdictId] })),
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -186,11 +220,33 @@ export function AutoReportDialog({
         setError(`Не применено: ${skipped.length} (статус уже меняли вручную или это не статус)`);
       }
       setSelected(new Set());
+      setChoice({});
       await loadRuns();
       onApplied();
     } finally {
       setBusy(false);
     }
+  }
+
+  function choose(verdict: Verdict, value: string) {
+    if (value === ESCALATE) {
+      onEscalate?.(verdict.issueId);
+      return;
+    }
+    setChoice((prev) => {
+      const next = { ...prev };
+      if (value) next[verdict.id] = value as IssueStatus;
+      else delete next[verdict.id];
+      return next;
+    });
+    // Выбрал статус — значит, хочет его применить; сбросил на «как у ИИ» —
+    // отметка остаётся, только если сам вывод ИИ применим.
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (value || preselect(verdict)) next.add(verdict.id);
+      else next.delete(verdict.id);
+      return next;
+    });
   }
 
   function toggle(id: string) {
@@ -237,8 +293,11 @@ export function AutoReportDialog({
           {activeRun && (
             <ul className="space-y-2">
               {activeRun.verdicts.map((v) => {
+                const open = untouched(v) && v.state !== "pending";
                 const canApply =
-                  v.state === "done" && !v.appliedAt && Boolean(v.proposed) && APPLICABLE.has(v.proposed!);
+                  open &&
+                  (Boolean(choice[v.id]) ||
+                    (v.state === "done" && Boolean(v.proposed) && APPLICABLE.has(v.proposed!)));
                 return (
                   <li
                     key={v.id}
@@ -308,9 +367,33 @@ export function AutoReportDialog({
                         {v.state === "error" && (
                           <p className="mt-1 text-xs text-red-500">{v.error}</p>
                         )}
-                        {v.proposed === "ESCALATED" && !v.appliedAt && (
-                          <p className="mt-1 text-xs text-slate-400">
-                            «Передано» ставится вручную — нужна команда
+                        {open && (
+                          <label className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
+                            Поставить:
+                            <select
+                              value={choice[v.id] ?? ""}
+                              disabled={busy}
+                              onChange={(e) => choose(v, e.target.value)}
+                              className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-800"
+                            >
+                              <option value="">
+                                {v.state === "done" && v.proposed && APPLICABLE.has(v.proposed)
+                                  ? `как предлагает ИИ (${PROPOSED_LABEL[v.proposed]})`
+                                  : "— выбрать —"}
+                              </option>
+                              {CHOICES.map((c) => (
+                                <option key={c.value} value={c.value}>
+                                  {c.label}
+                                </option>
+                              ))}
+                              {onEscalate && <option value={ESCALATE}>📤 Передать…</option>}
+                            </select>
+                          </label>
+                        )}
+                        {!v.appliedAt && v.issue.status !== v.statusBefore && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Статус уже изменён: {STATUS_META[v.issue.status].emoji}{" "}
+                            {STATUS_META[v.issue.status].label}
                           </p>
                         )}
                         {v.appliedAt && (

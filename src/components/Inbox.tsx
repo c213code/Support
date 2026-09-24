@@ -1370,6 +1370,8 @@ export function Inbox() {
           date={date}
           onClose={() => setAutoReportOpen(false)}
           onApplied={() => loadIssues(date)}
+          onEscalate={(issueId) => setEscalatingIssueId(issueId)}
+          refreshToken={issues}
         />
       )}
 

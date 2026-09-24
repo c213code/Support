@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { ownAgentTelegramIdList } from "@/lib/telegram";
 
 // К какому тикету относится реплика агента, написанная БЕЗ Reply.
 //
@@ -112,6 +113,16 @@ export async function resolveAgentTarget(params: {
     (m) => m.usedForIssueId != null && open.has(m.usedForIssueId)
   );
 
+  // Клиенты — все, кто не агент. Нужны, чтобы заметить обращение, по
+  // которому тикет НЕ завёлся: 24.09 в Сервисе второй куратор спросил про
+  // ошибку со скриншотом, тикета не было, и ответ ему уехал в тикет первого
+  // куратора — «свой разговор» и «ближайшее обращение» видели только
+  // сообщения с тикетом.
+  const agents = new Set(ownAgentTelegramIdList());
+  if (agentTelegramId != null) agents.add(agentTelegramId);
+  const clientMessages = window.filter((m) => m.fromId != null && !agents.has(m.fromId));
+  const openAuthors = new Set(openRequests.map((m) => m.fromId));
+
   // 2. Свой же разговор: последняя собственная реплика, про которую уже
   // известно, о каком тикете она была. Это случай "Окей, қазір" → через
   // четыре минуты "өшірілді": второе сообщение продолжает первое.
@@ -125,9 +136,22 @@ export async function resolveAgentTarget(params: {
       (m) => m.fromId === agentTelegramId && m.agentIssueId != null
     );
     if (mine?.agentIssueId) {
-      const interrupted = openRequests.some(
-        (r) =>
-          r.receivedAt > mine.receivedAt && r.usedForIssueId !== mine.agentIssueId
+      const authors = new Set(
+        (
+          await prisma.telegramMessage.findMany({
+            where: { usedForIssueId: mine.agentIssueId, fromId: { not: null } },
+            distinct: ["fromId"],
+            select: { fromId: true },
+          })
+        ).map((m) => m.fromId)
+      );
+      // Прервал любой клиент, кроме автора этого тикета, — даже если по его
+      // сообщению тикета нет: моя следующая фраза может отвечать ему.
+      const interrupted = clientMessages.some(
+        (m) =>
+          m.receivedAt > mine.receivedAt &&
+          !authors.has(m.fromId) &&
+          m.usedForIssueId !== mine.agentIssueId
       );
       if (!interrupted) {
         return { kind: "found", issueId: mine.agentIssueId, reason: "own-thread" };
@@ -138,6 +162,13 @@ export async function resolveAgentTarget(params: {
   // 3. Ближайшее обращение выше — так же, как читает человек, открывший
   // чат: последнее, что написал клиент перед этой репликой.
   if (open.size === 0) return { kind: "none" };
+  // Последним написал клиент, у которого тикета нет (и он не автор ни одного
+  // открытого) — агент, скорее всего, отвечает ему. Подставить сюда
+  // единственный открытый тикет — значит приписать ему чужой разговор.
+  const lastClient = clientMessages[0];
+  if (lastClient && lastClient.usedForIssueId == null && !openAuthors.has(lastClient.fromId)) {
+    return { kind: "none" };
+  }
   if (open.size === 1) {
     return { kind: "found", issueId: [...open.keys()][0], reason: "last-request" };
   }

@@ -145,13 +145,18 @@ const APPLICABLE = new Set<IssueStatus>(["RESOLVED", "IN_PROGRESS", "PENDING"]);
 export type ApplyOutcome = { verdictId: string; applied: boolean; reason?: string };
 
 // Применить отмеченные человеком решения.
+// status — статус, который выбрал человек, если модель ошиблась или не
+// поняла («Непонятно», «Передано»). Без него применяется предложенный.
+export type ApplyItem = { verdictId: string; status?: IssueStatus };
+
 export async function applyVerdicts(
   runId: string,
-  verdictIds: string[],
+  items: ApplyItem[],
   actor: string
 ): Promise<ApplyOutcome[]> {
+  const chosen = new Map(items.map((item) => [item.verdictId, item.status]));
   const verdicts = await prisma.reconcileVerdict.findMany({
-    where: { runId, id: { in: verdictIds } },
+    where: { runId, id: { in: [...chosen.keys()] } },
     select: {
       id: true,
       issueId: true,
@@ -167,12 +172,16 @@ export async function applyVerdicts(
 
   const outcomes: ApplyOutcome[] = [];
   for (const verdict of verdicts) {
-    const status = verdict.proposed as IssueStatus | null;
+    const override = chosen.get(verdict.id);
+    const status = override ?? (verdict.proposed as IssueStatus | null);
+    // Свой статус человек может поставить и тикету, который модель
+    // пропустила или не разобрала, — он сам посмотрел переписку.
+    const judged = override ? verdict.state !== "pending" : verdict.state === "done";
     if (verdict.appliedAt) {
       outcomes.push({ verdictId: verdict.id, applied: false, reason: "уже применено" });
       continue;
     }
-    if (verdict.state !== "done" || !status || !APPLICABLE.has(status)) {
+    if (!judged || !status || !APPLICABLE.has(status)) {
       outcomes.push({ verdictId: verdict.id, applied: false, reason: "это не статус для применения" });
       continue;
     }
@@ -183,10 +192,13 @@ export async function applyVerdicts(
       continue;
     }
 
+    // Заметка модели описывает её вывод; если человек выбрал другой статус,
+    // она не про то («Мәселенің шешілгені нақты емес» под «Решено»).
+    const modelNote = status === verdict.proposed ? verdict.note : null;
     const note =
       status === "RESOLVED"
-        ? `${verdict.resolver ?? actor} шешті${verdict.note ? `, ${verdict.note}` : ""}`
-        : verdict.note || undefined;
+        ? `${verdict.resolver ?? actor} шешті${modelNote ? `, ${modelNote}` : ""}`
+        : modelNote || undefined;
     // source "chat": в группе ответ дежурного уже прозвучал — повторять его
     // словами бота незачем (правило одной строки в CLAUDE.md).
     const result = await changeIssueStatus({
