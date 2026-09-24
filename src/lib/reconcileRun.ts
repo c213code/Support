@@ -109,21 +109,26 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
 }
 
 // Разобрать следующие несколько тикетов запуска.
-export async function stepRun(runId: string, batch = 3): Promise<{ remaining: number }> {
+export async function stepRun(runId: string): Promise<{ remaining: number }> {
   const run = await prisma.reconcileRun.findUnique({ where: { id: runId }, select: { id: true } });
   if (!run) return { remaining: 0 };
 
+  const provider = reconcileProvider();
+  // Шаг ждёт самый медленный ответ: медиана у моделей ~1 с, но каждый
+  // десятый — 5–25 с. Чем больше тикетов в шаге, тем реже этот хвост
+  // повторяется. Groq держим на 3 — его лимит 8000 токенов в минуту на ключ;
+  // у OpenRouter такого лимита нет. 6 × худшие 60 с + повтор укладываются
+  // в maxDuration маршрута (300 с), потому что идут одновременно.
+  const batch = provider.kind === "groq" ? 3 : 6;
   const pending = await prisma.reconcileVerdict.findMany({
     where: { runId, state: "pending" },
     orderBy: { createdAt: "asc" },
     take: batch,
     select: { id: true, issueId: true, issue: { select: { description: true } } },
   });
-  const provider = reconcileProvider();
 
-  // Тикеты шага — одновременно: модель отвечает по 1–6 секунд, и по очереди
-  // вечер в 40 тикетов ждал бы минуты. Три параллельных запроса Groq
-  // укладываются в его минутный лимит, а упёршийся ключ сменяет следующий.
+  // Тикеты шага — одновременно: по очереди вечер в 40 тикетов ждал бы
+  // минуты. Упёршийся в лимит ключ Groq сменяет следующий.
   await Promise.all(pending.map((verdict) => judgeVerdict(verdict, provider)));
 
   const remaining = await prisma.reconcileVerdict.count({ where: { runId, state: "pending" } });
@@ -214,7 +219,11 @@ export async function runsForDay(reportDate: string) {
     include: {
       verdicts: {
         orderBy: { createdAt: "asc" },
-        include: { issue: { select: { description: true, groupName: true, groupEmoji: true, status: true } } },
+        include: {
+          issue: {
+            select: { description: true, groupName: true, groupEmoji: true, status: true, telegramLink: true },
+          },
+        },
       },
     },
   });

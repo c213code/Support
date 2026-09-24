@@ -23,7 +23,13 @@ type Verdict = {
   error: string | null;
   appliedAt: string | null;
   appliedBy: string | null;
-  issue: { description: string; groupName: string; groupEmoji: string | null; status: IssueStatus };
+  issue: {
+    description: string;
+    groupName: string;
+    groupEmoji: string | null;
+    status: IssueStatus;
+    telegramLink: string | null;
+  };
 };
 
 type Run = {
@@ -273,6 +279,29 @@ export function AutoReportDialog({
                         {v.evidence && (
                           <p className="mt-1 text-xs italic text-slate-500">«{v.evidence}»</p>
                         )}
+                        {/* Проверить вывод модели: карточка тикета на доске и
+                            сама переписка в Telegram — в новой вкладке, чтобы
+                            не терять разбор. */}
+                        <p className="mt-1 flex gap-3 text-xs">
+                          <a
+                            href={`/inbox?issue=${encodeURIComponent(v.issueId)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-brand-600 hover:underline"
+                          >
+                            Открыть тикет ↗
+                          </a>
+                          {v.issue.telegramLink && (
+                            <a
+                              href={v.issue.telegramLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-brand-600 hover:underline"
+                            >
+                              Переписка в Telegram ↗
+                            </a>
+                          )}
+                        </p>
                         {v.state === "skipped" && (
                           <p className="mt-1 text-xs text-slate-400">{v.error}</p>
                         )}
