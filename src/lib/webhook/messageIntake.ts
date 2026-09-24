@@ -63,7 +63,7 @@ async function buildResolvedNoteDraft(
 
   const summary = await summarizeResolutionNote(
     issue.description,
-    context.context.agentTexts
+    context.context.thread
   );
   if (!summary.ok) return null;
 

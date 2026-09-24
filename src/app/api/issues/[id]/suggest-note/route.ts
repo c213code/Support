@@ -59,7 +59,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const summary = await summarizeResolutionNote(
     issue.description,
-    result.context.agentTexts
+    result.context.thread
   );
   // Реплики нашлись, но решения в них не видно (SKIP) — или модель вовсе не
   // ответила. Для окна это разные вещи: в первом случае подсказывать нечего,
