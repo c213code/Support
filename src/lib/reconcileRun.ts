@@ -15,12 +15,16 @@ import { reconcileIssue, type ReconcileProvider } from "@/lib/dayReconcile";
 // когда человек отметил решения и нажал «Применить».
 
 // Модель разбора — переменной RECONCILE_MODEL: «gemini:<модель>» (нужен
-// GEMINI_REPORT_KEY) или «groq».
+// GEMINI_REPORT_KEY), «openrouter:<модель>» (нужен OPENROUTER_API_KEY) или
+// «groq».
 export function reconcileProvider(): ReconcileProvider {
   const spec = process.env.RECONCILE_MODEL?.trim();
   if (spec === "groq") return { kind: "groq", model: "groq" };
   if (spec?.startsWith("gemini:") && process.env.GEMINI_REPORT_KEY) {
     return { kind: "gemini", model: spec.slice("gemini:".length) };
+  }
+  if (spec?.startsWith("openrouter:") && process.env.OPENROUTER_API_KEY) {
+    return { kind: "openrouter", model: spec.slice("openrouter:".length) };
   }
   // По умолчанию — Groq, которым проект уже пользуется. Бесплатный ключ
   // Gemini упирается в дневную квоту (429) посреди разбора, поэтому Gemini
@@ -29,7 +33,7 @@ export function reconcileProvider(): ReconcileProvider {
 }
 
 function providerLabel(provider: ReconcileProvider): string {
-  return provider.kind === "groq" ? "groq" : `gemini:${provider.model}`;
+  return provider.kind === "groq" ? "groq" : `${provider.kind}:${provider.model}`;
 }
 
 // Какие тикеты разбирать: все нерешённые тикеты дня. «Отправлено» тоже —

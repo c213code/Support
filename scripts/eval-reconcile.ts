@@ -2,6 +2,7 @@
 // модель угадывает статус, который дежурные проставили руками.
 //
 //   npm run eval:reconcile -- --models=gemini:gemini-3.8-flash,groq --limit=60
+//   npm run eval:reconcile -- --models=openrouter:deepseek/deepseek-v4.1-flash,groq
 //
 // Эталон — финальный статус тикета в базе. Он шумный: тикет могли закрыть и
 // через три дня, а бывает, что закрыли без единой реплики в чате. Поэтому в
@@ -33,10 +34,13 @@ const OUT = arg("out", "");
 const PROVIDERS: ReconcileProvider[] = arg("models", "gemini:gemini-3.8-flash,groq")
   .split(",")
   .map((spec) => {
-    const [kind, model] = spec.split(":");
-    return kind === "groq"
-      ? { kind: "groq", model: "groq" }
-      : { kind: "gemini", model: model ?? "gemini-3.8-flash" };
+    // Модель — всё после первого двоеточия: у OpenRouter бывают «…:batch».
+    const cut = spec.indexOf(":");
+    const kind = cut < 0 ? spec : spec.slice(0, cut);
+    const model = cut < 0 ? "" : spec.slice(cut + 1);
+    if (kind === "groq") return { kind: "groq", model: "groq" };
+    if (kind === "openrouter") return { kind: "openrouter", model };
+    return { kind: "gemini", model: model || "gemini-3.8-flash" };
   });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -102,7 +106,7 @@ function stableKey(id: string): number {
   const summary: string[] = [];
   for (const provider of PROVIDERS) {
     const name = provider.kind === "groq" ? `groq (${GROQ_MODEL})` : provider.model;
-    const rows: Array<{ id: string; truth: string; got: string | null; note: string; evidence: string; agentNote: string | null; error?: string; ms: number; inTok: number; outTok: number }> = [];
+    const rows: Array<{ id: string; truth: string; got: string | null; note: string; evidence: string; agentNote: string | null; error?: string; ms: number; inTok: number; outTok: number; cost: number }> = [];
     for (const [index, issue] of sample.entries()) {
       const result = await withRetry(() => reconcileIssue(provider, issue.description, issue.agentTexts));
       rows.push({
@@ -116,6 +120,7 @@ function stableKey(id: string): number {
         ms: result.ms,
         inTok: result.ok ? (result.usage?.inputTokens ?? 0) : 0,
         outTok: result.ok ? (result.usage?.outputTokens ?? 0) : 0,
+        cost: result.ok ? (result.usage?.costUsd ?? 0) : 0,
       });
       process.stdout.write(`\r${name}: ${index + 1}/${sample.length}`);
       await sleep(DELAY_MS);
@@ -143,6 +148,10 @@ function stableKey(id: string): number {
         `ошибок ${rows.length - answered.length}`.padEnd(10),
         `~${avg(answered.map((r) => r.ms))} мс`.padEnd(10),
         `токенов/тикет ~${avg(answered.map((r) => r.inTok))}+${avg(answered.map((r) => r.outTok))}`,
+        // Цену сообщает только OpenRouter; у остальных тут пусто.
+        ...(rows.some((r) => r.cost > 0)
+          ? [`$${rows.reduce((a, r) => a + r.cost, 0).toFixed(4)} за прогон`]
+          : []),
       ].join(" ")
     );
     report[name] = rows;

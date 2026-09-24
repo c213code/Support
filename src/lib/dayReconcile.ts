@@ -32,13 +32,14 @@ export type ReconcileVerdict = {
   evidence: string;
 };
 
-export type ReconcileUsage = { inputTokens: number; outputTokens: number };
+// costUsd — сколько запрос стоил, если провайдер это сообщает (OpenRouter).
+export type ReconcileUsage = { inputTokens: number; outputTokens: number; costUsd?: number };
 
 export type ReconcileResult =
   | { ok: true; verdict: ReconcileVerdict; usage: ReconcileUsage | null; ms: number }
   | { ok: false; error: string; ms: number };
 
-export type ReconcileProvider = { kind: "gemini" | "groq"; model: string };
+export type ReconcileProvider = { kind: "gemini" | "groq" | "openrouter"; model: string };
 
 // Правила «сделано / в работе / ждём» — те же, на которых держится подсказка
 // «Как решили?» (RESOLUTION_NOTE_SYSTEM_PROMPT в ai.ts), только с выбором
@@ -85,7 +86,7 @@ function parseVerdict(raw: string): ReconcileVerdict | null {
   };
 }
 
-const GEMINI_TIMEOUT_MS = 60_000;
+const MODEL_TIMEOUT_MS = 60_000;
 
 // Ключ Gemini лежит в GEMINI_REPORT_KEY, а не в GEMINI_API_KEY: с последним
 // graphify отправляет код проекта во внешний API (см. CLAUDE.md).
@@ -99,7 +100,7 @@ async function askGemini(model: string, userText: string): Promise<ReconcileResu
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+      signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: RECONCILE_PROMPT }] },
         contents: [{ role: "user", parts: [{ text: userText }] }],
@@ -186,6 +187,58 @@ async function askGroq(userText: string): Promise<ReconcileResult> {
   };
 }
 
+// OpenRouter — один ключ на модели разных компаний (DeepSeek, Qwen, GLM,
+// Kimi, MiMo…): их сравнивают на прошлых днях тем же скриптом, а в прод идёт
+// победитель без новой интеграции. API совместим с OpenAI.
+async function askOpenRouter(model: string, userText: string): Promise<ReconcileResult> {
+  const started = Date.now();
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return { ok: false, error: "OPENROUTER_API_KEY не задан", ms: 0 };
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: RECONCILE_PROMPT },
+        { role: "user", content: userText },
+      ],
+      response_format: { type: "json_object" },
+      // Почти все свежие модели — reasoning-типа: лимит с запасом на размышления.
+      max_tokens: 4000,
+      usage: { include: true },
+    }),
+  }).catch((err: unknown) => err as Error);
+  const ms = Date.now() - started;
+  if (res instanceof Error) return { ok: false, error: `сеть: ${res.name}`, ms };
+
+  const data = (await res.json().catch(() => null)) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+    error?: { message?: string; code?: number };
+  } | null;
+  if (!res.ok || data?.error) {
+    return { ok: false, error: `${res.status}: ${data?.error?.message?.slice(0, 160) ?? ""}`, ms };
+  }
+  const text = data?.choices?.[0]?.message?.content ?? "";
+  const verdict = parseVerdict(text);
+  if (!verdict) return { ok: false, error: `не JSON по схеме: ${text.slice(0, 120)}`, ms };
+  return {
+    ok: true,
+    verdict,
+    usage: data?.usage
+      ? {
+          inputTokens: data.usage.prompt_tokens ?? 0,
+          outputTokens: data.usage.completion_tokens ?? 0,
+          costUsd: data.usage.cost,
+        }
+      : null,
+    ms,
+  };
+}
+
 // Суждение по одному тикету. agentTexts — уже замаскированные реплики агентов
 // по этому тикету (collectResolutionContext); без реплик судить не о чем, и
 // такой тикет вызывающий код сразу помечает как «непонятно».
@@ -195,7 +248,7 @@ export async function reconcileIssue(
   agentTexts: string[]
 ): Promise<ReconcileResult> {
   const userText = buildUserText(description, agentTexts);
-  return provider.kind === "gemini"
-    ? askGemini(provider.model, userText)
-    : askGroq(userText);
+  if (provider.kind === "gemini") return askGemini(provider.model, userText);
+  if (provider.kind === "openrouter") return askOpenRouter(provider.model, userText);
+  return askGroq(userText);
 }

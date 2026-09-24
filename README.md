@@ -1336,7 +1336,10 @@ regex-чистку, что работает при выключенном ИИ (
 ### Модель
 
 `RECONCILE_MODEL`: `groq` (по умолчанию — тот же `GROQ_API_KEY`, что и
-у остальных ИИ-функций) или `gemini:<модель>` (нужен `GEMINI_REPORT_KEY`).
+у остальных ИИ-функций), `gemini:<модель>` (нужен `GEMINI_REPORT_KEY`) или
+`openrouter:<модель>` (нужен `OPENROUTER_API_KEY`) — один ключ на модели
+разных компаний: DeepSeek, Qwen, GLM, Kimi, MiMo. Например
+`RECONCILE_MODEL=openrouter:deepseek/deepseek-v4.1-flash`.
 Бесплатный ключ Gemini упирается в дневную квоту (429) посреди разбора,
 поэтому Gemini включается только явно.
 
@@ -1347,13 +1350,14 @@ regex-чистку, что работает при выключенном ИИ (
 
 ```bash
 npm run eval:reconcile -- --models=groq --limit=50
+npm run eval:reconcile -- --models=openrouter:deepseek/deepseek-v4.1-flash,openrouter:z-ai/glm-5.3,groq
 npm run eval:reconcile -- --from=2026-09-01 --to=2026-09-15 \
   --models=gemini:gemini-flash-latest,groq --out=eval.json
 ```
 
 Берёт уже решённые и открытые тикеты с точной перепиской (половина —
 решённые), прячет от модели текущий статус и сравнивает ответ с тем, что
-поставили люди. Главная цифра — **ложное «решено»**: открытый тикет,
+поставили люди (у OpenRouter в итоге ещё и цена прогона в $). Главная цифра — **ложное «решено»**: открытый тикет,
 который ИИ счёл решённым, уйдёт в репорт как сделанный.
 
 Прогон 24.09.2026 на Groq (`gpt-oss-120b`), 50 тикетов за 1–15 сентября:
