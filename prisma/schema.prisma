@@ -216,6 +216,11 @@ model ReconcileVerdict {
   proposed     String?
   note         String?
   evidence     String?
+  // Почему модель так решила (одна фраза) и что именно она видела —
+  // описание и ленту переписки. По ним ошибка разбора видна сразу, без
+  // похода в базу и чат.
+  reason       String?
+  input        String?
   // Кто ответил в чате — его имя пойдёт в «X шешті».
   resolver     String?
   error        String?

@@ -99,9 +99,17 @@ const MAX_AGENT_MESSAGES = 5;
 // а совпадение.
 const MAX_REPLY_HOPS = 4;
 
+// Строка общей ленты переписки: кто сказал и что.
+export type ThreadLine = { from: "agent" | "curator"; text: string };
+
 export type ResolutionContext = {
   // Реплики наших агентов, относящиеся к тикету, в порядке написания.
   agentTexts: string[];
+  // Реплики агентов вместе с ответами автора обращения, по времени. Нужна
+  // вечернему разбору: итог часто пишет сам куратор («Методист ашып
+  // берді», «шешілді, рахмет»), а по одним репликам агентов разговор
+  // выглядит оборванным вопросом.
+  thread: ThreadLine[];
   // Кто ответил в чате — автор последней реплики, надёжно привязанной к
   // тикету. Его имя, а не того, кто перетащил карточку, идёт в «X шешті»:
   // закрыть мог Ерош, а ответить — Алпа. У догадки по окну времени (exact:
@@ -333,6 +341,7 @@ export async function collectResolutionContext(
     (a, b) => a.receivedAt.getTime() - b.receivedAt.getTime()
   );
   const linked: string[] = [];
+  const linkedMessages: { message: ChatMessage; text: string }[] = [];
   const loose: string[] = [];
   // Исходный текст сообщения, на которое ответили: у сохранённого сообщения
   // в базе может быть своя цитата — срезаем и её, Telegram цитирует без неё.
@@ -356,6 +365,7 @@ export async function collectResolutionContext(
     const owner = ownerOf(message);
     if (owner === "ours") {
       linked.push(text);
+      linkedMessages.push({ message, text });
       lastLinked = message;
     }
     // "other" отбрасываем совсем: за час в чате проходит несколько обращений,
@@ -367,10 +377,38 @@ export async function collectResolutionContext(
   // надёжных нет вовсе: это уже догадка, и в окне она помечается иначе
   // ("собрано по переписке", а не "из твоего ответа").
   if (linked.length > 0) {
+    // Ответы куратора — только после первой нашей реплики (до неё идёт само
+    // обращение, оно уже в описании) и только те, что про этот тикет
+    // наверняка: привязанные к нему или ответ стрелкой на реплику по нему.
+    // Сообщения без стрелки не берём: куратор за день пишет несколько
+    // обращений подряд, и следующее его обращение читалось бы как ответ по
+    // этому («Тс осылай ашылмай тұр» после «Методист ашып берді»).
+    const agentIdSet = new Set(ownAgentIds.map((id) => id.toString()));
+    const firstAt = linkedMessages[0].message.receivedAt;
+    const curatorLines: { message: ChatMessage; text: string }[] = [];
+    for (const message of reporterMessages) {
+      if (message.receivedAt <= firstAt || !message.text) continue;
+      if (message.fromId != null && agentIdSet.has(message.fromId.toString())) continue;
+      const belongs =
+        message.usedForIssueId != null
+          ? message.usedForIssueId === issueId
+          : message.replyToMessageId != null && ownerOf(message) === "ours";
+      if (!belongs) continue;
+      const text = maskSensitiveForAi(stripReplyQuote(message.text, quotedTextOf(message)));
+      if (text) curatorLines.push({ message, text });
+    }
+    const thread: ThreadLine[] = [
+      ...linkedMessages.map((l) => ({ ...l, from: "agent" as const })),
+      ...curatorLines.map((l) => ({ ...l, from: "curator" as const })),
+    ]
+      .sort((a, b) => a.message.receivedAt.getTime() - b.message.receivedAt.getTime())
+      .slice(-MAX_AGENT_MESSAGES * 2)
+      .map(({ from, text }) => ({ from, text }));
     return {
       ok: true,
       context: {
         agentTexts: linked.slice(-MAX_AGENT_MESSAGES),
+        thread,
         exact: true,
         resolver: lastLinked
           ? { fromId: lastLinked.fromId, authorName: lastLinked.authorName }
@@ -381,7 +419,12 @@ export async function collectResolutionContext(
   if (loose.length > 0) {
     return {
       ok: true,
-      context: { agentTexts: loose.slice(-MAX_AGENT_MESSAGES), exact: false, resolver: null },
+      context: {
+        agentTexts: loose.slice(-MAX_AGENT_MESSAGES),
+        thread: loose.slice(-MAX_AGENT_MESSAGES).map((text) => ({ from: "agent" as const, text })),
+        exact: false,
+        resolver: null,
+      },
     };
   }
 

@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { IssueStatus } from "@/lib/status";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { collectResolutionContext, resolverName } from "@/lib/resolutionNote";
-import { reconcileIssue, type ReconcileProvider } from "@/lib/dayReconcile";
+import { buildUserText, reconcileIssue, type ReconcileProvider } from "@/lib/dayReconcile";
 
 // «Авто-репорт» по кнопке на доске: запуск, пошаговый разбор и применение.
 //
@@ -83,7 +83,9 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
     return;
   }
 
-  let result = await reconcileIssue(provider, verdict.issue.description, context.context.agentTexts);
+  // Что видела модель — в журнал: по нему ошибка разбора видна сразу.
+  const input = buildUserText(verdict.issue.description, context.context.thread);
+  let result = await reconcileIssue(provider, verdict.issue.description, context.context.thread);
   // Сетевой сбой, «модель перегружена» (503), пустой ответ и минутный лимит
   // Groq проходят сами — один повтор (на прогонах по прошлым дням так падало
   // 2–14% запросов). Groq считает лимит поминутно (8000 токенов на ключ,
@@ -92,7 +94,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   // спасёт: такой тикет помечается ошибкой, его можно разобрать заново позже.
   if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
     await new Promise((resolve) => setTimeout(resolve, provider.kind === "groq" ? 15_000 : 3000));
-    result = await reconcileIssue(provider, verdict.issue.description, context.context.agentTexts);
+    result = await reconcileIssue(provider, verdict.issue.description, context.context.thread);
   }
   await prisma.reconcileVerdict.update({
     where: { id: verdict.id },
@@ -102,9 +104,11 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
           proposed: result.verdict.status,
           note: result.verdict.note,
           evidence: result.verdict.evidence,
+          reason: result.verdict.reason || null,
           resolver: resolverName(context.context),
+          input,
         }
-      : { state: "error", error: result.error.slice(0, 300) },
+      : { state: "error", error: result.error.slice(0, 300), input },
   });
 }
 
@@ -231,6 +235,10 @@ export async function runsForDay(reportDate: string) {
     include: {
       verdicts: {
         orderBy: { createdAt: "asc" },
+        // input (что видела модель) — не здесь: это килобайты на тикет, а
+        // журнал перечитывается на каждом шаге разбора. Его отдаёт
+        // verdictInput по запросу, когда человек раскрыл «Почему так?».
+        omit: { input: true },
         include: {
           issue: {
             select: { description: true, groupName: true, groupEmoji: true, status: true, telegramLink: true },
@@ -239,4 +247,13 @@ export async function runsForDay(reportDate: string) {
       },
     },
   });
+}
+
+// Что видела модель по одному решению — для «Почему так?» в окне.
+export async function verdictInput(verdictId: string): Promise<string | null> {
+  const verdict = await prisma.reconcileVerdict.findUnique({
+    where: { id: verdictId },
+    select: { input: true },
+  });
+  return verdict?.input ?? null;
 }

@@ -13,7 +13,7 @@
 // сделанный. Поэтому отдельно считаем точность RESOLVED.
 import { writeFileSync } from "node:fs";
 import { prisma } from "@/lib/prisma";
-import { collectResolutionContext } from "@/lib/resolutionNote";
+import { collectResolutionContext, type ThreadLine } from "@/lib/resolutionNote";
 import { GROQ_MODEL } from "@/lib/ai";
 import {
   reconcileIssue,
@@ -90,14 +90,14 @@ function stableKey(id: string): number {
     where: { reportDate: { gte: FROM, lte: TO } },
     select: { id: true, description: true, status: true, note: true, reportDate: true },
   });
-  const withContext: Array<(typeof issues)[number] & { agentTexts: string[]; exact: boolean }> = [];
+  const withContext: Array<(typeof issues)[number] & { thread: ThreadLine[]; exact: boolean }> = [];
   for (const issue of issues) {
     const ctx = await collectResolutionContext(issue.id);
     // Только точно привязанные реплики: найденные догадкой по окну времени
     // могут быть о соседнем тикете, и такой промах был бы не на совести
     // модели. В проде разбор так же судит только по точным.
     if (ctx.ok && ctx.context.exact) {
-      withContext.push({ ...issue, agentTexts: ctx.context.agentTexts, exact: true });
+      withContext.push({ ...issue, thread: ctx.context.thread, exact: true });
     }
   }
   // Поровну решённых и нерешённых — иначе при 60% «решено» модель, которая
@@ -122,7 +122,7 @@ function stableKey(id: string): number {
     const name = provider.kind === "groq" ? `groq (${GROQ_MODEL})` : provider.model;
     const rows: Array<{ id: string; truth: string; got: string | null; note: string; evidence: string; agentNote: string | null; error?: string; ms: number; inTok: number; outTok: number; cost: number }> = [];
     for (const [index, issue] of sample.entries()) {
-      const result = await withRetry(() => reconcileIssue(provider, issue.description, issue.agentTexts));
+      const result = await withRetry(() => reconcileIssue(provider, issue.description, issue.thread));
       rows.push({
         id: issue.id,
         truth: issue.status,

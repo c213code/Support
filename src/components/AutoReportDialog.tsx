@@ -21,6 +21,7 @@ type Verdict = {
   proposed: string | null;
   note: string | null;
   evidence: string | null;
+  reason: string | null;
   resolver: string | null;
   error: string | null;
   appliedAt: string | null;
@@ -80,6 +81,45 @@ const CHOICES: { value: IssueStatus; label: string }[] = [
   { value: "PENDING", label: "⚠️ Пендинг" },
 ];
 const ESCALATE = "ESCALATE";
+
+// «Почему так?»: вывод модели одной фразой и то, что она видела. Переписку
+// грузим, только когда блок раскрыли, — это килобайты на тикет.
+function WhyBlock({ verdictId, reason }: { verdictId: string; reason: string | null }) {
+  const [input, setInput] = useState<string | null | undefined>(undefined);
+  async function load() {
+    if (input !== undefined) return;
+    const res = await fetch(`/api/reconcile/verdict/${verdictId}`).catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => null) : null;
+    setInput(data?.input ?? null);
+  }
+  return (
+    <details
+      className="mt-1 text-xs text-slate-500"
+      onToggle={(e) => {
+        if ((e.currentTarget as HTMLDetailsElement).open) void load();
+      }}
+    >
+      <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-600">
+        Почему так?
+      </summary>
+      <div className="mt-1 space-y-1.5 rounded-lg bg-slate-50 p-2">
+        {reason && <p className="text-slate-700">{reason}</p>}
+        {input === undefined ? (
+          <p className="text-slate-400">Загружаю, что видела модель…</p>
+        ) : input ? (
+          <>
+            <p className="text-slate-400">Что видела модель:</p>
+            <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap font-sans text-slate-600">
+              {input}
+            </pre>
+          </>
+        ) : (
+          <p className="text-slate-400">Переписка не сохранена (разбор до 24.09).</p>
+        )}
+      </div>
+    </details>
+  );
+}
 
 function time(iso: string): string {
   return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
@@ -378,6 +418,9 @@ export function AutoReportDialog({
                             </a>
                           )}
                         </p>
+                        {(v.state === "done" || v.state === "error") && (
+                          <WhyBlock verdictId={v.id} reason={v.reason} />
+                        )}
                         {v.state === "skipped" && (
                           <p className="mt-1 text-xs text-slate-400">{v.error}</p>
                         )}

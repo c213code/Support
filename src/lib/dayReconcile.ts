@@ -1,5 +1,6 @@
 import { callGroqChat, GROQ_MODEL } from "@/lib/ai";
 import { maskSensitiveForAi } from "@/lib/textClean";
+import type { ThreadLine } from "@/lib/resolutionNote";
 import { buildReconcileMessages, reasoningParams, RECONCILE_RULES } from "@/lib/reconcilePrompt";
 
 // Вечерний разбор: чем закончился каждый открытый тикет дня — по переписке в
@@ -32,6 +33,9 @@ export type ReconcileVerdict = {
   // Дословная цитата из реплик агента, на которой основан вывод, — чтобы
   // дежурный проверял решение за секунду, а не перечитывал чат.
   evidence: string;
+  // Почему модель выбрала этот статус — одна фраза для человека,
+  // проверяющего разбор (показывается в окне под «Почему так?»).
+  reason: string;
 };
 
 // costUsd — сколько запрос стоил, если провайдер это сообщает (OpenRouter).
@@ -48,10 +52,14 @@ export type ReconcileProvider = { kind: "gemini" | "groq" | "openrouter"; model:
 // Реплики агентов приходят уже замаскированными (collectResolutionContext), а
 // описание — нет: у тикетов из формы и заведённых руками в нём бывает почта
 // ученика. Без маски модель повторяет её в ответе, и почта оседает в журнале.
-function buildUserText(description: string, agentTexts: string[]): string {
+// Экспорт — ради журнала: разбор сохраняет ровно тот текст, что видела
+// модель, чтобы по ошибке сразу было видно, чего ей не хватило.
+export function buildUserText(description: string, thread: ThreadLine[]): string {
   description = maskSensitiveForAi(description);
-  const replies = agentTexts.map((text, i) => `${i + 1}. ${text}`).join("\n");
-  return `Обращение: ${description}\n\nРеплики агентов по порядку:\n${replies}`;
+  const replies = thread
+    .map((line, i) => `${i + 1}. ${line.from === "agent" ? "Агент" : "Куратор"}: ${line.text}`)
+    .join("\n");
+  return `Обращение: ${description}\n\nПереписка по порядку:\n${replies}`;
 }
 
 // Последний {…} в тексте. DeepSeek изредка пишет в ответ свои размышления
@@ -81,7 +89,7 @@ function parseVerdict(raw: string): ReconcileVerdict | null {
     data = lastJsonObject(raw);
   }
   if (typeof data !== "object" || data === null) return null;
-  const { status, note, evidence } = data as Record<string, unknown>;
+  const { status, note, evidence, reason } = data as Record<string, unknown>;
   if (typeof status !== "string" || !RECONCILE_STATUSES.includes(status as ReconcileStatus)) {
     return null;
   }
@@ -89,6 +97,7 @@ function parseVerdict(raw: string): ReconcileVerdict | null {
     status: status as ReconcileStatus,
     note: typeof note === "string" ? note.trim() : "",
     evidence: typeof evidence === "string" ? evidence.trim() : "",
+    reason: typeof reason === "string" ? reason.trim() : "",
   };
 }
 
@@ -119,6 +128,7 @@ async function askGemini(model: string, userText: string): Promise<ReconcileResu
               status: { type: "STRING", enum: [...RECONCILE_STATUSES] },
               note: { type: "STRING" },
               evidence: { type: "STRING" },
+              reason: { type: "STRING" },
             },
             required: ["status", "note", "evidence"],
           },
@@ -243,15 +253,15 @@ async function askOpenRouter(model: string, userText: string): Promise<Reconcile
   };
 }
 
-// Суждение по одному тикету. agentTexts — уже замаскированные реплики агентов
-// по этому тикету (collectResolutionContext); без реплик судить не о чем, и
-// такой тикет вызывающий код сразу помечает как «непонятно».
+// Суждение по одному тикету. thread — уже замаскированная переписка по нему:
+// реплики агентов и ответы куратора (collectResolutionContext); без реплик
+// агентов судить не о чем, и такой тикет вызывающий код сразу пропускает.
 export async function reconcileIssue(
   provider: ReconcileProvider,
   description: string,
-  agentTexts: string[]
+  thread: ThreadLine[]
 ): Promise<ReconcileResult> {
-  const userText = buildUserText(description, agentTexts);
+  const userText = buildUserText(description, thread);
   if (provider.kind === "gemini") return askGemini(provider.model, userText);
   if (provider.kind === "openrouter") return askOpenRouter(provider.model, userText);
   return askGroq(userText);
