@@ -180,6 +180,53 @@ model ForwardDraft {
   updatedAt       DateTime @updatedAt
 }
 
+// «Авто-репорт»: один запуск вечернего разбора по дню (lib/dayReconcile.ts).
+//
+// Хранится не ради отладки, а как журнал для людей: вечером видно, что ИИ
+// посчитал сделанным, на какой цитате из чата это основано и совпало ли с
+// тем, что дежурные применили. Без журнала проверить, можно ли доверять
+// разбору, было бы нечем.
+model ReconcileRun {
+  id         String             @id @default(cuid())
+  reportDate String
+  // Какая модель разбирала: при сравнении моделей видно, кто где ошибся.
+  model      String
+  startedBy  String
+  createdAt  DateTime           @default(now())
+  finishedAt DateTime?
+  verdicts   ReconcileVerdict[]
+
+  @@index([reportDate])
+}
+
+// Решение разбора по одному тикету. Ничего не меняет само: статус тикета
+// меняется только когда человек отметил решение и нажал «Применить»
+// (appliedAt/appliedBy), и только через changeIssueStatus.
+model ReconcileVerdict {
+  id           String       @id @default(cuid())
+  runId        String
+  run          ReconcileRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  issueId      String
+  issue        Issue        @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  statusBefore IssueStatus
+  // pending — ещё не разобран; done — модель ответила; skipped — в чате нет
+  // точно привязанных реплик, судить не по чему; error — модель не ответила.
+  state        String       @default("pending")
+  // RESOLVED | IN_PROGRESS | PENDING | ESCALATED | UNCLEAR
+  proposed     String?
+  note         String?
+  evidence     String?
+  // Кто ответил в чате — его имя пойдёт в «X шешті».
+  resolver     String?
+  error        String?
+  appliedAt    DateTime?
+  appliedBy    String?
+  createdAt    DateTime     @default(now())
+
+  @@index([runId])
+  @@index([issueId])
+}
+
 // Что именно бот написал в рабочую группу по конкретному тикету. Нужна
 // ровно для двух вещей: не отправить одно и то же дважды и суметь потом
 // исправить/удалить неудачный ответ (Telegram позволяет это только по
@@ -400,6 +447,8 @@ model Issue {
   // группе — поля формы лежат отдельно, см. IssueSubmission. Заявок может
   // быть несколько: при склейке тикетов они переезжают на основной.
   submissions    IssueSubmission[]
+  // Что вечерний разбор думал об этом тикете (см. ReconcileRun).
+  reconcileVerdicts ReconcileVerdict[]
 
   @@index([reportDate])
   // Библиотека решений (src/lib/solutionLibrary.ts) на каждой карточке

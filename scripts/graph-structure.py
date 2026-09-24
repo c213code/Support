@@ -85,6 +85,10 @@ AREAS = [
     ]),
     ("Репорт боссам", [
         r"^app/api/report/",
+        # Авто-репорт: ИИ разбирает переписку дня и предлагает итоги тикетов.
+        r"^app/api/reconcile/",
+        r"^components/AutoReportDialog\.tsx$",
+        r"^lib/(dayReconcile|reconcileRun)\.ts$",
         r"^app/api/cron/(evening-report|morning-report-check)/",
         r"^components/ReportLedger\.tsx$",
         r"^lib/(report|reportSend)\.ts$",

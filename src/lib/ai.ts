@@ -30,7 +30,7 @@ import {
 //
 // Модель переопределяется переменной GROQ_MODEL: когда Groq в следующий раз
 // поменяет список, чинится без деплоя.
-const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+export const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 // Groq free tier: 100k токенов/день, лимит висит на аккаунте целиком (не на
 // ключе) — второй ключ того же аккаунта квоту не обходит, нужен ключ с
@@ -50,7 +50,7 @@ function groqApiKeys(): string[] {
 // следующему, а не сразу к null. Возвращает null, только если так
 // ответили (или упали) вообще все ключи — вызывающий код как и раньше
 // откатывается на regex-чистку/пропуск фичи.
-async function callGroqChat(
+export async function callGroqChat(
   body: Record<string, unknown>,
   timeoutMs: number
 ): Promise<unknown> {

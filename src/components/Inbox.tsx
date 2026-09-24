@@ -9,6 +9,7 @@ import { BotSettingsMenu } from "@/components/BotSettingsMenu";
 import { GlossaryPanel } from "@/components/GlossaryPanel";
 import { GroqStatusPanel } from "@/components/GroqStatusPanel";
 import { ResolveDialog } from "@/components/ResolveDialog";
+import { AutoReportDialog } from "@/components/AutoReportDialog";
 import { EscalateDialog, type EscalateValues } from "@/components/EscalateDialog";
 import { AttachToIssuePicker } from "@/components/AttachToIssuePicker";
 import { Modal } from "@/components/Modal";
@@ -96,6 +97,8 @@ export function Inbox() {
   const [tab, setTab] = useState<"messages" | "board">("board");
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [resolvingIssueId, setResolvingIssueId] = useState<string | null>(null);
+  // Окно «Авто-репорт» (см. AutoReportDialog): ИИ разбирает переписку дня.
+  const [autoReportOpen, setAutoReportOpen] = useState(false);
   const [escalatingIssueId, setEscalatingIssueId] = useState<string | null>(
     null
   );
@@ -1134,6 +1137,13 @@ export function Inbox() {
                 <IconPlus className="h-3.5 w-3.5" />
                 Новый тикет
               </button>
+              <button
+                onClick={() => setAutoReportOpen(true)}
+                title="ИИ читает переписку по открытым тикетам дня и предлагает статусы и заметки для репорта"
+                className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+              >
+                🤖 Авто-репорт
+              </button>
               {issues.length >= 2 && (
                 <button
                   onClick={handleFindDuplicates}
@@ -1354,6 +1364,14 @@ export function Inbox() {
             </Modal>
           );
         })()}
+
+      {autoReportOpen && (
+        <AutoReportDialog
+          date={date}
+          onClose={() => setAutoReportOpen(false)}
+          onApplied={() => loadIssues(date)}
+        />
+      )}
 
       {resolvingIssueId &&
         (() => {
