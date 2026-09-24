@@ -55,6 +55,11 @@ async function withRetry(call: () => Promise<ReconcileResult>): Promise<Reconcil
     await sleep(15_000 * attempt);
     result = await call();
   }
+  // Как в проде (stepRun): любой сбой, кроме квоты, — ещё один повтор.
+  if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
+    await sleep(3000);
+    result = await call();
+  }
   return result;
 }
 
