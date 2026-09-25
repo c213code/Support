@@ -6,6 +6,7 @@ import type { IssueStatus } from "@/lib/status";
 import type { MySubmission } from "@/lib/miniappClient";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
 import { isAgentTelegramId } from "@/lib/agentTelegram";
+import { feedbackAvailability, lastFeedbackAt } from "@/lib/feedbackRequest";
 
 // За сколько показывать обращения: месяц — достаточно, чтобы увидеть всё
 // недавнее, и список не растёт бесконечно.
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest) {
       labelFields: true,
       photoFileId: true,
       photoFileIds: true,
+      issueId: true,
       issue: {
         select: {
           status: true,
@@ -77,6 +79,8 @@ export async function POST(request: NextRequest) {
 
   const labelOf = (row: { labelId: string | null; issue: { groupName: string } }) =>
     row.labelId ? findLabel(row.issue.groupName, row.labelId) : null;
+
+  const asked = await lastFeedbackAt(rows.map((row) => row.issueId));
 
   const items: MySubmission[] = rows.map((row) => ({
     id: row.id,
@@ -118,6 +122,23 @@ export async function POST(request: NextRequest) {
     // только пока его никто не взял в работу.
     canDelete:
       agent || (row.telegramUserId === check.user.id && row.issue.status === "SENT"),
+    // «КБ сұрау» — только автору и только по нерешённому.
+    feedback:
+      row.telegramUserId === check.user.id && row.issue.status !== "RESOLVED"
+        ? (() => {
+            const lastAskedAt = asked.get(row.issueId) ?? null;
+            const { canAsk, nextAt } = feedbackAvailability({
+              status: row.issue.status,
+              submittedAt: row.createdAt,
+              lastAskedAt,
+            });
+            return {
+              canAsk,
+              nextAt: nextAt?.toISOString() ?? null,
+              lastAskedAt: lastAskedAt?.toISOString() ?? null,
+            };
+          })()
+        : null,
   }));
 
   // Нерешённые сверху: это то, за чем куратор открыл список. Сортировка

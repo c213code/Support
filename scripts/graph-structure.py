@@ -56,7 +56,7 @@ AREAS = [
         # и черновик из пересланной переписки — всё это путь обращения из
         # мини-аппа, даже когда вызывает его вебхук (forwardDraft).
         r"^lib/(miniapp|miniappClient|statusKk|submitterNotify|telegramPhoto|submissionLabels"
-        r"|submissionChat|submissionGroupPost|forwardDraft|forwardFill|phone)\.ts$",
+        r"|submissionChat|submissionGroupPost|forwardDraft|forwardFill|phone|feedbackRequest)\.ts$",
     ]),
     ("ИИ (Groq)", [
         r"^app/api/ai/",

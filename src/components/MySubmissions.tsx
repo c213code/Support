@@ -55,6 +55,18 @@ function formatWhen(iso: string): string {
   return `${parts.day} ${MONTHS_KK[Number(parts.month) - 1]}, ${parts.hour}:${parts.minute}`;
 }
 
+// Только часы и минуты по Алматы — для «Қайта сұрау уақыты: 15:20». Без
+// падежного окончания после числа: оно зависит от того, как число читается
+// («15:20-дан», но «15:15-тен»), и ошибиться легко.
+function formatClock(iso: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "Asia/Almaty",
+  }).format(new Date(iso));
+}
+
 function StatusBadge({ status }: { status: IssueStatus }) {
   const meta = STATUS_KK[status];
   return (
@@ -86,6 +98,8 @@ export function MySubmissions({
   // зависимости — то есть перезагрузку на каждый рендер.
   const scopeRef = useRef<"mine" | "all">("mine");
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Подтверждение «КБ сұрау» — отдельно от ошибки, зелёным.
+  const [notice, setNotice] = useState<string | null>(null);
   const loadedAtRef = useRef(0);
   const inFlightRef = useRef(false);
 
@@ -191,6 +205,54 @@ export function MySubmissions({
     }
   }
 
+  // «КБ сұрау»: бот спросит в группе реплаем на пост обращения (см.
+  // lib/feedbackRequest.ts). Частоту и право проверяет сервер; здесь только
+  // сразу показываем, что спросили, чтобы не жали второй раз.
+  async function askFeedback(item: MySubmission) {
+    setBusyId(item.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/miniapp/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: currentInitData(), submissionId: item.id }),
+        signal: timeoutSignal(),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? `Сұрау жіберілмеді (қате ${res.status})`);
+        return;
+      }
+      haptic("tap");
+      setNotice(
+        data?.via === "dm"
+          ? "Сұрау кезекшіге жіберілді ✅"
+          : "Сұрау топқа жіберілді — кезекші жауап береді ✅"
+      );
+      const now = new Date();
+      setItems(
+        (prev) =>
+          prev?.map((row) =>
+            row.id === item.id
+              ? {
+                  ...row,
+                  feedback: {
+                    canAsk: false,
+                    lastAskedAt: now.toISOString(),
+                    nextAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
+                  },
+                }
+              : row
+          ) ?? prev
+      );
+    } catch {
+      setError("Байланыс жоқ — интернетті тексеріп, қайталаңыз");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (env === "browser") {
     return (
       <p className={styles.notice}>
@@ -245,6 +307,11 @@ export function MySubmissions({
           {error}
         </p>
       )}
+      {notice && (
+        <p className={styles.notice} role="status">
+          {notice}
+        </p>
+      )}
 
       {items === null && loading && (
         <div className={`${styles.list} ${styles.section}`} aria-busy="true">
@@ -274,6 +341,7 @@ export function MySubmissions({
               showAuthor={scope === "all"}
               busy={busyId === item.id}
               onDelete={() => remove(item)}
+              onFeedback={() => askFeedback(item)}
               open={openId === item.id}
               onToggle={() => {
                 haptic("select");
@@ -294,6 +362,7 @@ function SubmissionItem({
   busy,
   onToggle,
   onDelete,
+  onFeedback,
 }: {
   item: MySubmission;
   open: boolean;
@@ -301,6 +370,7 @@ function SubmissionItem({
   busy: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onFeedback: () => void;
 }) {
   const panelId = `submission-${item.id}`;
   return (
@@ -363,6 +433,28 @@ function SubmissionItem({
           </ol>
 
           <SubmissionPhotos submissionId={item.id} count={item.photoCount} />
+
+          {item.feedback &&
+            (item.feedback.canAsk ? (
+              <button
+                type="button"
+                className={styles.feedbackButton}
+                disabled={busy}
+                onClick={onFeedback}
+              >
+                {busy ? "Жіберілуде…" : "🔔 КБ сұрау"}
+              </button>
+            ) : (
+              <p className={styles.feedbackHint}>
+                🔔{" "}
+                {item.feedback.lastAskedAt
+                  ? `КБ сұралды · ${formatClock(item.feedback.lastAskedAt)}. `
+                  : ""}
+                {item.feedback.nextAt
+                  ? `Қайта сұрау уақыты: ${formatClock(item.feedback.nextAt)}`
+                  : ""}
+              </p>
+            ))}
 
           {item.canDelete && (
             <button

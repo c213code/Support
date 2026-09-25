@@ -910,6 +910,38 @@
   color: var(--hint);
 }
 
+/* «КБ сұрау» — спросить, что с обращением. Акцентная, но не главная:
+   главное на карточке — статус и ответ дежурного. */
+.feedbackButton {
+  align-self: flex-start;
+  margin-top: 14px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--section));
+  color: var(--accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.feedbackButton:disabled {
+  opacity: 0.6;
+}
+
+.feedbackButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.feedbackHint {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--hint);
+}
+
 /* Переключатель «свои / все» — виден только дежурному. */
 .scopeSwitch {
   display: flex;

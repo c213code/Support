@@ -23,6 +23,9 @@ export type MySubmission = {
   // Имя подавшего — видно дежурному в режиме «все обращения».
   authorName: string;
   canDelete: boolean;
+  // «КБ сұрау»: можно ли спросить сейчас, а если нет — с какого времени
+  // (ISO). Кнопка есть только у своих нерешённых; решает сервер.
+  feedback: { canAsk: boolean; nextAt: string | null; lastAskedAt: string | null } | null;
 };
 
 // Минимум Telegram WebApp API, которым пользуется мини-апп
