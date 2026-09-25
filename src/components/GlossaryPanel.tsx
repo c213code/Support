@@ -39,15 +39,27 @@ export function GlossaryPanel({
     setDraftMeaning(t.meaning);
   }
 
+  // После сохранения строка меняется на месте, без перезагрузки списка:
+  // сервер сортирует «ручные» термины первыми, и поправленный улетал в
+  // начало словаря, а вместе с ним — и прокрутка того, кто правил. Займёт
+  // своё место среди ручных при следующем открытии.
   async function saveEdit() {
-    if (!editingId || !draftTerm.trim() || !draftMeaning.trim()) return;
+    const id = editingId;
+    if (!id || !draftTerm.trim() || !draftMeaning.trim()) return;
     setSaving(true);
-    const data = await post({ action: "update", id: editingId, term: draftTerm, meaning: draftMeaning });
+    const data = await post({ action: "update", id, term: draftTerm, meaning: draftMeaning });
     setSaving(false);
-    if (data) {
-      setEditingId(null);
-      await load();
-    }
+    if (!data) return;
+    setTerms((prev) =>
+      prev?.map((t) =>
+        t.id === id ? { ...t, term: draftTerm.trim(), meaning: draftMeaning.trim(), auto: false } : t
+      ) ?? prev
+    );
+    setEditingId(null);
+    // Фокус — обратно на ту же строку, а не в никуда: поле правки исчезло.
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLButtonElement>(`[data-term-id="${id}"]`)?.focus({ preventScroll: true })
+    );
   }
 
   async function load() {
@@ -57,6 +69,7 @@ export function GlossaryPanel({
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load on mount
     load();
   }, []);
 
@@ -191,6 +204,7 @@ export function GlossaryPanel({
               ) : (
               <li key={t.id} className="group flex items-baseline gap-2 py-1.5">
                 <button
+                  data-term-id={t.id}
                   onClick={() => startEdit(t)}
                   title="Исправить"
                   className="flex min-w-0 flex-1 items-baseline gap-2 rounded text-left hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300"
