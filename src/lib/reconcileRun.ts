@@ -148,7 +148,9 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   // Судим только по точно привязанным репликам: найденные догадкой по окну
   // времени могут быть о соседнем тикете, а ошибка тут уходит в репорт.
   if ((!context.ok || !context.context.exact) && siblings.length === 0) {
-    await prisma.reconcileVerdict.update({
+    // updateMany, а не update: тикет могли объединить посреди разбора, и его
+    // строка журнала ушла каскадом — тогда писать некуда, и это не ошибка.
+    await prisma.reconcileVerdict.updateMany({
       where: { id: verdict.id },
       data: {
         state: "skipped",
@@ -183,7 +185,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   if (result.ok && answeredBy !== provider) {
     result.verdict.reason = `${result.verdict.reason} (ответила запасная модель: ${providerLabel(answeredBy)})`.trim();
   }
-  await prisma.reconcileVerdict.update({
+  await prisma.reconcileVerdict.updateMany({
     where: { id: verdict.id },
     data: result.ok
       ? {

@@ -32,6 +32,8 @@ type VerdictLite = { state: string; proposed: string | null };
 
 // Как часто подтягивать журнал, пока идёт шаг.
 const STEP_POLL_MS = 1500;
+// Сколько ждём ответа на шаг: maxDuration маршрута — 300 с, плюс запас.
+const STEP_TIMEOUT_MS = 330_000;
 
 export function countVerdicts(verdicts: VerdictLite[]): { done: number; counts: RunCounts } {
   const counts: RunCounts = { resolved: 0, inProgress: 0, pending: 0, unclear: 0, skipped: 0, error: 0 };
@@ -92,27 +94,44 @@ export function useAutoReportRun() {
           const verdicts = await fetchRun(runId, date);
           polling = false;
           if (verdicts) {
+            // Все тикеты уже разобраны — показываем «готово», не дожидаясь
+            // ответа на шаг: он мог и не прийти (25.09 полоса 20 минут висела
+            // на «6 из 6 · разбираю», хотя разбор давно закончился).
+            const allDone = verdicts.length > 0 && verdicts.every((v) => v.state !== "pending");
             // Опоздавший ответ не должен откатывать полосу назад.
             setRun((prev) => {
               if (prev?.runId !== runId || prev.finishedAt) return prev;
-              const next = snapshot(verdicts, false);
-              return next.done > prev.done ? next : prev;
+              const next = snapshot(verdicts, allDone);
+              return allDone || next.done > prev.done ? next : prev;
             });
           }
         }, STEP_POLL_MS);
-        const step = await fetch(`/api/reconcile/${runId}/step`, { method: "POST" })
+        // Шаг не может идти дольше maxDuration маршрута (300 с); если ответа
+        // нет дольше — не ждём вечно, а смотрим журнал.
+        const step = await fetch(`/api/reconcile/${runId}/step`, {
+          method: "POST",
+          signal: AbortSignal.timeout(STEP_TIMEOUT_MS),
+        })
           .catch(() => null)
           .finally(() => clearInterval(poll));
         const stepData = step?.ok ? await step.json().catch(() => null) : null;
-        if (!stepData) {
+        const verdicts = await fetchRun(runId, date);
+        const allDone = verdicts ? verdicts.every((v) => v.state !== "pending") : false;
+        if (!stepData && !allDone) {
           setRun((prev) =>
             prev?.runId === runId ? { ...prev, failed: "Разбор прервался — можно продолжить" } : prev
           );
           return;
         }
-        const verdicts = await fetchRun(runId, date);
-        const finished = (stepData.remaining ?? 0) === 0;
+        const finished = allDone || (stepData?.remaining ?? 0) === 0;
+        // Журнал не пришёл, но шаг сказал «всё» — отмечаем готовым с тем,
+        // что уже показано: иначе окно так и осталось бы «разбираю».
         if (verdicts) setRun(snapshot(verdicts, finished));
+        else if (finished) {
+          setRun((prev) =>
+            prev?.runId === runId && !prev.finishedAt ? { ...prev, finishedAt: Date.now() } : prev
+          );
+        }
         if (finished) return;
       }
     } finally {
