@@ -88,6 +88,7 @@ export function stripReplyQuote(text: string, quoted: string | null): string {
 // живёт день (reportDate), а решают его обычно в течение часов. Более
 // старое — уже другая история в том же чате.
 const LOOKBACK_HOURS = 24;
+const REPLY_LOOKBACK_DAYS = 7;
 
 // Сколько реплик отдаём модели. Обычно решение — одно-два сообщения; всё,
 // что сверху, это уже соседние разговоры в том же чате. Берём последние:
@@ -198,6 +199,12 @@ export async function collectResolutionContext(
   const chatId = anchor.chatId;
   const since = new Date(anchor.at.getTime() - 60 * 60 * 1000);
   const until = new Date(since.getTime() + LOOKBACK_HOURS * 60 * 60 * 1000);
+  // Ответы РЕПЛАЕМ ищем дольше — неделю: реплай сам говорит, к чему он, и
+  // цепочка ниже (ownerOf) отнесёт его куда надо. Тикет теперь разбирают и
+  // на следующий день («📅 с 23.09»), а «жөнделді» Нурбека на тикет Мадины
+  // пришло через полтора дня после обращения — в сутки не влезало. Реплики
+  // без стрелки остаются в окне суток: там привязка — догадка по времени.
+  const replyUntil = new Date(since.getTime() + REPLY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const issueMessageIds = new Set(issueMessages.map((m) => m.messageId));
   // Кто написал обращение. Ответ агента на ЛЮБОЕ сообщение этого человека —
   // почти наверняка про его же тикет, даже если то сообщение само тикетом не
@@ -221,8 +228,11 @@ export async function collectResolutionContext(
       prisma.telegramMessage.findMany({
         where: {
           chatId,
-          receivedAt: { gte: since, lte: until },
           fromId: { in: ownAgentIds },
+          OR: [
+            { receivedAt: { gte: since, lte: until } },
+            { receivedAt: { gte: since, lte: replyUntil }, replyToMessageId: { not: null } },
+          ],
         },
         select: MESSAGE_FIELDS,
       }),
@@ -232,7 +242,7 @@ export async function collectResolutionContext(
       }),
       reporterIds.length > 0
         ? prisma.telegramMessage.findMany({
-            where: { chatId, receivedAt: { lte: until }, fromId: { in: reporterIds } },
+            where: { chatId, receivedAt: { lte: replyUntil }, fromId: { in: reporterIds } },
             select: MESSAGE_FIELDS,
             orderBy: { receivedAt: "asc" },
           })
