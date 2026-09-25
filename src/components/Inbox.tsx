@@ -1406,6 +1406,7 @@ export function Inbox() {
           autoRun={autoReport.run}
           onStart={() => autoReport.start(date)}
           onResume={(runId) => void autoReport.resume(runId, date)}
+          onStop={autoReport.stop}
         />
       )}
 

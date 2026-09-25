@@ -150,6 +150,7 @@ export function AutoReportDialog({
   autoRun,
   onStart,
   onResume,
+  onStop,
 }: {
   date: string;
   onClose: () => void;
@@ -159,6 +160,8 @@ export function AutoReportDialog({
   autoRun: AutoRunState | null;
   onStart: () => Promise<string | null>;
   onResume: (runId: string) => void;
+  // Остановить идущий разбор (см. useAutoReportRun.stop).
+  onStop: () => void;
   // Открыть окно передачи с доски (выбор команды) для этого тикета.
   onEscalate?: (issueId: string) => void;
   // Меняется, когда доска перечитала тикеты (например, после передачи) —
@@ -561,14 +564,24 @@ export function AutoReportDialog({
           >
             Закрыть
           </button>
-          <button
-            type="button"
-            onClick={start}
-            disabled={busy || running}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            {running ? "Разбираю…" : "Разобрать день"}
-          </button>
+          {running ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50"
+            >
+              ⏹ Остановить
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={start}
+              disabled={busy}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Разобрать день
+            </button>
+          )}
           <button
             type="button"
             onClick={apply}

@@ -65,10 +65,15 @@ export function useAutoReportRun() {
   // Какой запуск сейчас гоняет эта вкладка — второй цикл по тому же запуску
   // разбирал бы те же тикеты дважды.
   const driving = useRef<string | null>(null);
+  // «Остановить»: новые шаги не начинаются, текущий запрос обрывается.
+  // Тикеты, которые сервер уже взял в этот шаг, он доделает сам.
+  const stopRequested = useRef(false);
+  const stepAbort = useRef<AbortController | null>(null);
 
   const drive = useCallback(async (runId: string, date: string) => {
     if (driving.current) return;
     driving.current = runId;
+    stopRequested.current = false;
     const startedAt = Date.now();
     const snapshot = (verdicts: VerdictLite[], finished: boolean): AutoRunState => ({
       runId,
@@ -83,6 +88,12 @@ export function useAutoReportRun() {
       const first = await fetchRun(runId, date);
       if (first) setRun(snapshot(first, false));
       for (;;) {
+        if (stopRequested.current) {
+          setRun((prev) =>
+            prev?.runId === runId ? { ...prev, failed: "Разбор остановлен" } : prev
+          );
+          return;
+        }
         // Шаг — несколько тикетов одновременно, и ответ на него приходит,
         // когда готов самый медленный. Но каждый тикет пишется в журнал сразу
         // по готовности — поэтому, пока шаг идёт, подтягиваем журнал сами:
@@ -108,19 +119,29 @@ export function useAutoReportRun() {
         }, STEP_POLL_MS);
         // Шаг не может идти дольше maxDuration маршрута (300 с); если ответа
         // нет дольше — не ждём вечно, а смотрим журнал.
+        const controller = new AbortController();
+        stepAbort.current = controller;
+        const timeout = setTimeout(() => controller.abort(), STEP_TIMEOUT_MS);
         const step = await fetch(`/api/reconcile/${runId}/step`, {
           method: "POST",
-          signal: AbortSignal.timeout(STEP_TIMEOUT_MS),
+          signal: controller.signal,
         })
           .catch(() => null)
-          .finally(() => clearInterval(poll));
+          .finally(() => {
+            clearInterval(poll);
+            clearTimeout(timeout);
+            stepAbort.current = null;
+          });
         const stepData = step?.ok ? await step.json().catch(() => null) : null;
         const verdicts = await fetchRun(runId, date);
         const allDone = verdicts ? verdicts.every((v) => v.state !== "pending") : false;
         if (!stepData && !allDone) {
-          setRun((prev) =>
-            prev?.runId === runId ? { ...prev, failed: "Разбор прервался — можно продолжить" } : prev
-          );
+          const reason = stopRequested.current ? "Разбор остановлен" : "Разбор прервался — можно продолжить";
+          setRun((prev) => {
+            if (prev?.runId !== runId) return prev;
+            const next = verdicts ? snapshot(verdicts, false) : prev;
+            return { ...next, failed: reason };
+          });
           return;
         }
         const finished = allDone || (stepData?.remaining ?? 0) === 0;
@@ -158,5 +179,11 @@ export function useAutoReportRun() {
 
   const dismiss = useCallback(() => setRun(null), []);
 
-  return { run, start, resume: drive, dismiss };
+  const stop = useCallback(() => {
+    if (!driving.current) return;
+    stopRequested.current = true;
+    stepAbort.current?.abort();
+  }, []);
+
+  return { run, start, resume: drive, dismiss, stop };
 }
