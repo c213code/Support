@@ -4,7 +4,8 @@ import { getCurrentIdentity } from "@/lib/auth";
 import { stepRun } from "@/lib/reconcileRun";
 
 // Шаг — 3–6 тикетов одновременно (см. stepRun), так что он длится как самый
-// медленный из них: в худшем случае таймаут 60 с, пауза и повтор ещё 60 с.
+// медленный из них: в худшем случае таймаут 110 с, пауза 3 с и повтор ещё
+// 110 с — 223 с из 300.
 export const maxDuration = 300;
 
 type Params = { params: Promise<{ runId: string }> };

@@ -124,7 +124,10 @@ function parseVerdict(raw: string): ReconcileVerdict | null {
   };
 }
 
-const MODEL_TIMEOUT_MS = 60_000;
+// Трудная переписка (восемь реплик, спор о том, что делать) думается долго:
+// 25.09 MiMo отвечала за 50–60 с, и на 60 с запрос обрывался. 110 с —
+// с запасом, а попытка + пауза + повтор ещё укладываются в 300 с шага.
+const MODEL_TIMEOUT_MS = 110_000;
 
 // Ключ Gemini лежит в GEMINI_REPORT_KEY, а не в GEMINI_API_KEY: с последним
 // graphify отправляет код проекта во внешний API (см. CLAUDE.md).
@@ -243,8 +246,10 @@ async function askOpenRouter(model: string, userText: string, glossary: string):
       messages: buildReconcileMessages(model, userText, glossary),
       ...reasoningParams("openrouter", model),
       response_format: { type: "json_object" },
-      // Почти все свежие модели — reasoning-типа: лимит с запасом на размышления.
-      max_tokens: 4000,
+      // Почти все свежие модели — reasoning-типа: лимит с запасом на
+      // размышления. 4000 не хватало: DeepSeek на трудной переписке
+      // исписал весь лимит размышлениями и вернул пустой ответ.
+      max_tokens: 8000,
       usage: { include: true },
     }),
   }).catch((err: unknown) => err as Error);
@@ -252,7 +257,7 @@ async function askOpenRouter(model: string, userText: string, glossary: string):
   if (res instanceof Error) return { ok: false, error: `сеть: ${res.name}`, ms };
 
   const data = (await res.json().catch(() => null)) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
     usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
     error?: { message?: string; code?: number };
   } | null;
@@ -261,7 +266,15 @@ async function askOpenRouter(model: string, userText: string, glossary: string):
   }
   const text = data?.choices?.[0]?.message?.content ?? "";
   const verdict = parseVerdict(text);
-  if (!verdict) return { ok: false, error: `не JSON по схеме: ${text.slice(0, 120)}`, ms };
+  if (!verdict) {
+    // Пустой ответ с finish_reason=length — модель исписала лимит
+    // размышлениями и до ответа не дошла; человеку это понятнее, чем «не JSON».
+    const error =
+      !text && data?.choices?.[0]?.finish_reason === "length"
+        ? "модель не уложилась в лимит размышлений — разберите заново или поставьте вручную"
+        : `не JSON по схеме: ${text.slice(0, 120)}`;
+    return { ok: false, error, ms };
+  }
   return {
     ok: true,
     verdict,
