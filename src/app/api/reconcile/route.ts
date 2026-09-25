@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return NextResponse.json({ error: "date must be YYYY-MM-DD" }, { status: 400 });
   }
-  return NextResponse.json({ runs: await runsForDay(date) });
+  return NextResponse.json(await runsForDay(date));
 }
 
 // Новый запуск разбора по дню. Сам ничего не разбирает — только заводит

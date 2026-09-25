@@ -23,6 +23,7 @@ type Verdict = {
   evidence: string | null;
   reason: string | null;
   resolver: string | null;
+  mergeTargetId: string | null;
   error: string | null;
   appliedAt: string | null;
   appliedBy: string | null;
@@ -35,6 +36,8 @@ type Verdict = {
     reportDate: string;
   };
 };
+
+type MergeTarget = { id: string; description: string; reportDate: string; groupName: string };
 
 type Run = {
   id: string;
@@ -163,6 +166,9 @@ export function AutoReportDialog({
   refreshToken?: unknown;
 }) {
   const [runs, setRuns] = useState<Run[] | null>(null);
+  // Тикеты, с которыми предлагается объединить (см. findSplitOriginal).
+  const [mergeTargets, setMergeTargets] = useState<Record<string, MergeTarget>>({});
+  const [mergingId, setMergingId] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Статус, выбранный человеком вместо предложенного моделью.
@@ -175,6 +181,7 @@ export function AutoReportDialog({
     const data = res.ok ? await res.json().catch(() => null) : null;
     const list: Run[] = data?.runs ?? [];
     setRuns(list);
+    setMergeTargets(data?.mergeTargets ?? {});
     return list;
   }, [date]);
 
@@ -285,6 +292,30 @@ export function AutoReportDialog({
       onApplied();
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Объединить тикет с тем, продолжением которого он оказался. Тот же
+  // маршрут, что у ручного объединения на доске; этот тикет исчезает, его
+  // сообщения и ответы переезжают в старший.
+  async function merge(verdict: Verdict, target: MergeTarget) {
+    setMergingId(verdict.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/issues/${verdict.issueId}/merge-into`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: target.id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error ?? "Не удалось объединить");
+        return;
+      }
+      await loadRuns();
+      onApplied();
+    } finally {
+      setMergingId(null);
     }
   }
 
@@ -401,6 +432,25 @@ export function AutoReportDialog({
                         </p>
                         {v.evidence && (
                           <p className="mt-1 text-xs italic text-slate-500">«{v.evidence}»</p>
+                        )}
+                        {v.mergeTargetId && mergeTargets[v.mergeTargetId] && !v.appliedAt && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-lg bg-violet-50 px-2 py-1.5 text-xs text-violet-800">
+                            <span className="min-w-0 flex-1">
+                              🔗 Похоже на продолжение тикета «
+                              {mergeTargets[v.mergeTargetId].description.slice(0, 80)}» (📅{" "}
+                              {mergeTargets[v.mergeTargetId].reportDate.slice(8, 10)}.
+                              {mergeTargets[v.mergeTargetId].reportDate.slice(5, 7)}) — тот же автор,
+                              та же проблема
+                            </span>
+                            <button
+                              type="button"
+                              disabled={busy || mergingId !== null}
+                              onClick={() => merge(v, mergeTargets[v.mergeTargetId!])}
+                              className="rounded-md bg-violet-600 px-2 py-1 font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                            >
+                              {mergingId === v.id ? "Объединяю…" : "Объединить"}
+                            </button>
+                          </div>
                         )}
                         {/* Проверить вывод модели: карточка тикета на доске и
                             сама переписка в Telegram — в новой вкладке, чтобы

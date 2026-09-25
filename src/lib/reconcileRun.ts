@@ -3,7 +3,7 @@ import { dayRangeUtc, shiftDateString } from "@/lib/date";
 import type { IssueStatus } from "@/lib/status";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { collectResolutionContext, resolverName } from "@/lib/resolutionNote";
-import { findResolvedSiblings, type ResolvedSibling } from "@/lib/relatedIssue";
+import { findResolvedSiblings, findSplitOriginal, type ResolvedSibling } from "@/lib/relatedIssue";
 import { buildUserText, reconcileIssue, type ReconcileProvider } from "@/lib/dayReconcile";
 
 // «Авто-репорт» по кнопке на доске: запуск, пошаговый разбор и применение.
@@ -141,6 +141,9 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   // findResolvedSiblings) — тогда есть о чём судить даже без нашего ответа
   // в этом чате: часто здесь и не отвечали, ответили там.
   const siblings = await findResolvedSiblings(verdict.issueId);
+  // Не продолжение ли это другого открытого тикета того же автора — тогда
+  // окно предложит объединить (как тикеты Амины за 24 и 25.09).
+  const mergeTargetId = (await findSplitOriginal(verdict.issueId))?.id ?? null;
   const thread = context.ok && context.context.exact ? context.context.thread : [];
   // Судим только по точно привязанным репликам: найденные догадкой по окну
   // времени могут быть о соседнем тикете, а ошибка тут уходит в репорт.
@@ -151,6 +154,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
         state: "skipped",
         proposed: "UNCLEAR",
         error: context.ok ? "переписка найдена только догадкой — судить рискованно" : SKIP_REASON[context.reason],
+        mergeTargetId,
       },
     });
     return;
@@ -190,8 +194,9 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
           reason: result.verdict.reason || null,
           resolver: resolverFor(result.verdict, siblings, context),
           input,
+          mergeTargetId,
         }
-      : { state: "error", error: result.error.slice(0, 300), input },
+      : { state: "error", error: result.error.slice(0, 300), input, mergeTargetId },
   });
 }
 
@@ -310,7 +315,23 @@ export async function applyVerdicts(
 
 // Журнал: запуски дня с решениями — для окна «Авто-репорт» и для вечерней
 // сверки «что ИИ посчитал сделанным и что из этого применили».
+// Запуски дня и тикеты, с которыми окно предлагает объединить (описание и
+// дата — чтобы человек видел, с чем именно).
 export async function runsForDay(reportDate: string) {
+  const runs = await runsOnly(reportDate);
+  const targetIds = [
+    ...new Set(runs.flatMap((r) => r.verdicts.map((v) => v.mergeTargetId)).filter((id): id is string => !!id)),
+  ];
+  const targets = targetIds.length
+    ? await prisma.issue.findMany({
+        where: { id: { in: targetIds } },
+        select: { id: true, description: true, reportDate: true, groupName: true, status: true },
+      })
+    : [];
+  return { runs, mergeTargets: Object.fromEntries(targets.map((t) => [t.id, t])) };
+}
+
+async function runsOnly(reportDate: string) {
   return prisma.reconcileRun.findMany({
     where: { reportDate },
     orderBy: { createdAt: "desc" },

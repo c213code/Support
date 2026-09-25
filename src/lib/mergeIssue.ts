@@ -45,6 +45,19 @@ export async function mergeIssueInto(
       data: { issueId: target.id },
     });
 
+    // Наши ответы по source и сообщения бота о нём — туда же. Иначе при
+    // удалении source ответы отвязываются (SetNull), посты бота удаляются
+    // каскадом, и из переписки target пропадает всё, что по нему сказали:
+    // «Как решили?» и вечерний разбор видят оборванный разговор.
+    await tx.telegramMessage.updateMany({
+      where: { agentIssueId: source.id },
+      data: { agentIssueId: target.id },
+    });
+    await tx.botReply.updateMany({
+      where: { issueId: source.id },
+      data: { issueId: target.id },
+    });
+
     await tx.issue.delete({ where: { id: source.id } });
 
     return nextTarget;

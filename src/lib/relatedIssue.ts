@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { stemSimilarity } from "@/lib/similarity";
+import { isSameRequestFollowUp } from "@/lib/ai";
+import { maskSensitiveForAi } from "@/lib/textClean";
 
 // «Про одно и то же пишут несколько человек».
 //
@@ -153,4 +155,84 @@ export async function findResolvedSiblings(issueId: string): Promise<ResolvedSib
     .sort((a, b) => b.score - a.score)
     .slice(0, MAX_SIBLINGS)
     .map(({ groupName, description, note }) => ({ groupName, description, note }));
+}
+
+// «Один случай разнесло на два тикета».
+//
+// 24.09 Амина написала, что ученик не может войти; наутро продолжила в том
+// же чате — сначала реплаем на вчерашнее (привязалось), потом без реплая
+// («Сілтеме берілмей», «Негізі почтасы басқа») — и бот завёл второй тикет.
+// Ответ дежурного ушёл во вчерашний, и сегодняшний висел «в работе».
+//
+// Кандидат — более ранний незакрытый тикет того же автора в том же чате (или
+// заявка того же куратора из мини-аппа) за последние три дня. Одна ли это
+// проблема, решает та же проверка, что склеивает продолжения на лету
+// (isSameRequestFollowUp): у куратора за три дня бывает несколько разных
+// обращений. Объединяет человек кнопкой — слияние удаляет тикет.
+const SPLIT_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const MAX_SPLIT_CANDIDATES = 3;
+
+export async function findSplitOriginal(
+  issueId: string
+): Promise<{ id: string; description: string; reportDate: string } | null> {
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: {
+      description: true,
+      createdAt: true,
+      sourceMessages: { select: { chatId: true, fromId: true, text: true } },
+      submissions: { select: { telegramUserId: true } },
+    },
+  });
+  if (!issue) return null;
+  const sourceTexts = issue.sourceMessages.map((m) => m.text ?? "").filter(Boolean);
+  const authors = issue.sourceMessages
+    .filter((m) => m.fromId != null)
+    .map((m) => ({ chatId: m.chatId, fromId: m.fromId as bigint }));
+  const curators = issue.submissions.map((s) => s.telegramUserId);
+  if (authors.length === 0 && curators.length === 0) return null;
+
+  const candidates = await prisma.issue.findMany({
+    where: {
+      id: { not: issueId },
+      status: { not: "RESOLVED" },
+      createdAt: {
+        lt: issue.createdAt,
+        gte: new Date(issue.createdAt.getTime() - SPLIT_WINDOW_MS),
+      },
+      OR: [
+        ...authors.map((a) => ({
+          sourceMessages: { some: { chatId: a.chatId, fromId: a.fromId } },
+        })),
+        ...(curators.length ? [{ submissions: { some: { telegramUserId: { in: curators } } } }] : []),
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: MAX_SPLIT_CANDIDATES,
+    select: { id: true, description: true, reportDate: true },
+  });
+
+  // Проверке мало двух описаний: «сілтеме берілмей, почтасы басқа» рядом с
+  // «кіре алмай отыр» выглядит другой проблемой, а на деле это ответ на наш
+  // вопрос «Осы почта иә?» во вчерашнем тикете. Поэтому даём ей наши
+  // последние реплики по старшему тикету и сами сообщения нового.
+  const newText = sourceTexts.map((t) => maskSensitiveForAi(t)).join("\n") || issue.description;
+  for (const candidate of candidates) {
+    const ours = await prisma.telegramMessage.findMany({
+      where: { agentIssueId: candidate.id, text: { not: null } },
+      orderBy: { receivedAt: "desc" },
+      take: 3,
+      select: { text: true },
+    });
+    const existing = ours.length
+      ? `${candidate.description}\nНаши последние реплики по нему: ${ours
+          .reverse()
+          .map((m) => maskSensitiveForAi(m.text ?? ""))
+          .join(" / ")}`
+      : candidate.description;
+    if ((await isSameRequestFollowUp(existing, newText)) === true) {
+      return candidate;
+    }
+  }
+  return null;
 }
