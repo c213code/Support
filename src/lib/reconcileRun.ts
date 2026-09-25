@@ -3,6 +3,7 @@ import { dayRangeUtc, shiftDateString } from "@/lib/date";
 import type { IssueStatus } from "@/lib/status";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { collectResolutionContext, resolverName } from "@/lib/resolutionNote";
+import { findResolvedSiblings, type ResolvedSibling } from "@/lib/relatedIssue";
 import { buildUserText, reconcileIssue, type ReconcileProvider } from "@/lib/dayReconcile";
 
 // «Авто-репорт» по кнопке на доске: запуск, пошаговый разбор и применение.
@@ -88,14 +89,36 @@ const SKIP_REASON: Record<"no-agent-ids" | "no-issue-messages" | "no-agent-messa
   "no-agent-messages": "в чате по нему никто из агентов не отвечал",
 };
 
+// Чьё имя пойдёт в «X шешті». Решено по соседней группе (цитата — из её
+// решения) — решал тот, кто решал там: «Тикош шешті, …» в заметке соседа.
+// Иначе — кто ответил в этом чате; без точной переписки — никто (подставится
+// тот, кто применит).
+function resolverFor(
+  verdict: { status: string; evidence: string },
+  siblings: ResolvedSibling[],
+  context: Awaited<ReturnType<typeof collectResolutionContext>>
+): string | null {
+  if (verdict.status === "RESOLVED" && verdict.evidence) {
+    const source = siblings.find((s) => s.note?.includes(verdict.evidence));
+    const name = source?.note?.match(/^\s*([^,]+?)\s+шешті/)?.[1];
+    if (source) return name ?? null;
+  }
+  return context.ok && context.context.exact ? resolverName(context.context) : null;
+}
+
 type PendingVerdict = { id: string; issueId: string; issue: { description: string } };
 
 // Суждение по одному тикету запуска — пишет результат в его строку журнала.
 async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider): Promise<void> {
   const context = await collectResolutionContext(verdict.issueId);
+  // Та же общая поломка могла быть решена в другой группе (см.
+  // findResolvedSiblings) — тогда есть о чём судить даже без нашего ответа
+  // в этом чате: часто здесь и не отвечали, ответили там.
+  const siblings = await findResolvedSiblings(verdict.issueId);
+  const thread = context.ok && context.context.exact ? context.context.thread : [];
   // Судим только по точно привязанным репликам: найденные догадкой по окну
   // времени могут быть о соседнем тикете, а ошибка тут уходит в репорт.
-  if (!context.ok || !context.context.exact) {
+  if ((!context.ok || !context.context.exact) && siblings.length === 0) {
     await prisma.reconcileVerdict.update({
       where: { id: verdict.id },
       data: {
@@ -108,8 +131,8 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   }
 
   // Что видела модель — в журнал: по нему ошибка разбора видна сразу.
-  const input = buildUserText(verdict.issue.description, context.context.thread);
-  let result = await reconcileIssue(provider, verdict.issue.description, context.context.thread);
+  const input = buildUserText(verdict.issue.description, thread, siblings);
+  let result = await reconcileIssue(provider, verdict.issue.description, thread, siblings);
   // Сетевой сбой, «модель перегружена» (503), пустой ответ и минутный лимит
   // Groq проходят сами — один повтор (на прогонах по прошлым дням так падало
   // 2–14% запросов). Groq считает лимит поминутно (8000 токенов на ключ,
@@ -118,7 +141,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   // спасёт: такой тикет помечается ошибкой, его можно разобрать заново позже.
   if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
     await new Promise((resolve) => setTimeout(resolve, provider.kind === "groq" ? 15_000 : 3000));
-    result = await reconcileIssue(provider, verdict.issue.description, context.context.thread);
+    result = await reconcileIssue(provider, verdict.issue.description, thread, siblings);
   }
   await prisma.reconcileVerdict.update({
     where: { id: verdict.id },
@@ -129,7 +152,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
           note: result.verdict.note,
           evidence: result.verdict.evidence,
           reason: result.verdict.reason || null,
-          resolver: resolverName(context.context),
+          resolver: resolverFor(result.verdict, siblings, context),
           input,
         }
       : { state: "error", error: result.error.slice(0, 300), input },

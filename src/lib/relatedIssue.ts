@@ -106,3 +106,51 @@ export async function findRelatedRecentIssue(params: {
   }
   return best;
 }
+
+// «Та же поломка в другой группе уже решена».
+//
+// Общая поломка платформы (не грузятся файлы, не видно картинок) приходит
+// сразу в несколько групп: 25.09 в 10:42 «1.3.3 ст нұсқасындағы сурет
+// көрінбейді» в Әдістеме, в 10:43 «файл жүктелмейді, суреттер көрінбейді» в
+// Product. В Product куратор написал «реттелді толық», и тикет закрыли, а в
+// Әдістеме по нему в чате так и осталось «жақсы, қарап көреміз» — вечерний
+// разбор честно ставил «в работе».
+//
+// Здесь — только кандидаты: решённые тикеты других групп, заведённые почти
+// одновременно, с похожим текстом. Та ли это поломка, решает модель в
+// вечернем разборе (lib/dayReconcile.ts): похожие по форме обращения про
+// разных учеников — не одна поломка, и это видно только по сути.
+const SIBLING_WINDOW_MS = 3 * 60 * 60 * 1000;
+// Строже, чем порог кандидата на склейку выше: там кнопка, а здесь —
+// предложенный статус в репорт.
+const SIBLING_MIN_SIMILARITY = 0.25;
+const MAX_SIBLINGS = 2;
+
+export type ResolvedSibling = { groupName: string; description: string; note: string | null };
+
+export async function findResolvedSiblings(issueId: string): Promise<ResolvedSibling[]> {
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { description: true, groupName: true, createdAt: true },
+  });
+  if (!issue) return [];
+  const candidates = await prisma.issue.findMany({
+    where: {
+      id: { not: issueId },
+      groupName: { not: issue.groupName },
+      status: "RESOLVED",
+      createdAt: {
+        gte: new Date(issue.createdAt.getTime() - SIBLING_WINDOW_MS),
+        lte: new Date(issue.createdAt.getTime() + SIBLING_WINDOW_MS),
+      },
+    },
+    select: { groupName: true, description: true, note: true },
+    take: 50,
+  });
+  return candidates
+    .map((c) => ({ ...c, score: stemSimilarity(issue.description, c.description) }))
+    .filter((c) => c.score >= SIBLING_MIN_SIMILARITY)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_SIBLINGS)
+    .map(({ groupName, description, note }) => ({ groupName, description, note }));
+}

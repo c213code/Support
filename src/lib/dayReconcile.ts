@@ -1,7 +1,9 @@
 import { callGroqChat, GROQ_MODEL } from "@/lib/ai";
 import { maskSensitiveForAi } from "@/lib/textClean";
 import type { ThreadLine } from "@/lib/resolutionNote";
+import type { ResolvedSibling } from "@/lib/relatedIssue";
 import { buildReconcileMessages, reasoningParams, RECONCILE_RULES } from "@/lib/reconcilePrompt";
+import { buildAiContext } from "@/lib/projectContext";
 
 // Вечерний разбор: чем закончился каждый открытый тикет дня — по переписке в
 // рабочем чате, а не по тому, успел ли дежурный передвинуть карточку.
@@ -54,12 +56,33 @@ export type ReconcileProvider = { kind: "gemini" | "groq" | "openrouter"; model:
 // ученика. Без маски модель повторяет её в ответе, и почта оседает в журнале.
 // Экспорт — ради журнала: разбор сохраняет ровно тот текст, что видела
 // модель, чтобы по ошибке сразу было видно, чего ей не хватило.
-export function buildUserText(description: string, thread: ThreadLine[]): string {
+// siblings — решённые почти одновременно похожие тикеты других групп
+// (findResolvedSiblings): возможно, та же общая поломка. Модель сама решает,
+// одна ли это поломка, — см. правило в reconcilePrompt.ts.
+export function buildUserText(
+  description: string,
+  thread: ThreadLine[],
+  siblings: ResolvedSibling[] = []
+): string {
   description = maskSensitiveForAi(description);
-  const replies = thread
-    .map((line, i) => `${i + 1}. ${line.from === "agent" ? "Агент" : "Куратор"}: ${line.text}`)
-    .join("\n");
-  return `Обращение: ${description}\n\nПереписка по порядку:\n${replies}`;
+  const replies = thread.length
+    ? thread
+        .map((line, i) => `${i + 1}. ${line.from === "agent" ? "Агент" : "Куратор"}: ${line.text}`)
+        .join("\n")
+    : "(в этом чате наши по обращению не отвечали)";
+  const parts = [`Обращение: ${description}`, `Переписка по порядку:\n${replies}`];
+  if (siblings.length) {
+    parts.push(
+      "Похожие обращения в ДРУГИХ группах, уже решённые (возможно, та же общая поломка):\n" +
+        siblings
+          .map(
+            (s) =>
+              `- [${s.groupName}] ${maskSensitiveForAi(s.description)} — решено${s.note ? `: ${maskSensitiveForAi(s.note)}` : ""}`
+          )
+          .join("\n")
+    );
+  }
+  return parts.join("\n\n");
 }
 
 // Последний {…} в тексте. DeepSeek изредка пишет в ответ свои размышления
@@ -105,7 +128,7 @@ const MODEL_TIMEOUT_MS = 60_000;
 
 // Ключ Gemini лежит в GEMINI_REPORT_KEY, а не в GEMINI_API_KEY: с последним
 // graphify отправляет код проекта во внешний API (см. CLAUDE.md).
-async function askGemini(model: string, userText: string): Promise<ReconcileResult> {
+async function askGemini(model: string, userText: string, glossary: string): Promise<ReconcileResult> {
   const started = Date.now();
   const key = process.env.GEMINI_REPORT_KEY;
   if (!key) return { ok: false, error: "GEMINI_REPORT_KEY не задан", ms: 0 };
@@ -117,7 +140,7 @@ async function askGemini(model: string, userText: string): Promise<ReconcileResu
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: RECONCILE_RULES }] },
+        systemInstruction: { parts: [{ text: RECONCILE_RULES + glossary }] },
         contents: [{ role: "user", parts: [{ text: userText }] }],
         generationConfig: {
           // Схема ответа — на стороне API: невалидного JSON не придёт.
@@ -169,12 +192,12 @@ async function askGemini(model: string, userText: string): Promise<ReconcileResu
   };
 }
 
-async function askGroq(userText: string): Promise<ReconcileResult> {
+async function askGroq(userText: string, glossary: string): Promise<ReconcileResult> {
   const started = Date.now();
   const data = (await callGroqChat(
     {
       model: GROQ_MODEL,
-      messages: buildReconcileMessages(GROQ_MODEL, userText),
+      messages: buildReconcileMessages(GROQ_MODEL, userText, glossary),
       ...reasoningParams("groq", GROQ_MODEL),
       response_format: { type: "json_object" },
       // Модель reasoning-типа: маленький лимит съедают размышления, и ответ
@@ -206,7 +229,7 @@ async function askGroq(userText: string): Promise<ReconcileResult> {
 // OpenRouter — один ключ на модели разных компаний (DeepSeek, Qwen, GLM,
 // Kimi, MiMo…): их сравнивают на прошлых днях тем же скриптом, а в прод идёт
 // победитель без новой интеграции. API совместим с OpenAI.
-async function askOpenRouter(model: string, userText: string): Promise<ReconcileResult> {
+async function askOpenRouter(model: string, userText: string, glossary: string): Promise<ReconcileResult> {
   const started = Date.now();
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { ok: false, error: "OPENROUTER_API_KEY не задан", ms: 0 };
@@ -217,7 +240,7 @@ async function askOpenRouter(model: string, userText: string): Promise<Reconcile
     signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
     body: JSON.stringify({
       model,
-      messages: buildReconcileMessages(model, userText),
+      messages: buildReconcileMessages(model, userText, glossary),
       ...reasoningParams("openrouter", model),
       response_format: { type: "json_object" },
       // Почти все свежие модели — reasoning-типа: лимит с запасом на размышления.
@@ -259,10 +282,14 @@ async function askOpenRouter(model: string, userText: string): Promise<Reconcile
 export async function reconcileIssue(
   provider: ReconcileProvider,
   description: string,
-  thread: ThreadLine[]
+  thread: ThreadLine[],
+  siblings: ResolvedSibling[] = []
 ): Promise<ReconcileResult> {
-  const userText = buildUserText(description, thread);
-  if (provider.kind === "gemini") return askGemini(provider.model, userText);
-  if (provider.kind === "openrouter") return askOpenRouter(provider.model, userText);
-  return askGroq(userText);
+  const userText = buildUserText(description, thread, siblings);
+  // Словарь компании — только термины, встретившиеся в этом тексте (правило
+  // из CLAUDE.md: весь словарь в каждый запрос не влезает в лимиты).
+  const glossary = await buildAiContext(userText);
+  if (provider.kind === "gemini") return askGemini(provider.model, userText, glossary);
+  if (provider.kind === "openrouter") return askOpenRouter(provider.model, userText, glossary);
+  return askGroq(userText, glossary);
 }
