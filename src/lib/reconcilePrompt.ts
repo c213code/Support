@@ -118,6 +118,14 @@ export function modelFamily(model: string): ModelFamily {
 const FORMAT_REMINDER =
   "\n\nОтветь только JSON-объектом {\"status\": ..., \"note\": ..., \"evidence\": ..., \"reason\": ...} — без текста до и после.";
 
+// Правила вместо RECONCILE_RULES — только для прогона на истории
+// (scripts/eval-reconcile.ts --rules=файл): так вариант промпта сравнивают
+// с текущим, не трогая то, чем разбирает прод.
+let rulesOverride: string | null = null;
+export function overrideReconcileRules(rules: string | null): void {
+  rulesOverride = rules;
+}
+
 // glossary — термины словаря компании, встретившиеся в тексте запроса
 // (buildAiContext): «ДТ», «АА», «кинескоп» и т. п. Модель их не знает, а
 // итог по переписке без них не понять («кинескопта жаңа вд ашу»).
@@ -128,7 +136,7 @@ export function buildReconcileMessages(
   today = new Date().toISOString().slice(0, 10)
 ): Array<{ role: "system" | "user"; content: string }> {
   const family = modelFamily(model);
-  const rules = RECONCILE_RULES + glossary;
+  const rules = (rulesOverride ?? RECONCILE_RULES) + glossary;
   const system =
     family === "mimo"
       ? `You are MiMo, an AI assistant developed by Xiaomi. Today's date: ${today}.\n\n${rules}`

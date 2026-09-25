@@ -11,7 +11,8 @@
 //
 // Самое дорогое — ложное «решено»: такой тикет уйдёт в репорт боссам как
 // сделанный. Поэтому отдельно считаем точность RESOLVED.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { overrideReconcileRules } from "@/lib/reconcilePrompt";
 import { prisma } from "@/lib/prisma";
 import { collectResolutionContext, type ThreadLine } from "@/lib/resolutionNote";
 import { findResolvedSiblings, type ResolvedSibling } from "@/lib/relatedIssue";
@@ -48,6 +49,20 @@ const PROVIDERS: ReconcileProvider[] = arg("models", "gemini:gemini-3.8-flash,gr
     if (kind === "openrouter") return { kind: "openrouter", model };
     return { kind: "gemini", model: model || "gemini-3.8-flash" };
   });
+
+// --rules=файл — сравнить вариант правил с текущими, не трогая прод.
+const RULES_FILE = arg("rules", "");
+if (RULES_FILE) overrideReconcileRules(readFileSync(RULES_FILE, "utf8"));
+// --gold=файл — поправки к эталону: {"<id тикета>": "RESOLVED" | "OPEN" |
+// "NOISE"}. Статус в базе шумный («өшірілді», а тикет так и остался
+// «Отправлено»); проверенные вручную тикеты судятся по поправке, а NOISE —
+// тикеты, по которым итог не понять и человеку, — из выборки выпадают.
+const GOLD: Record<string, string> = arg("gold", "")
+  ? JSON.parse(readFileSync(arg("gold", ""), "utf8"))
+  : {};
+// --concurrency=N — сколько тикетов разбирать одновременно (по умолчанию
+// по одному, с паузой --delay: так бережётся минутный лимит Groq).
+const CONCURRENCY = Math.max(1, Number(arg("concurrency", "1")));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -127,7 +142,14 @@ function stableKey(id: string): number {
   const sample = [
     ...resolved.slice(skipResolved, skipResolved + half),
     ...open.slice(skipOpen, skipOpen + LIMIT - half),
-  ];
+  ]
+    .filter((issue) => GOLD[issue.id] !== "NOISE")
+    .map((issue) => {
+      const gold = GOLD[issue.id];
+      if (gold === "RESOLVED") return { ...issue, status: "RESOLVED" as const };
+      if (gold === "OPEN" && issue.status === "RESOLVED") return { ...issue, status: "IN_PROGRESS" as const };
+      return issue;
+    });
   console.log(
     `тикетов ${FROM}…${TO}: ${issues.length}, с точно привязанной перепиской: ${withContext.length} ` +
       `(решено ${resolved.length}, открыто ${open.length}); в прогоне: ${sample.length} (${SET})\n`
@@ -138,28 +160,38 @@ function stableKey(id: string): number {
   for (const provider of PROVIDERS) {
     const name = provider.kind === "groq" ? `groq (${GROQ_MODEL})` : provider.model;
     const rows: Array<{ id: string; truth: string; got: string | null; note: string; evidence: string; reason: string; input: string; agentNote: string | null; error?: string; ms: number; inTok: number; outTok: number; cost: number }> = [];
-    for (const [index, issue] of sample.entries()) {
-      const result = await withRetry(() =>
-        reconcileIssue(provider, issue.description, issue.thread, issue.siblings, issue.general)
-      );
-      rows.push({
-        id: issue.id,
-        truth: issue.status,
-        got: result.ok ? result.verdict.status : null,
-        note: result.ok ? result.verdict.note : "",
-        evidence: result.ok ? result.verdict.evidence : "",
-        reason: result.ok ? result.verdict.reason : "",
-        input: buildUserText(issue.description, issue.thread, issue.siblings, issue.general),
-        agentNote: issue.note,
-        error: result.ok ? undefined : result.error,
-        ms: result.ms,
-        inTok: result.ok ? (result.usage?.inputTokens ?? 0) : 0,
-        outTok: result.ok ? (result.usage?.outputTokens ?? 0) : 0,
-        cost: result.ok ? (result.usage?.costUsd ?? 0) : 0,
-      });
-      process.stdout.write(`\r${name}: ${index + 1}/${sample.length}`);
-      await sleep(DELAY_MS);
-    }
+    type Row = (typeof rows)[number];
+    const slots: Row[] = new Array(sample.length);
+    let next = 0;
+    let finished = 0;
+    const worker = async () => {
+      while (next < sample.length) {
+        const index = next++;
+        const issue = sample[index];
+        const result = await withRetry(() =>
+          reconcileIssue(provider, issue.description, issue.thread, issue.siblings, issue.general)
+        );
+        slots[index] = {
+          id: issue.id,
+          truth: issue.status,
+          got: result.ok ? result.verdict.status : null,
+          note: result.ok ? result.verdict.note : "",
+          evidence: result.ok ? result.verdict.evidence : "",
+          reason: result.ok ? result.verdict.reason : "",
+          input: buildUserText(issue.description, issue.thread, issue.siblings, issue.general),
+          agentNote: issue.note,
+          error: result.ok ? undefined : result.error,
+          ms: result.ms,
+          inTok: result.ok ? (result.usage?.inputTokens ?? 0) : 0,
+          outTok: result.ok ? (result.usage?.outputTokens ?? 0) : 0,
+          cost: result.ok ? (result.usage?.costUsd ?? 0) : 0,
+        };
+        process.stdout.write(`\r${name}: ${++finished}/${sample.length}`);
+        await sleep(DELAY_MS);
+      }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    rows.push(...slots);
     process.stdout.write("\n");
 
     const answered = rows.filter((r) => r.got !== null);
@@ -207,7 +239,7 @@ function stableKey(id: string): number {
     if (process.argv.includes("--misses")) {
       console.log(`\n── ${name}: расхождения с эталоном ──`);
       for (const r of answered.filter((x) => truthResolved(x) !== saidResolved(x))) {
-        console.log(`\n[эталон ${r.truth} → модель ${r.got}] ${r.note}\n  почему: ${r.reason}\n${r.input.replace(/^/gm, "  | ")}`);
+        console.log(`\n[эталон ${r.truth} → модель ${r.got}] (${r.id}) ${r.note}\n  почему: ${r.reason}\n${r.input.replace(/^/gm, "  | ")}`);
       }
     }
   }
