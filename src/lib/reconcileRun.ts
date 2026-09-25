@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { dayRangeUtc, shiftDateString } from "@/lib/date";
 import type { IssueStatus } from "@/lib/status";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { collectResolutionContext, resolverName } from "@/lib/resolutionNote";
@@ -38,12 +39,35 @@ function providerLabel(provider: ReconcileProvider): string {
 
 // Какие тикеты разбирать: все нерешённые тикеты дня. «Отправлено» тоже —
 // часто по нему уже ответили в чате, просто карточку не тронули.
+// Сколько дней назад ещё смотрим на незакрытые тикеты, по которым в
+// разбираемый день была переписка.
+const CARRY_OVER_DAYS = 7;
+
 export async function startRun(reportDate: string, startedBy: string) {
-  const issues = await prisma.issue.findMany({
+  const today = await prisma.issue.findMany({
     where: { reportDate, status: { not: "RESOLVED" } },
     select: { id: true, status: true },
     orderBy: { createdAt: "asc" },
   });
+  // Плюс вчерашние (и старше, до недели) незакрытые тикеты, по которым в
+  // ЭТОТ день писали в чате. Иначе ответ дежурного на вчерашнее обращение
+  // («<почта> <пароль> — осымен кіреді» 25.09 на тикет от 24.09) не видел
+  // ни один разбор: вчерашний уже прошёл, а сегодняшний берёт только
+  // сегодняшние тикеты.
+  const { start, end } = dayRangeUtc(reportDate);
+  const earlier = await prisma.issue.findMany({
+    where: {
+      reportDate: { gte: shiftDateString(reportDate, -CARRY_OVER_DAYS), lt: reportDate },
+      status: { not: "RESOLVED" },
+      OR: [
+        { sourceMessages: { some: { receivedAt: { gte: start, lt: end } } } },
+        { agentReplies: { some: { receivedAt: { gte: start, lt: end } } } },
+      ],
+    },
+    select: { id: true, status: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const issues = [...earlier, ...today];
   return prisma.reconcileRun.create({
     data: {
       reportDate,
@@ -241,7 +265,14 @@ export async function runsForDay(reportDate: string) {
         omit: { input: true },
         include: {
           issue: {
-            select: { description: true, groupName: true, groupEmoji: true, status: true, telegramLink: true },
+            select: {
+              description: true,
+              groupName: true,
+              groupEmoji: true,
+              status: true,
+              telegramLink: true,
+              reportDate: true,
+            },
           },
         },
       },

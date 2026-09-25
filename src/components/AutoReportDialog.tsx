@@ -32,6 +32,7 @@ type Verdict = {
     groupEmoji: string | null;
     status: IssueStatus;
     telegramLink: string | null;
+    reportDate: string;
   };
 };
 
@@ -373,6 +374,12 @@ export function AutoReportDialog({
                       />
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-2 text-slate-800">
+                          {/* Тикет прошлого дня, по которому писали в этот день. */}
+                          {v.issue.reportDate !== date && (
+                            <span className="mr-1 rounded bg-amber-50 px-1 text-xs text-amber-700">
+                              📅 с {v.issue.reportDate.slice(8, 10)}.{v.issue.reportDate.slice(5, 7)}
+                            </span>
+                          )}
                           <span className="text-slate-400">
                             {v.issue.groupEmoji} {v.issue.groupName} ·{" "}
                           </span>

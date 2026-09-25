@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { todayDateString } from "@/lib/date";
+import { shiftDateString, todayDateString } from "@/lib/date";
 import { isNoiseOnly } from "@/lib/textClean";
 import { STATUS_META } from "@/lib/status";
 import { changeIssueStatus } from "@/lib/issueStatus";
@@ -23,6 +23,10 @@ import {
   sendTelegramMessage,
   type TelegramMessagePayload,
 } from "@/lib/telegram";
+
+// За сколько дней назад незакрытый тикет автора ещё считается «его текущим»
+// для проверки «это продолжение?».
+const FOLLOW_UP_DAYS = 3;
 
 // Разбор входящего сообщения агента/клиента, которое не заводит новый тикет,
 // а меняет уже существующий: реплика агента в группе двигает статус
@@ -281,7 +285,15 @@ export async function findSameAuthorActiveIssue(
       reportDate: true,
     },
   });
-  if (!issue || issue.status === "RESOLVED" || issue.reportDate !== todayDateString()) {
+  // Не только сегодняшний: куратор утром продолжает вчерашний разговор
+  // («Шешілді ме?», потом «Сілтеме берілмей», «Негізі почтасы басқа»), и с
+  // проверкой «только сегодня» вторая половина заводила новый тикет рядом
+  // с открытым вчерашним. Старше трёх дней — уже другой разговор.
+  if (
+    !issue ||
+    issue.status === "RESOLVED" ||
+    issue.reportDate < shiftDateString(todayDateString(), -FOLLOW_UP_DAYS)
+  ) {
     return null;
   }
 
