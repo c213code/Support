@@ -434,6 +434,14 @@ function SubmissionItem({
 
           <SubmissionPhotos submissionId={item.id} count={item.photoCount} />
 
+        </div>
+      )}
+
+      {/* Действия — в свёрнутой карточке, а не в раскрытой: кураторы
+          карточку почти не раскрывают, и кнопки оттуда не находили. Вне
+          кнопки-заголовка: кнопка внутри кнопки — невалидная разметка. */}
+      {(item.feedback || item.canDelete) && (
+        <div className={styles.submissionActions}>
           {item.feedback &&
             (item.feedback.canAsk ? (
               <button
@@ -455,7 +463,6 @@ function SubmissionItem({
                   : ""}
               </p>
             ))}
-
           {item.canDelete && (
             <button
               type="button"
@@ -463,7 +470,7 @@ function SubmissionItem({
               disabled={busy}
               onClick={onDelete}
             >
-              {busy ? "Өшірілуде…" : "🗑 Өтінішті өшіру"}
+              {busy ? "Өшірілуде…" : "🗑 Өшіру"}
             </button>
           )}
         </div>
