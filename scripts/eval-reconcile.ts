@@ -14,6 +14,7 @@
 import { writeFileSync } from "node:fs";
 import { prisma } from "@/lib/prisma";
 import { collectResolutionContext, type ThreadLine } from "@/lib/resolutionNote";
+import { findResolvedSiblings, type ResolvedSibling } from "@/lib/relatedIssue";
 import { GROQ_MODEL } from "@/lib/ai";
 import {
   buildUserText,
@@ -91,14 +92,29 @@ function stableKey(id: string): number {
     where: { reportDate: { gte: FROM, lte: TO } },
     select: { id: true, description: true, status: true, note: true, reportDate: true },
   });
-  const withContext: Array<(typeof issues)[number] & { thread: ThreadLine[]; exact: boolean }> = [];
+  // Модель видит то же, что в проде (judgeVerdict): переписку, общие
+  // сообщения агентов в чате и решённые соседние обращения из других групп.
+  const withContext: Array<
+    (typeof issues)[number] & {
+      thread: ThreadLine[];
+      exact: boolean;
+      general: { text: string; author: string | null }[];
+      siblings: ResolvedSibling[];
+    }
+  > = [];
   for (const issue of issues) {
     const ctx = await collectResolutionContext(issue.id);
     // Только точно привязанные реплики: найденные догадкой по окну времени
     // могут быть о соседнем тикете, и такой промах был бы не на совести
     // модели. В проде разбор так же судит только по точным.
     if (ctx.ok && ctx.context.exact) {
-      withContext.push({ ...issue, thread: ctx.context.thread, exact: true });
+      withContext.push({
+        ...issue,
+        thread: ctx.context.thread,
+        exact: true,
+        general: ctx.context.general,
+        siblings: await findResolvedSiblings(issue.id),
+      });
     }
   }
   // Поровну решённых и нерешённых — иначе при 60% «решено» модель, которая
@@ -123,7 +139,9 @@ function stableKey(id: string): number {
     const name = provider.kind === "groq" ? `groq (${GROQ_MODEL})` : provider.model;
     const rows: Array<{ id: string; truth: string; got: string | null; note: string; evidence: string; reason: string; input: string; agentNote: string | null; error?: string; ms: number; inTok: number; outTok: number; cost: number }> = [];
     for (const [index, issue] of sample.entries()) {
-      const result = await withRetry(() => reconcileIssue(provider, issue.description, issue.thread));
+      const result = await withRetry(() =>
+        reconcileIssue(provider, issue.description, issue.thread, issue.siblings, issue.general)
+      );
       rows.push({
         id: issue.id,
         truth: issue.status,
@@ -131,7 +149,7 @@ function stableKey(id: string): number {
         note: result.ok ? result.verdict.note : "",
         evidence: result.ok ? result.verdict.evidence : "",
         reason: result.ok ? result.verdict.reason : "",
-        input: buildUserText(issue.description, issue.thread),
+        input: buildUserText(issue.description, issue.thread, issue.siblings, issue.general),
         agentNote: issue.note,
         error: result.ok ? undefined : result.error,
         ms: result.ms,

@@ -20,7 +20,7 @@ import {
   findSameAuthorActiveIssue,
   attachFollowUpToTicket,
 } from "@/lib/webhook/messageIntake";
-import { resolveAgentTarget } from "@/lib/agentThread";
+import { resolveAgentTarget, type AgentTarget } from "@/lib/agentThread";
 import { isSameRequestFollowUp } from "@/lib/ai";
 import { sendBotReply } from "@/lib/botReply";
 import { isAutoReplyEnabled, isAiCleaningEnabled } from "@/lib/settings";
@@ -282,13 +282,25 @@ export async function POST(request: NextRequest) {
     // Время — отправки (message.date), а не получения: правку Telegram шлёт
     // тем же сообщением, и "полчаса до реплики" надо отсчитывать от того,
     // когда её написали, а не когда исправили.
-    const target = await resolveAgentTarget({
-      chatId,
-      messageId: message.message_id,
-      replyToMessageId: message.reply_to_message?.message_id ?? null,
-      agentTelegramId: fromId,
-      sentAt: new Date(message.date * 1000),
-    });
+    // Правка своей реплики: к какому тикету она, решили при отправке — со
+    // стрелкой и тем окном переписки, что было тогда. Заново по правке
+    // гадать нельзя: окно с тех пор сдвинулось, и исправленная опечатка
+    // могла уехать в соседний тикет и сменить статус там.
+    const earlier = update?.edited_message
+      ? await prisma.telegramMessage.findUnique({
+          where: { chatId_messageId: { chatId, messageId: message.message_id } },
+          select: { agentIssueId: true, replyToMessageId: true },
+        })
+      : null;
+    const target: AgentTarget = earlier?.agentIssueId
+      ? { kind: "found", issueId: earlier.agentIssueId, reason: "reply" }
+      : await resolveAgentTarget({
+          chatId,
+          messageId: message.message_id,
+          replyToMessageId: message.reply_to_message?.message_id ?? earlier?.replyToMessageId ?? null,
+          agentTelegramId: fromId,
+          sentAt: new Date(message.date * 1000),
+        });
     const targetIssueId = target.kind === "found" ? target.issueId : null;
     await prisma.telegramMessage.upsert({
       where: { chatId_messageId: { chatId, messageId: message.message_id } },

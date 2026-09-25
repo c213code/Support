@@ -222,7 +222,7 @@ export async function findSplitOriginal(
   // «кіре алмай отыр» выглядит другой проблемой, а на деле это ответ на наш
   // вопрос «Осы почта иә?» во вчерашнем тикете. Поэтому даём ей наши
   // последние реплики по старшему тикету и сами сообщения нового.
-  const newText = sourceTexts.map((t) => maskSensitiveForAi(t)).join("\n") || issue.description;
+  const newText = sourceTexts.map((t) => maskSensitiveForAi(t)).join("\n") || maskSensitiveForAi(issue.description);
   const startedAt = issue.sourceMessages.reduce<Date>(
     (min, m) => (m.receivedAt < min ? m.receivedAt : min),
     issue.createdAt
@@ -249,13 +249,15 @@ export async function findSplitOriginal(
       take: 6,
       select: { text: true, agentIssueId: true },
     });
+    // Описания тоже маскируем: в них бывает почта ученика, а модель — внешняя.
     const existing = recent.length
-      ? `${candidate.description}\nПоследняя переписка по нему:\n${recent
+      ? `${maskSensitiveForAi(candidate.description)}\nПоследняя переписка по нему:\n${recent
           .reverse()
           .map((m) => `${m.agentIssueId === candidate.id ? "Агент" : "Куратор"}: ${maskSensitiveForAi(m.text ?? "").slice(0, 200)}`)
           .join("\n")}`
-      : candidate.description;
-    if ((await isSplitOfSameCase(existing, `${issue.description}\nСообщения автора: ${newText}`)) === true) {
+      : maskSensitiveForAi(candidate.description);
+    const fresh = `${maskSensitiveForAi(issue.description)}\nСообщения автора: ${newText}`;
+    if ((await isSplitOfSameCase(existing, fresh)) === true) {
       return candidate;
     }
   }

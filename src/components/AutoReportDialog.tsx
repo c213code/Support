@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/Modal";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { AutoReportProgress } from "@/components/AutoReportProgress";
@@ -178,13 +178,25 @@ export function AutoReportDialog({
   const [choice, setChoice] = useState<Record<string, IssueStatus>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Отметки, которые человек поставил или снял сам. Конец разбора заново
+  // отмечает уверенные решения — но только нетронутые: иначе снятая
+  // посреди разбора галочка возвращалась, и «Применить» ставило статус,
+  // от которого человек отказался.
+  const touched = useRef<Set<string>>(new Set());
+  // Журнал перечитывается из пяти мест, и ответы приходят не по порядку:
+  // в окно пишет только самый свежий запрос, иначе опоздавший ответ
+  // возвращал только что применённое решение в «не применено».
+  const loadSeq = useRef(0);
 
   const loadRuns = useCallback(async (): Promise<Run[]> => {
-    const res = await fetch(`/api/reconcile?date=${date}`);
-    const data = res.ok ? await res.json().catch(() => null) : null;
+    const seq = ++loadSeq.current;
+    const res = await fetch(`/api/reconcile?date=${date}`).catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => null) : null;
     const list: Run[] = data?.runs ?? [];
-    setRuns(list);
-    setMergeTargets(data?.mergeTargets ?? {});
+    if (seq === loadSeq.current && data) {
+      setRuns(list);
+      setMergeTargets(data.mergeTargets ?? {});
+    }
     return list;
   }, [date]);
 
@@ -195,6 +207,7 @@ export function AutoReportDialog({
       if (cancelled) return;
       // Открываем последний запуск дня — его обычно и продолжают разбирать.
       if (list[0]) {
+        touched.current.clear();
         setActiveRunId(list[0].id);
         setSelected(new Set(list[0].verdicts.filter(preselect).map((v) => v.id)));
       }
@@ -230,7 +243,14 @@ export function AutoReportDialog({
       setActiveRunId(liveRunId);
       if (liveFinished) {
         const run = list.find((r) => r.id === liveRunId);
-        setSelected(new Set(run?.verdicts.filter(preselect).map((v) => v.id) ?? []));
+        if (!run) return;
+        setSelected((prev) => {
+          const next = new Set<string>();
+          for (const v of run.verdicts) {
+            if (touched.current.has(v.id) ? prev.has(v.id) : preselect(v)) next.add(v.id);
+          }
+          return next;
+        });
       }
     }, 0);
     return () => {
@@ -289,6 +309,7 @@ export function AutoReportDialog({
       if (skipped.length > 0) {
         setError(`Не применено: ${skipped.length} (статус уже меняли вручную или это не статус)`);
       }
+      touched.current.clear();
       setSelected(new Set());
       setChoice({});
       await loadRuns();
@@ -315,6 +336,18 @@ export function AutoReportDialog({
         setError(data?.error ?? "Не удалось объединить");
         return;
       }
+      // Тикет ушёл в старший, его строка журнала — вместе с ним: отметка на
+      // ней раздувала бы «Применить (N)» тем, чего уже нет.
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(verdict.id);
+        return next;
+      });
+      setChoice((prev) => {
+        const next = { ...prev };
+        delete next[verdict.id];
+        return next;
+      });
       await loadRuns();
       onApplied();
     } finally {
@@ -327,6 +360,7 @@ export function AutoReportDialog({
       onEscalate?.(verdict.issueId);
       return;
     }
+    touched.current.add(verdict.id);
     setChoice((prev) => {
       const next = { ...prev };
       if (value) next[verdict.id] = value as IssueStatus;
@@ -344,6 +378,7 @@ export function AutoReportDialog({
   }
 
   function toggle(id: string) {
+    touched.current.add(id);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -538,6 +573,7 @@ export function AutoReportDialog({
                     <button
                       type="button"
                       onClick={() => {
+                        touched.current.clear();
                         setActiveRunId(run.id);
                         setSelected(new Set(run.verdicts.filter(preselect).map((v) => v.id)));
                       }}

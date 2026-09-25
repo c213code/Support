@@ -210,8 +210,15 @@ export function extractReplyContextLine(
   const quoted = message.reply_to_message;
   if (!quoted) return null;
 
-  const quotedText = quoted.text ?? quoted.caption;
-  if (!quotedText) return null;
+  const rawQuoted = quoted.text ?? quoted.caption;
+  if (!rawQuoted) return null;
+  // Цитата — всегда одна строка: так её и срезают обратно (stripReplyQuote,
+  // REPLY_QUOTE_LINE в textClean, промпт чистки — «цитата идёт первой
+  // строкой»). Многострочная цитата срезалась по первой строке, и остальные
+  // строки куратора попадали в реплику агента — модель пересказывала их как
+  // его ответ. Перевод строки меняем на пробел символ в символ: длина та же,
+  // и обрезка по QUOTE_MAX_LENGTH срезается по той же позиции.
+  const quotedText = rawQuoted.replace(/\n/g, " ");
 
   const truncated =
     quotedText.length > QUOTE_MAX_LENGTH

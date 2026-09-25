@@ -5,6 +5,7 @@ import { changeIssueStatus } from "@/lib/issueStatus";
 import { collectResolutionContext, resolverName } from "@/lib/resolutionNote";
 import { findResolvedSiblings, findSplitOriginal, type ResolvedSibling } from "@/lib/relatedIssue";
 import { buildUserText, reconcileIssue, type ReconcileProvider } from "@/lib/dayReconcile";
+import { maskSensitiveForAi } from "@/lib/textClean";
 
 // «Авто-репорт» по кнопке на доске: запуск, пошаговый разбор и применение.
 //
@@ -70,7 +71,37 @@ function providerLabel(provider: ReconcileProvider): string {
 // разбираемый день была переписка.
 const CARRY_OVER_DAYS = 7;
 
+// Шаг не живёт дольше maxDuration маршрута (300 с): метка claimedAt старше
+// этого — шаг умер, тикет снова свободен.
+const CLAIM_STALE_MS = 330_000;
+
+function claimFree(now: Date) {
+  return [{ claimedAt: null }, { claimedAt: { lt: new Date(now.getTime() - CLAIM_STALE_MS) } }];
+}
+
+// Разбор этого дня, который кто-то гоняет прямо сейчас: только что заведён
+// или его шаг взял тикеты недавно. Второй «Разобрать день» из другой
+// вкладки (или у коллеги) присоединяется к нему, а не разбирает те же
+// тикеты заново за те же деньги.
+async function activeRunFor(reportDate: string) {
+  const now = Date.now();
+  return prisma.reconcileRun.findFirst({
+    where: {
+      reportDate,
+      finishedAt: null,
+      OR: [
+        { createdAt: { gte: new Date(now - 120_000) } },
+        { verdicts: { some: { claimedAt: { gte: new Date(now - CLAIM_STALE_MS) } } } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+}
+
 export async function startRun(reportDate: string, startedBy: string) {
+  const active = await activeRunFor(reportDate);
+  if (active) return active;
   const today = await prisma.issue.findMany({
     where: { reportDate, status: { not: "RESOLVED" } },
     select: { id: true, status: true },
@@ -122,12 +153,18 @@ const SKIP_REASON: Record<"no-agent-ids" | "no-issue-messages" | "no-agent-messa
 function resolverFor(
   verdict: { status: string; evidence: string },
   siblings: ResolvedSibling[],
+  general: { text: string; author: string | null }[],
   context: Awaited<ReturnType<typeof collectResolutionContext>>
 ): string | null {
   if (verdict.status === "RESOLVED" && verdict.evidence) {
-    const source = siblings.find((s) => s.note?.includes(verdict.evidence));
+    // Модель видела заметку соседа уже замаскированной (buildUserText) —
+    // и цитирует её такой же: сравнивать надо с маской, а не с сырой.
+    const source = siblings.find((s) => s.note && maskSensitiveForAi(s.note).includes(verdict.evidence));
     const name = source?.note?.match(/^\s*([^,]+?)\s+шешті/)?.[1];
     if (source) return name ?? null;
+    // Решено общим сообщением агента — его автор и решал.
+    const said = general.find((g) => g.text.includes(verdict.evidence));
+    if (said) return said.author;
   }
   return context.ok && context.context.exact ? resolverName(context.context) : null;
 }
@@ -145,9 +182,12 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   // окно предложит объединить (как тикеты Амины за 24 и 25.09).
   const mergeTargetId = (await findSplitOriginal(verdict.issueId))?.id ?? null;
   const thread = context.ok && context.context.exact ? context.context.thread : [];
+  // Общие сообщения агентов в чате — даже при неточной переписке: ответ
+  // «всем сразу» без стрелки и есть типичный случай, когда точной нет.
+  const general = context.ok ? context.context.general : [];
   // Судим только по точно привязанным репликам: найденные догадкой по окну
   // времени могут быть о соседнем тикете, а ошибка тут уходит в репорт.
-  if ((!context.ok || !context.context.exact) && siblings.length === 0) {
+  if ((!context.ok || !context.context.exact) && siblings.length === 0 && general.length === 0) {
     // updateMany, а не update: тикет могли объединить посреди разбора, и его
     // строка журнала ушла каскадом — тогда писать некуда, и это не ошибка.
     await prisma.reconcileVerdict.updateMany({
@@ -163,23 +203,25 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   }
 
   // Что видела модель — в журнал: по нему ошибка разбора видна сразу.
-  const input = buildUserText(verdict.issue.description, thread, siblings);
-  let result = await reconcileIssue(provider, verdict.issue.description, thread, siblings);
+  const input = buildUserText(verdict.issue.description, thread, siblings, general);
+  let result = await reconcileIssue(provider, verdict.issue.description, thread, siblings, general);
   // Сетевой сбой, «модель перегружена» (503), пустой ответ и минутный лимит
   // Groq проходят сами — один повтор (на прогонах по прошлым дням так падало
   // 2–14% запросов). Groq считает лимит поминутно (8000 токенов на ключ,
   // с рассуждениями high это 3 тикета) — ему пауза 15 секунд; у остальных
-  // сбой случайный, хватит 3. Исчерпанную дневную квоту Gemini повтор не
-  // спасёт: такой тикет помечается ошибкой, его можно разобрать заново позже.
+  // сбой случайный, хватит 3. Исчерпанную квоту (429) повтор к той же
+  // модели не спасёт — но запасная другая, со своим ключом и лимитом, и к
+  // ней идём и после 429.
   //
   // Повтор — к запасной модели (fallbackProvider): у MiMo бывают серии пустых
   // ответов, и повтор к ней же 25.09 дважды подряд вернул пусто по тикету,
   // который она же через минуту разобрала верно.
   let answeredBy: ReconcileProvider = provider;
-  if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
-    const retry = fallbackProvider(provider) ?? provider;
+  const retry = fallbackProvider(provider) ?? provider;
+  const exhausted = !result.ok && /^429|quota|RESOURCE_EXHAUSTED/i.test(result.error);
+  if (!result.ok && !(exhausted && retry === provider)) {
     await new Promise((resolve) => setTimeout(resolve, retry.kind === "groq" ? 15_000 : 3000));
-    result = await reconcileIssue(retry, verdict.issue.description, thread, siblings);
+    result = await reconcileIssue(retry, verdict.issue.description, thread, siblings, general);
     answeredBy = retry;
   }
   if (result.ok && answeredBy !== provider) {
@@ -194,7 +236,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
           note: result.verdict.note,
           evidence: result.verdict.evidence,
           reason: result.verdict.reason || null,
-          resolver: resolverFor(result.verdict, siblings, context),
+          resolver: resolverFor(result.verdict, siblings, general, context),
           input,
           mergeTargetId,
         }
@@ -214,20 +256,41 @@ export async function stepRun(runId: string): Promise<{ remaining: number }> {
   // у OpenRouter такого лимита нет. 6 × худшие 60 с + повтор укладываются
   // в maxDuration маршрута (300 с), потому что идут одновременно.
   const batch = provider.kind === "groq" ? 3 : 6;
-  const pending = await prisma.reconcileVerdict.findMany({
-    where: { runId, state: "pending" },
+  const now = new Date();
+  const free = await prisma.reconcileVerdict.findMany({
+    where: { runId, state: "pending", OR: claimFree(now) },
     orderBy: { createdAt: "asc" },
     take: batch,
     select: { id: true, issueId: true, issue: { select: { description: true } } },
   });
+  // Берём тикеты за собой условной записью: если этот же запуск гоняет
+  // вторая вкладка, её шаг возьмёт следующие, а не те же (раньше оба
+  // разбирали одни и те же тикеты — вдвое дороже, и побеждал последний).
+  const claims = await Promise.all(
+    free.map((verdict) =>
+      prisma.reconcileVerdict.updateMany({
+        where: { id: verdict.id, state: "pending", OR: claimFree(now) },
+        data: { claimedAt: now },
+      })
+    )
+  );
+  const pending = free.filter((_, i) => claims[i].count === 1);
 
   // Тикеты шага — одновременно: по очереди вечер в 40 тикетов ждал бы
   // минуты. Упёршийся в лимит ключ Groq сменяет следующий.
   await Promise.all(pending.map((verdict) => judgeVerdict(verdict, provider)));
 
+  // Всё оставшееся разбирает чужой шаг — не крутим пустые шаги подряд,
+  // ждём, пока он допишет.
+  if (pending.length === 0) await new Promise((resolve) => setTimeout(resolve, 5000));
+
   const remaining = await prisma.reconcileVerdict.count({ where: { runId, state: "pending" } });
   if (remaining === 0) {
-    await prisma.reconcileRun.update({ where: { id: runId }, data: { finishedAt: new Date() } });
+    // updateMany с условием: два шага могут закончить одновременно.
+    await prisma.reconcileRun.updateMany({
+      where: { id: runId, finishedAt: null },
+      data: { finishedAt: new Date() },
+    });
   }
   return { remaining };
 }
@@ -271,10 +334,6 @@ export async function applyVerdicts(
     // Свой статус человек может поставить и тикету, который модель
     // пропустила или не разобрала, — он сам посмотрел переписку.
     const judged = override ? verdict.state !== "pending" : verdict.state === "done";
-    if (verdict.appliedAt) {
-      outcomes.push({ verdictId: verdict.id, applied: false, reason: "уже применено" });
-      continue;
-    }
     if (!judged || !status || !APPLICABLE.has(status)) {
       outcomes.push({ verdictId: verdict.id, applied: false, reason: "это не статус для применения" });
       continue;
@@ -293,6 +352,17 @@ export async function applyVerdicts(
       status === "RESOLVED"
         ? `${verdict.resolver ?? actor} шешті${modelNote ? `, ${modelNote}` : ""}`
         : modelNote || undefined;
+    // Сначала застолбить решение условной записью, потом менять статус:
+    // два «Применить» одновременно (две вкладки, два агента) иначе оба
+    // видели appliedAt пустым, и куратор получал «шешілді» в личку дважды.
+    const claim = await prisma.reconcileVerdict.updateMany({
+      where: { id: verdict.id, appliedAt: null },
+      data: { appliedAt: new Date(), appliedBy: actor },
+    });
+    if (verdict.appliedAt || claim.count === 0) {
+      outcomes.push({ verdictId: verdict.id, applied: false, reason: "уже применено" });
+      continue;
+    }
     // source "chat": в группе ответ дежурного уже прозвучал — повторять его
     // словами бота незачем (правило одной строки в CLAUDE.md).
     const result = await changeIssueStatus({
@@ -303,13 +373,13 @@ export async function applyVerdicts(
       note,
     });
     if (!result.ok) {
+      await prisma.reconcileVerdict.updateMany({
+        where: { id: verdict.id },
+        data: { appliedAt: null, appliedBy: null },
+      });
       outcomes.push({ verdictId: verdict.id, applied: false, reason: "тикет не найден" });
       continue;
     }
-    await prisma.reconcileVerdict.update({
-      where: { id: verdict.id },
-      data: { appliedAt: new Date(), appliedBy: actor },
-    });
     outcomes.push({ verdictId: verdict.id, applied: true });
   }
   return outcomes;

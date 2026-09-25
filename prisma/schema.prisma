@@ -228,6 +228,10 @@ model ReconcileVerdict {
   // Кто ответил в чате — его имя пойдёт в «X шешті».
   resolver     String?
   error        String?
+  // Когда шаг взял тикет в работу. Две вкладки (или два агента) гоняют один
+  // запуск — второй шаг не берёт то, что уже разбирает первый. Метка старше
+  // maxDuration шага значит, что шаг умер, и тикет снова можно брать.
+  claimedAt    DateTime?
   appliedAt    DateTime?
   appliedBy    String?
   createdAt    DateTime     @default(now())

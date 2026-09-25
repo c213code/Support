@@ -62,7 +62,9 @@ export type ReconcileProvider = { kind: "gemini" | "groq" | "openrouter"; model:
 export function buildUserText(
   description: string,
   thread: ThreadLine[],
-  siblings: ResolvedSibling[] = []
+  siblings: ResolvedSibling[] = [],
+  // Общие сообщения агентов в чате без стрелки (ResolutionContext.general).
+  general: { text: string }[] = []
 ): string {
   description = maskSensitiveForAi(description);
   const replies = thread.length
@@ -71,6 +73,12 @@ export function buildUserText(
         .join("\n")
     : "(в этом чате наши по обращению не отвечали)";
   const parts = [`Обращение: ${description}`, `Переписка по порядку:\n${replies}`];
+  if (general.length) {
+    parts.push(
+      "Сообщения агентов в этом чате после обращения — без ответа на конкретное обращение (могут относиться сразу к нескольким похожим):\n" +
+        general.map((g) => `- ${g.text}`).join("\n")
+    );
+  }
   if (siblings.length) {
     parts.push(
       "Похожие обращения в ДРУГИХ группах, уже решённые (возможно, та же общая поломка):\n" +
@@ -112,10 +120,11 @@ function parseVerdict(raw: string): ReconcileVerdict | null {
     data = lastJsonObject(raw);
   }
   if (typeof data !== "object" || data === null) return null;
-  const { status, note, evidence, reason } = data as Record<string, unknown>;
-  if (typeof status !== "string" || !RECONCILE_STATUSES.includes(status as ReconcileStatus)) {
-    return null;
-  }
+  const { status: rawStatus, note, evidence, reason } = data as Record<string, unknown>;
+  // Схему статуса держит только Gemini; Groq и OpenRouter знают её из
+  // промпта и иногда отвечают «resolved» — суждение то же, регистр не тот.
+  const status = typeof rawStatus === "string" ? rawStatus.trim().toUpperCase() : "";
+  if (!RECONCILE_STATUSES.includes(status as ReconcileStatus)) return null;
   return {
     status: status as ReconcileStatus,
     note: typeof note === "string" ? note.trim() : "",
@@ -296,9 +305,10 @@ export async function reconcileIssue(
   provider: ReconcileProvider,
   description: string,
   thread: ThreadLine[],
-  siblings: ResolvedSibling[] = []
+  siblings: ResolvedSibling[] = [],
+  general: { text: string }[] = []
 ): Promise<ReconcileResult> {
-  const userText = buildUserText(description, thread, siblings);
+  const userText = buildUserText(description, thread, siblings, general);
   // Словарь компании — только термины, встретившиеся в этом тексте (правило
   // из CLAUDE.md: весь словарь в каждый запрос не влезает в лимиты).
   const glossary = await buildAiContext(userText);

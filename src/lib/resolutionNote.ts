@@ -18,9 +18,13 @@ export function stripReplyQuote(text: string, quoted: string | null): string {
   if (quoted) {
     const shown =
       quoted.length > QUOTE_MAX_LENGTH ? `${quoted.slice(0, QUOTE_MAX_LENGTH)}…` : quoted;
-    const marker = `: ${shown}\n`;
-    const at = text.indexOf(marker);
-    if (at !== -1) return text.slice(at + marker.length).trim();
+    // Цитату пишут одной строкой (extractReplyContextLine); сохранённые до
+    // этого — с переводами строк как были.
+    for (const form of [shown.replace(/\n/g, " "), shown]) {
+      const marker = `: ${form}\n`;
+      const at = text.indexOf(marker);
+      if (at !== -1) return text.slice(at + marker.length).trim();
+    }
   }
 
   // Начало цитаты — сразу после "↩️ Автор: ".
@@ -94,6 +98,9 @@ const REPLY_LOOKBACK_DAYS = 7;
 // что сверху, это уже соседние разговоры в том же чате. Берём последние:
 // решение — это конец разговора, а не его начало.
 const MAX_AGENT_MESSAGES = 5;
+// Общих сообщений (см. ResolutionContext.general) — меньше: это кандидаты,
+// а не переписка по тикету.
+const MAX_GENERAL_MESSAGES = 4;
 
 // На сколько звеньев идём вверх по цепочке ответов. Реальные цепочки
 // короткие ("проблема → уточнение → ответ агента"); больше — уже не связь,
@@ -111,6 +118,11 @@ export type ResolutionContext = {
   // берді», «шешілді, рахмет»), а по одним репликам агентов разговор
   // выглядит оборванным вопросом.
   thread: ThreadLine[];
+  // Общие сообщения агентов в этом чате после обращения — без стрелки и ни к
+  // какому тикету не привязанные: «файл салу бойынша мәселе түзелді,
+  // тексеріп көресіздер ме» сразу всем, кто писал про ту же ошибку. Про ЭТОТ
+  // ли тикет — решает модель (lib/reconcilePrompt.ts), по смыслу.
+  general: { text: string; author: string | null }[];
   // Кто ответил в чате — автор последней реплики, надёжно привязанной к
   // тикету. Его имя, а не того, кто перетащил карточку, идёт в «X шешті»:
   // закрыть мог Ерош, а ответить — Алпа. У догадки по окну времени (exact:
@@ -213,6 +225,15 @@ export async function collectResolutionContext(
   const reporterIds = issueMessages
     .map((m) => m.fromId)
     .filter((id): id is bigint => id != null);
+  // У тикета из мини-аппа сообщений обращения нет — автор тот, кто подал
+  // форму. Без него «рахмет, көрдім» куратора в группе не попадало в ленту.
+  if (issueMessages.length === 0) {
+    const submissions = await prisma.issueSubmission.findMany({
+      where: { issueId },
+      select: { telegramUserId: true },
+    });
+    reporterIds.push(...submissions.map((s) => s.telegramUserId));
+  }
   const reporterIdSet = new Set(reporterIds.map((id) => id.toString()));
 
   // Реплики агентов берём прицельно, а не срезом всего чата: раньше
@@ -353,6 +374,7 @@ export async function collectResolutionContext(
   const linked: string[] = [];
   const linkedMessages: { message: ChatMessage; text: string }[] = [];
   const loose: string[] = [];
+  const general: { text: string; author: string | null }[] = [];
   // Исходный текст сообщения, на которое ответили: у сохранённого сообщения
   // в базе может быть своя цитата — срезаем и её, Telegram цитирует без неё.
   function quotedTextOf(message: ChatMessage): string | null {
@@ -380,7 +402,18 @@ export async function collectResolutionContext(
     }
     // "other" отбрасываем совсем: за час в чате проходит несколько обращений,
     // и решение соседнего тикета в нашей заметке — прямая ошибка в репорте.
-    else if (owner === "unknown") loose.push(text);
+    else if (owner === "unknown") {
+      loose.push(text);
+      if (message.replyToMessageId == null && message.receivedAt >= anchor.at) {
+        general.push({
+          text,
+          author:
+            (message.fromId != null ? telegramIdToAgent(Number(message.fromId)) : null) ??
+            message.authorName?.split("|")[0].trim() ??
+            null,
+        });
+      }
+    }
   }
 
   // Привязанные — надёжно. Ничем не привязанные реплики берём, только если
@@ -419,6 +452,7 @@ export async function collectResolutionContext(
       context: {
         agentTexts: linked.slice(-MAX_AGENT_MESSAGES),
         thread,
+        general: general.slice(-MAX_GENERAL_MESSAGES),
         exact: true,
         resolver: lastLinked
           ? { fromId: lastLinked.fromId, authorName: lastLinked.authorName }
@@ -432,6 +466,7 @@ export async function collectResolutionContext(
       context: {
         agentTexts: loose.slice(-MAX_AGENT_MESSAGES),
         thread: loose.slice(-MAX_AGENT_MESSAGES).map((text) => ({ from: "agent" as const, text })),
+        general: general.slice(-MAX_GENERAL_MESSAGES),
         exact: false,
         resolver: null,
       },

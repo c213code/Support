@@ -91,6 +91,13 @@ export function Inbox() {
   const [issuesByDate, setIssuesByDate] = useState<Record<string, IssueDTO[]>>({});
   const messages = messagesByDate[date] ?? NO_MESSAGES;
   const issues = issuesByDate[date] ?? NO_ISSUES;
+  // Опрос каждые 15 с приносит новый массив, даже если ничего не менялось;
+  // окну «Авто-репорт» перечитывать журнал нужно, только когда тикеты
+  // действительно сменили статус или исчезли (объединили, удалили).
+  const issuesFingerprint = useMemo(
+    () => issues.map((i) => `${i.id}:${i.status}`).join(","),
+    [issues]
+  );
   const loading = !(date in messagesByDate);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
   const [attachingFromId, setAttachingFromId] = useState<string | null>(null);
@@ -102,9 +109,11 @@ export function Inbox() {
   const [autoReportOpen, setAutoReportOpen] = useState(false);
   // Ход разбора — здесь, а не в окне: окно можно закрыть, разбор идёт.
   const autoReport = useAutoReportRun();
-  const autoRunning = Boolean(
-    autoReport.run && !autoReport.run.finishedAt && !autoReport.run.failed
-  );
+  // Кнопка на доске говорит только о разборе открытого дня: пока идёт разбор
+  // 24.09, а на доске 25.09, «3/10» и «✓ готово» были бы не про этот день —
+  // и открыв окно 25.09, человек «видел» бы чужой, ещё не просмотренный итог.
+  const dayRun = autoReport.run?.date === date ? autoReport.run : null;
+  const autoRunning = Boolean(dayRun && !dayRun.finishedAt && !dayRun.failed);
   // «✓ готово» на кнопке — пока результат не открыли.
   const [seenRunId, setSeenRunId] = useState<string | null>(null);
   const [escalatingIssueId, setEscalatingIssueId] = useState<string | null>(
@@ -1148,25 +1157,25 @@ export function Inbox() {
               <button
                 onClick={() => {
                   setAutoReportOpen(true);
-                  if (autoReport.run?.finishedAt) setSeenRunId(autoReport.run.runId);
+                  if (dayRun?.finishedAt) setSeenRunId(dayRun.runId);
                 }}
                 title="ИИ читает переписку по открытым тикетам дня и предлагает статусы и заметки для репорта"
                 className="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700"
               >
                 🤖 Авто-репорт
-                {autoRunning && autoReport.run && (
+                {autoRunning && dayRun && (
                   <span className="flex items-center gap-1 rounded-full bg-brand-50 px-1.5 py-0.5 tabular-nums text-brand-700">
                     <span className="relative flex h-1.5 w-1.5">
                       <span className="absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75 motion-safe:animate-ping" />
                       <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-600" />
                     </span>
-                    {autoReport.run.done}/{autoReport.run.total}
+                    {dayRun.done}/{dayRun.total}
                   </span>
                 )}
                 {!autoRunning &&
                   !autoReportOpen &&
-                  autoReport.run?.finishedAt &&
-                  seenRunId !== autoReport.run.runId && (
+                  dayRun?.finishedAt &&
+                  seenRunId !== dayRun.runId && (
                   <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
                     ✓ готово
                   </span>
@@ -1398,11 +1407,11 @@ export function Inbox() {
           date={date}
           onClose={() => {
             setAutoReportOpen(false);
-            if (autoReport.run?.finishedAt) setSeenRunId(autoReport.run.runId);
+            if (dayRun?.finishedAt) setSeenRunId(dayRun.runId);
           }}
           onApplied={() => loadIssues(date)}
           onEscalate={(issueId) => setEscalatingIssueId(issueId)}
-          refreshToken={issues}
+          refreshToken={issuesFingerprint}
           autoRun={autoReport.run}
           onStart={() => autoReport.start(date)}
           onResume={(runId) => void autoReport.resume(runId, date)}
