@@ -173,6 +173,36 @@ export async function upsertTerm(
   invalidateAiContext();
 }
 
+// Правка термина прямо в списке («🧠 Словарь»). По id, а не по названию:
+// через upsertTerm переименование завело бы вторую запись рядом со старой.
+// Правленое человеком становится «ручным» (auto = false) — ночная
+// пересборка его больше не перезапишет: раз поправили, модель ошиблась.
+export async function updateTerm(
+  id: string,
+  term: string,
+  meaning: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmedTerm = term.trim();
+  const trimmedMeaning = meaning.trim();
+  if (!trimmedTerm || !trimmedMeaning) {
+    return { ok: false, error: "Термин и значение не должны быть пустыми" };
+  }
+  const clash = (
+    await prisma.glossaryTerm.findMany({ select: { id: true, term: true } })
+  ).find((row) => row.id !== id && normalizeTerm(row.term) === normalizeTerm(trimmedTerm));
+  if (clash) return { ok: false, error: `«${clash.term}» уже есть в словаре` };
+
+  const updated = await prisma.glossaryTerm
+    .update({
+      where: { id },
+      data: { term: trimmedTerm, meaning: trimmedMeaning, auto: false },
+    })
+    .catch(() => null);
+  if (!updated) return { ok: false, error: "Термин не найден — обновите список" };
+  invalidateAiContext();
+  return { ok: true };
+}
+
 export async function deleteTerm(id: string): Promise<void> {
   await prisma.glossaryTerm.delete({ where: { id } }).catch(() => {});
   invalidateAiContext();

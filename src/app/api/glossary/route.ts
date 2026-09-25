@@ -6,6 +6,7 @@ import { extractGlossaryTerms } from "@/lib/ai";
 import {
   listGlossary,
   upsertTerm,
+  updateTerm,
   deleteTerm,
   invalidateAiContext,
 } from "@/lib/projectContext";
@@ -17,8 +18,9 @@ export async function GET() {
   return NextResponse.json({ terms: await listGlossary() });
 }
 
-// Три действия одним роутом: пересобрать словарь из истории (rebuild),
-// поправить/добавить термин руками (upsert), удалить (delete).
+// Четыре действия одним роутом: пересобрать словарь из истории (rebuild),
+// добавить термин руками (upsert), поправить прямо в списке (update — по id,
+// можно и переименовать), удалить (delete).
 //
 // Пересборка — только по явному нажатию или по cron, но не на каждое
 // сообщение: словарь строится из уже решённых тикетов и за день почти не
@@ -30,6 +32,18 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null);
+
+  if (
+    body?.action === "update" &&
+    typeof body.id === "string" &&
+    typeof body.term === "string" &&
+    typeof body.meaning === "string"
+  ) {
+    const result = await updateTerm(body.id, body.term, body.meaning);
+    return result.ok
+      ? NextResponse.json({ ok: true })
+      : NextResponse.json({ error: result.error }, { status: 409 });
+  }
 
   if (body?.action === "delete" && typeof body.id === "string") {
     await deleteTerm(body.id);

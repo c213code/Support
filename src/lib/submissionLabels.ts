@@ -397,6 +397,24 @@ const OTHER_STUDENT_CONTACT: LabelField = {
   hint: "Мәселе нақты оқушыға қатысты болса",
 };
 
+// MentorHUB — внутренняя система менторов. В чатах её пишут как попало
+// («ментрохаб», «менторхаб», «mentorhub»), поэтому в подсказке привычное
+// кураторам слово. Обращения про неё приходят и в Сервис, и в Product.
+const MENTORHUB_LABEL: SubmissionLabel = {
+  id: "mentorhub",
+  emoji: "🧑‍🏫",
+  title: "MentorHUB",
+  hint: "Ментрохаб бойынша мәселе",
+  fields: [
+    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
+    {
+      ...DESCRIPTION,
+      label: "Не шықпай тұр?",
+      placeholder: "Ментрохабта не шықпай тұрғанын қысқаша жазыңыз",
+    },
+  ],
+};
+
 const OTHER_LABEL: SubmissionLabel = {
   id: "other",
   emoji: "📝",
@@ -680,6 +698,7 @@ const SERVICE: SubmissionLabel[] = [
       },
     ],
   },
+  MENTORHUB_LABEL,
   PLATFORM_ERROR_LABEL,
   SUGGESTION_LABEL,
   OTHER_LABEL,
@@ -825,6 +844,7 @@ const PRODUCT: SubmissionLabel[] = [
   },
   LOGIN_LABEL,
   REOPEN_LABEL,
+  MENTORHUB_LABEL,
   PLATFORM_ERROR_LABEL,
   SCORE_LABEL,
   SUGGESTION_LABEL,

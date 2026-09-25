@@ -27,6 +27,28 @@ export function GlossaryPanel({
   const [rebuilding, setRebuilding] = useState(false);
   const [newTerm, setNewTerm] = useState("");
   const [newMeaning, setNewMeaning] = useState("");
+  // Правка термина прямо в списке: какой правим и черновик.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftTerm, setDraftTerm] = useState("");
+  const [draftMeaning, setDraftMeaning] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  function startEdit(t: Term) {
+    setEditingId(t.id);
+    setDraftTerm(t.term);
+    setDraftMeaning(t.meaning);
+  }
+
+  async function saveEdit() {
+    if (!editingId || !draftTerm.trim() || !draftMeaning.trim()) return;
+    setSaving(true);
+    const data = await post({ action: "update", id: editingId, term: draftTerm, meaning: draftMeaning });
+    setSaving(false);
+    if (data) {
+      setEditingId(null);
+      await load();
+    }
+  }
 
   async function load() {
     const res = await fetch("/api/glossary");
@@ -35,7 +57,6 @@ export function GlossaryPanel({
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load on mount
     load();
   }, []);
 
@@ -73,7 +94,9 @@ export function GlossaryPanel({
   }
 
   return (
-    <Modal onClose={onClose} labelledBy="glossary-title">
+    // Escape во время правки отменяет правку, а не закрывает окно: модалка
+    // ловит Escape раньше поля ввода, и набранное пропадало бы вместе с окном.
+    <Modal onClose={() => (editingId ? setEditingId(null) : onClose())} labelledBy="glossary-title">
       <div className="max-h-[80vh] w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
         <div className="mb-1 flex items-start justify-between gap-3">
           <h2 id="glossary-title" className="text-sm font-semibold text-slate-900">
@@ -90,7 +113,8 @@ export function GlossaryPanel({
         <p className="mb-3 text-xs leading-snug text-slate-500">
           Внутренние сокращения из нашей же переписки. Подмешиваются во все
           запросы к ИИ — без них он разбирает обращения вслепую. Обновляется
-          само раз в сутки; вписанное руками не перезаписывается.
+          само раз в сутки; вписанное и поправленное руками не перезаписывается.
+          Нажмите на термин, чтобы исправить.
         </p>
 
         <div className="mb-3 flex flex-wrap gap-1.5 rounded-lg bg-slate-50 p-2">
@@ -124,8 +148,53 @@ export function GlossaryPanel({
           </p>
         ) : (
           <ul className="flex flex-col divide-y divide-slate-100">
-            {terms.map((t) => (
+            {terms.map((t) =>
+              editingId === t.id ? (
+                <li key={t.id} className="flex flex-wrap items-start gap-1.5 rounded-lg bg-brand-50/60 p-2">
+                  <input
+                    value={draftTerm}
+                    onChange={(e) => setDraftTerm(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                    aria-label="Термин"
+                    className="w-28 rounded border border-slate-300 px-2 py-1 font-mono text-xs outline-none focus:border-brand-400"
+                  />
+                  <textarea
+                    value={draftMeaning}
+                    autoFocus
+                    rows={2}
+                    onChange={(e) => setDraftMeaning(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        saveEdit();
+                      }
+                    }}
+                    aria-label="Что это значит"
+                    className="min-w-0 flex-1 resize-y rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-400"
+                  />
+                  <div className="flex w-full justify-end gap-1.5">
+                    <button
+                      onClick={() => setEditingId(null)}
+                      className="rounded px-2.5 py-1 text-xs text-slate-500 hover:bg-slate-100"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      onClick={saveEdit}
+                      disabled={saving || !draftTerm.trim() || !draftMeaning.trim()}
+                      className="rounded bg-brand-600 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+                    >
+                      {saving ? "Сохраняем…" : "Сохранить"}
+                    </button>
+                  </div>
+                </li>
+              ) : (
               <li key={t.id} className="group flex items-baseline gap-2 py-1.5">
+                <button
+                  onClick={() => startEdit(t)}
+                  title="Исправить"
+                  className="flex min-w-0 flex-1 items-baseline gap-2 rounded text-left hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300"
+                >
                 <span className="shrink-0 font-mono text-xs font-semibold text-slate-800">
                   {t.term}
                 </span>
@@ -140,6 +209,7 @@ export function GlossaryPanel({
                 <span className="min-w-0 flex-1 text-xs text-slate-500">
                   {t.meaning}
                 </span>
+                </button>
                 <button
                   onClick={async () => {
                     if (await post({ action: "delete", id: t.id })) await load();
@@ -150,7 +220,8 @@ export function GlossaryPanel({
                   ✕
                 </button>
               </li>
-            ))}
+              )
+            )}
           </ul>
         )}
       </div>
