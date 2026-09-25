@@ -9,6 +9,7 @@ import {
 import { summarizeIssueTopic } from "@/lib/ai";
 import { isStatusReplyEnabled } from "@/lib/settings";
 import { notifySubmitter } from "@/lib/submitterNotify";
+import { refreshSubmissionStatus } from "@/lib/submissionGroupPost";
 import {
   deleteBotReply,
   editBotReply,
@@ -241,6 +242,13 @@ export async function changeIssueStatus(params: {
   // Обращение из формы мини-аппа: в группе по нему сообщения нет, поэтому
   // reactToStatusChange выше промолчал — автору пишем в личку.
   await notifySubmitter(issueId, status, params.note);
+
+  // У обращения из формы в группе есть пост бота «Өтініш #…» — строка
+  // статуса внизу него переписывается на месте, чтобы коллеги видели, что с
+  // обращением. Правка, а не новое сообщение: без уведомлений и без шума.
+  await refreshSubmissionStatus(issueId, actor).catch((err: unknown) =>
+    console.warn(`[submission] строка статуса не обновилась: ${err instanceof Error ? err.name : "ошибка"}`)
+  );
 
   return { ok: true, previous: existing.status, changed: true };
 }

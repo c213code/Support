@@ -251,6 +251,11 @@ model BotReply {
   // каждого нового повода незачем.
   kind      String
   text      String
+  // Только у поста обращения из формы: разметка с местом под строку
+  // статуса и признак «подпись к фото». По ней бот переписывает строку
+  // статуса внизу поста при каждой смене статуса (submissionGroupPost.ts).
+  // JSON, у старых постов — null: их статус не обновляется.
+  layout    String?
   deleted   Boolean  @default(false)
   sentAt    DateTime @default(now())
 

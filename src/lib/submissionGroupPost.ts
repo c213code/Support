@@ -2,10 +2,15 @@ import { prisma } from "@/lib/prisma";
 import {
   buildMessageLink,
   CAPTION_LIMIT,
+  editMessageCaption,
+  editMessageText,
   escapeHtml,
   sendStoredPhotos,
   sendTelegramMessage,
 } from "@/lib/telegram";
+import type { IssueStatus } from "@/lib/status";
+import { STATUS_KK } from "@/lib/statusKk";
+import { formatTimeAlmaty } from "@/lib/date";
 import { isSubmissionToGroupEnabled } from "@/lib/settings";
 import { ticketShortCode, ticketUrl } from "@/lib/miniapp";
 import {
@@ -77,7 +82,61 @@ function restoreLinks(masked: string, urls: string[], asHtml: boolean): string {
 // Поле «что случилось»: если оно есть и отвечено, заголовок берётся из него —
 // «[ЖЖ] Жұпты ауыстыру керек» говорит больше, чем «ЖЖ бойынша мәселе».
 const KIND_FIELD_IDS = ["issueKind", "action"];
-const STATUS_LINE = "Өтініш тіркелді — кезекші қарайды";
+
+// Строка статуса внизу поста живая: бот переписывает её при каждой смене
+// статуса (refreshSubmissionStatus), чтобы в группе было видно, что с
+// обращением, без новых сообщений и без «ну что там?». Правка сообщения
+// уведомлений не шлёт — правило «пишем только то, чего не прозвучало» не
+// нарушается.
+//
+// Пост хранится шаблоном с этим местом под строку (BotReply.layout).
+const STATUS_SLOT = "\u0001STATUS\u0001";
+// Сколько места держим под строку статуса: у подписи к фото всего 1024
+// символа, и тело режется с запасом под самую длинную строку — иначе
+// правка упёрлась бы в лимит и Telegram отклонил бы её.
+const STATUS_ROOM = 140;
+
+// Слова — те же, что куратор видит в мини-аппе и в уведомлении в личку
+// (STATUS_KK): одно состояние не должно называться по-разному.
+export function submissionStatusLine(opts: {
+  status: IssueStatus;
+  note: string | null;
+  escalatedTeam: string | null;
+  actor: string | null;
+  at: Date | null;
+}): string {
+  const kk = STATUS_KK[opts.status];
+  const time = opts.at ? ` · ${formatTimeAlmaty(opts.at)}` : "";
+  const who = opts.actor ? ` · ${opts.actor}` : "";
+  let line: string;
+  switch (opts.status) {
+    case "SENT":
+      line = `${kk.emoji} Өтініш тіркелді — кезекші қарайды`;
+      break;
+    case "ESCALATED":
+      line = `${kk.emoji} ${kk.label}${opts.escalatedTeam ? `: ${opts.escalatedTeam}` : ""}${time}`;
+      break;
+    case "RESOLVED":
+      // Заметка решения («Ерош шешті, Пошта ауыстырылды») говорит больше,
+      // чем голое «Шешілді», — коллегам видно, чем кончилось.
+      line = `${kk.emoji} ${opts.note?.trim() || `${kk.label}${who}`}${time}`;
+      break;
+    default:
+      line = `${kk.emoji} ${kk.label}${who}${time}`;
+  }
+  return line.length > STATUS_ROOM ? `${line.slice(0, STATUS_ROOM - 1)}…` : line;
+}
+
+const INITIAL_STATUS = submissionStatusLine({
+  status: "SENT",
+  note: null,
+  escalatedTeam: null,
+  actor: null,
+  at: null,
+});
+
+// Шаблон поста в BotReply.layout.
+type PostLayout = { html: string; plain: string; caption: boolean };
 
 // Сообщение об обращении — в том виде, в каком его удобно читать дежурному.
 //
@@ -91,7 +150,8 @@ const STATUS_LINE = "Өтініш тіркелді — кезекші қарай
 //   Сабаққа сілтеме немесе ай-апта: 3-ай 2-апта                ← остальное коротко
 //   Оқушының аты немесе поштасы: meirzhanulbosyn@gmail.com
 //
-//   Кураторы: Ерғанат Жұмақанов · Өтініш тіркелді — кезекші қарайды
+//   Кураторы: Ерғанат Жұмақанов · 📨 Өтініш тіркелді — кезекші қарайды
+//                                   ↑ строка статуса, меняется вместе со статусом
 //
 // «Өтініш #…» ведёт на сам тикет на сайте, а короткий номер ищется на доске.
 // Чистая функция — проверяется без Telegram.
@@ -106,7 +166,7 @@ export function buildSubmissionPost(opts: {
   // Сколько видимых символов Telegram примет: 1024 у подписи к фото, 4096
   // у сообщения.
   limit: number;
-}): { html: string; plain: string } {
+}): { html: string; plain: string; layout: { html: string; plain: string } } {
   const { label, values } = opts;
 
   const kindField = label.fields.find(
@@ -130,9 +190,9 @@ export function buildSubmissionPost(opts: {
     `${url ? `<a href="${escapeHtml(url)}">${code}</a>` : code}: ` +
     `${tag ? `[${escapeHtml(tag)}] ` : ""}<b>${escapeHtml(title)}</b>`;
 
-  const footPlain = `Кураторы: ${opts.authorName} · ${STATUS_LINE}`;
+  const footPlain = `Кураторы: ${opts.authorName} · ${STATUS_SLOT}`;
   const mention = `<a href="tg://user?id=${opts.telegramUserId}">${escapeHtml(opts.authorName)}</a>`;
-  const footHtml = `<i>Кураторы: ${mention} · ${STATUS_LINE}</i>`;
+  const footHtml = `<i>Кураторы: ${mention} · ${STATUS_SLOT}</i>`;
 
   // Тело: слова куратора абзацем, под ними остальные ответы. Служебные поля
   // (выбор «номер или почта») и уже вынесенные в заголовок — не повторяем.
@@ -145,7 +205,11 @@ export function buildSubmissionPost(opts: {
   // Режем только тело и только до разметки (см. extractLinks). Слово-ссылка
   // длиннее своего плейсхолдера, поэтому видимую длину проверяем уже после
   // подстановки и при перелёте подрезаем ещё.
-  const frame = [testLine, headPlain, footPlain].filter(Boolean).join("\n\n").length + 8;
+  const frame =
+    [testLine, headPlain, footPlain].filter(Boolean).join("\n\n").length -
+    STATUS_SLOT.length +
+    STATUS_ROOM +
+    8;
   const { masked, urls } = extractLinks(body);
   let room = Math.max(0, opts.limit - frame);
   let cut = masked.slice(0, room);
@@ -157,11 +221,15 @@ export function buildSubmissionPost(opts: {
   const bodyPlain = restoreLinks(cut, urls, false).trim();
   const bodyHtml = restoreLinks(escapeHtml(cut), urls, true).trim();
 
-  const html = [testLine && escapeHtml(testLine), headHtml, bodyHtml, footHtml]
+  const htmlLayout = [testLine && escapeHtml(testLine), headHtml, bodyHtml, footHtml]
     .filter(Boolean)
     .join("\n\n");
-  const plain = [testLine, headPlain, bodyPlain, footPlain].filter(Boolean).join("\n\n");
-  return { html, plain };
+  const plainLayout = [testLine, headPlain, bodyPlain, footPlain].filter(Boolean).join("\n\n");
+  return {
+    html: htmlLayout.replace(STATUS_SLOT, escapeHtml(INITIAL_STATUS)),
+    plain: plainLayout.replace(STATUS_SLOT, INITIAL_STATUS),
+    layout: { html: htmlLayout, plain: plainLayout },
+  };
 }
 
 export async function postSubmissionToGroup(opts: {
@@ -196,7 +264,7 @@ export async function postSubmissionToGroup(opts: {
   if (!chatId) return null;
 
   const withPhotos = opts.photoFileIds.length > 0;
-  const { html, plain } = buildSubmissionPost({
+  const { html, plain, layout } = buildSubmissionPost({
     issueId: opts.issueId,
     groupName: opts.groupName,
     authorName: opts.authorName,
@@ -234,6 +302,7 @@ export async function postSubmissionToGroup(opts: {
       // коллегам.
       kind: live ? "SUBMISSION" : "SUBMISSION_TEST",
       text: plain.slice(0, CAPTION_LIMIT),
+      layout: JSON.stringify({ ...layout, caption: withPhotos } satisfies PostLayout),
     },
   });
 
@@ -243,4 +312,60 @@ export async function postSubmissionToGroup(opts: {
   // служебном канале там была бы битой для всех, кроме нас. Тестовое
   // сообщение с карточки и так достижимо — через запись BotReply.
   return live ? buildMessageLink(Number(chatId), sent.message_id) : null;
+}
+
+// Переписать строку статуса в посте обращения — зовётся из changeIssueStatus
+// после каждой смены статуса. Ничего не должно ломать: пост могли удалить,
+// Telegram мог отказать — строка в лог, статус тикета уже сохранён.
+export async function refreshSubmissionStatus(
+  issueId: string,
+  actor: string | null
+): Promise<void> {
+  const posts = await prisma.botReply.findMany({
+    where: {
+      issueId,
+      deleted: false,
+      layout: { not: null },
+      kind: { in: ["SUBMISSION", "SUBMISSION_TEST"] },
+    },
+    select: { id: true, chatId: true, messageId: true, text: true, layout: true },
+  });
+  if (posts.length === 0) return;
+
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { status: true, note: true, escalatedTeam: true, statusChangedAt: true },
+  });
+  if (!issue) return;
+  const line = submissionStatusLine({
+    status: issue.status,
+    note: issue.note,
+    escalatedTeam: issue.escalatedTeam,
+    actor,
+    at: issue.statusChangedAt,
+  });
+
+  for (const post of posts) {
+    let layout: PostLayout;
+    try {
+      layout = JSON.parse(post.layout!) as PostLayout;
+    } catch {
+      continue;
+    }
+    const plain = layout.plain.replace(STATUS_SLOT, line).slice(0, CAPTION_LIMIT);
+    // Та же строка — править нечего (Telegram ответил бы «message is not
+    // modified»).
+    if (plain === post.text) continue;
+    const html = layout.html.replace(STATUS_SLOT, escapeHtml(line));
+    const edited = layout.caption
+      ? await editMessageCaption(post.chatId, post.messageId, html, "HTML")
+      : await editMessageText(post.chatId, post.messageId, html, null, "HTML");
+    if (!edited) {
+      console.warn(`[submission] строку статуса в посте ${post.chatId}/${post.messageId} обновить не вышло`);
+      continue;
+    }
+    // text держим в синхроне с тем, что в чате: по нему срезается цитата
+    // поста из ответов коллег (resolutionNote) и он показан на карточке.
+    await prisma.botReply.update({ where: { id: post.id }, data: { text: plain } });
+  }
 }

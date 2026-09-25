@@ -643,6 +643,26 @@ export async function editMessageText(
   return data?.result != null;
 }
 
+// То же для подписи к фото: у поста с фото текста нет, есть подпись, и
+// editMessageText на нём Telegram отклоняет («there is no text in the
+// message to edit»). У альбома подпись лежит на первом фото — его
+// message_id мы и храним.
+export async function editMessageCaption(
+  chatId: string | number,
+  messageId: number,
+  caption: string,
+  parseMode?: "HTML"
+): Promise<boolean> {
+  const data = (await callBotApi("editMessageCaption", {
+    chat_id: chatId,
+    message_id: messageId,
+    caption: caption.slice(0, CAPTION_LIMIT),
+    parse_mode: parseMode,
+  })) as { result?: unknown } | null;
+
+  return data?.result != null;
+}
+
 // Снимает инлайн-клавиатуру с уже отправленного сообщения — после того,
 // как кнопку нажали ("Отправить в группу" / смена статуса), чтобы её
 // нельзя было случайно нажать второй раз.
