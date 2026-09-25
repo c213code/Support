@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { stemSimilarity } from "@/lib/similarity";
-import { isSameRequestFollowUp } from "@/lib/ai";
+import { isSplitOfSameCase } from "@/lib/ai";
 import { maskSensitiveForAi } from "@/lib/textClean";
 
 // «Про одно и то же пишут несколько человек».
@@ -166,11 +166,17 @@ export async function findResolvedSiblings(issueId: string): Promise<ResolvedSib
 //
 // Кандидат — более ранний незакрытый тикет того же автора в том же чате (или
 // заявка того же куратора из мини-аппа) за последние три дня. Одна ли это
-// проблема, решает та же проверка, что склеивает продолжения на лету
-// (isSameRequestFollowUp): у куратора за три дня бывает несколько разных
-// обращений. Объединяет человек кнопкой — слияние удаляет тикет.
+// проблема, решает отдельная проверка по сути просьбы (isSplitOfSameCase):
+// у куратора за три дня бывает несколько разных обращений, в том числе про
+// одного ученика. Объединяет человек кнопкой — слияние удаляет тикет.
 const SPLIT_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_SPLIT_CANDIDATES = 3;
+// Продолжение начинается вскоре после последней переписки по старшему
+// тикету: у Амины между нашим «осы почта иә?» и её «негізі почтасы басқа»
+// прошли минуты. Без этого условия проверка склеивала два разных обращения
+// одного куратора с разницей в два дня («тапсырма қолжетімсіз» 23.09 и
+// «чек бойынша аккаунтты анықтау» 25.09).
+const SPLIT_GAP_MS = 3 * 60 * 60 * 1000;
 
 export async function findSplitOriginal(
   issueId: string
@@ -180,7 +186,7 @@ export async function findSplitOriginal(
     select: {
       description: true,
       createdAt: true,
-      sourceMessages: { select: { chatId: true, fromId: true, text: true } },
+      sourceMessages: { select: { chatId: true, fromId: true, text: true, receivedAt: true } },
       submissions: { select: { telegramUserId: true } },
     },
   });
@@ -217,20 +223,39 @@ export async function findSplitOriginal(
   // вопрос «Осы почта иә?» во вчерашнем тикете. Поэтому даём ей наши
   // последние реплики по старшему тикету и сами сообщения нового.
   const newText = sourceTexts.map((t) => maskSensitiveForAi(t)).join("\n") || issue.description;
+  const startedAt = issue.sourceMessages.reduce<Date>(
+    (min, m) => (m.receivedAt < min ? m.receivedAt : min),
+    issue.createdAt
+  );
   for (const candidate of candidates) {
-    const ours = await prisma.telegramMessage.findMany({
-      where: { agentIssueId: candidate.id, text: { not: null } },
+    const last = await prisma.telegramMessage.findFirst({
+      where: {
+        OR: [{ usedForIssueId: candidate.id }, { agentIssueId: candidate.id }],
+        receivedAt: { lte: startedAt },
+      },
       orderBy: { receivedAt: "desc" },
-      take: 3,
-      select: { text: true },
+      select: { receivedAt: true },
     });
-    const existing = ours.length
-      ? `${candidate.description}\nНаши последние реплики по нему: ${ours
+    if (!last || startedAt.getTime() - last.receivedAt.getTime() > SPLIT_GAP_MS) continue;
+    // Последние реплики по старшему — с обеих сторон и по порядку: «сілтеме
+    // берілмей» понятно только рядом с нашим «жаңа ссылка жіберіп көресіз?».
+    const recent = await prisma.telegramMessage.findMany({
+      where: {
+        OR: [{ usedForIssueId: candidate.id }, { agentIssueId: candidate.id }],
+        text: { not: null },
+        receivedAt: { lte: startedAt },
+      },
+      orderBy: { receivedAt: "desc" },
+      take: 6,
+      select: { text: true, agentIssueId: true },
+    });
+    const existing = recent.length
+      ? `${candidate.description}\nПоследняя переписка по нему:\n${recent
           .reverse()
-          .map((m) => maskSensitiveForAi(m.text ?? ""))
-          .join(" / ")}`
+          .map((m) => `${m.agentIssueId === candidate.id ? "Агент" : "Куратор"}: ${maskSensitiveForAi(m.text ?? "").slice(0, 200)}`)
+          .join("\n")}`
       : candidate.description;
-    if ((await isSameRequestFollowUp(existing, newText)) === true) {
+    if ((await isSplitOfSameCase(existing, `${issue.description}\nСообщения автора: ${newText}`)) === true) {
       return candidate;
     }
   }

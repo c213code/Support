@@ -439,8 +439,8 @@ export function AutoReportDialog({
                               🔗 Похоже на продолжение тикета «
                               {mergeTargets[v.mergeTargetId].description.slice(0, 80)}» (📅{" "}
                               {mergeTargets[v.mergeTargetId].reportDate.slice(8, 10)}.
-                              {mergeTargets[v.mergeTargetId].reportDate.slice(5, 7)}) — тот же автор,
-                              та же проблема
+                              {mergeTargets[v.mergeTargetId].reportDate.slice(5, 7)}) — тот же автор;
+                              проверьте переписку перед объединением
                             </span>
                             <button
                               type="button"
