@@ -32,6 +32,10 @@ const MAX_WINDOW_MESSAGES = 100;
 // трёх кнопок в личке — это уже не подсказка, а форма.
 const MAX_CANDIDATES = 3;
 
+// Сколько звеньев цепочки реплаев проходим вверх в поисках тикета. Реальные
+// цепочки короткие; предел защищает от кольца.
+const MAX_REPLY_HOPS = 4;
+
 export type AgentTarget =
   | { kind: "found"; issueId: string; reason: "reply" | "own-thread" | "last-request" }
   | { kind: "ambiguous"; candidates: { id: string; description: string }[] }
@@ -51,10 +55,16 @@ export async function resolveAgentTarget(params: {
   const { chatId, messageId, replyToMessageId, agentTelegramId, sentAt } = params;
 
   // 1. Стрелка реплая — самый точный признак, проверяется первым.
-  if (replyToMessageId != null) {
+  //
+  // Идём вверх по цепочке реплаев, пока не найдём сообщение с тикетом: ответ
+  // куратора на нашу реплику сам к тикету не привязан, и «жөнделді» реплаем
+  // на него (25.09, тикет Мадины от 23.09) раньше не находил тикета вовсе —
+  // хотя двумя звеньями выше стояла наша реплика по нему.
+  let cursor = replyToMessageId;
+  for (let hop = 0; cursor != null && hop < MAX_REPLY_HOPS; hop++) {
     const replied = await prisma.telegramMessage.findUnique({
-      where: { chatId_messageId: { chatId, messageId: replyToMessageId } },
-      select: { usedForIssueId: true, agentIssueId: true },
+      where: { chatId_messageId: { chatId, messageId: cursor } },
+      select: { usedForIssueId: true, agentIssueId: true, replyToMessageId: true },
     });
     // Ответ на своё же сообщение ведёт к тикету, который оно обсуждало.
     const target = replied?.usedForIssueId ?? replied?.agentIssueId ?? null;
@@ -66,10 +76,11 @@ export async function resolveAgentTarget(params: {
     // «Өтініш #…», и дежурный отвечает стрелкой именно на него. Раньше такой
     // ответ ни к чему не привязывался, и «Как решили?» его не видела.
     const botPost = await prisma.botReply.findUnique({
-      where: { chatId_messageId: { chatId, messageId: replyToMessageId } },
+      where: { chatId_messageId: { chatId, messageId: cursor } },
       select: { issueId: true },
     });
     if (botPost) return { kind: "found", issueId: botPost.issueId, reason: "reply" };
+    cursor = replied?.replyToMessageId ?? null;
   }
 
   const since = new Date(sentAt.getTime() - WINDOW_MINUTES * 60 * 1000);

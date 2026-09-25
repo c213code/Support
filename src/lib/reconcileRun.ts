@@ -19,6 +19,32 @@ import { buildUserText, reconcileIssue, type ReconcileProvider } from "@/lib/day
 // Модель разбора — переменной RECONCILE_MODEL: «gemini:<модель>» (нужен
 // GEMINI_REPORT_KEY), «openrouter:<модель>» (нужен OPENROUTER_API_KEY) или
 // «groq».
+// Запасная модель для повтора: другая, чем основная, чтобы сбой одной не
+// оставлял тикет с «ИИ не ответил». RECONCILE_FALLBACK — «openrouter:<модель>»,
+// «groq» или «none»; по умолчанию DeepSeek Flash через OpenRouter (дешёвый и
+// на наших тикетах почти не хуже MiMo), без ключа OpenRouter — Groq.
+export function fallbackProvider(primary: ReconcileProvider): ReconcileProvider | null {
+  const spec = process.env.RECONCILE_FALLBACK?.trim();
+  if (spec === "none") return null;
+  const candidate: ReconcileProvider | null =
+    spec === "groq"
+      ? { kind: "groq", model: "groq" }
+      : process.env.OPENROUTER_API_KEY
+        ? {
+            kind: "openrouter",
+            model: spec?.startsWith("openrouter:")
+              ? spec.slice("openrouter:".length)
+              : "deepseek/deepseek-v4.1-flash",
+          }
+        : process.env.GROQ_API_KEY
+          ? { kind: "groq", model: "groq" }
+          : null;
+  if (!candidate) return null;
+  if (candidate.kind !== primary.kind || candidate.model !== primary.model) return candidate;
+  // Запасная совпала с основной — тогда Groq, если основная не он.
+  return primary.kind !== "groq" && process.env.GROQ_API_KEY ? { kind: "groq", model: "groq" } : null;
+}
+
 export function reconcileProvider(): ReconcileProvider {
   const spec = process.env.RECONCILE_MODEL?.trim();
   if (spec === "groq") return { kind: "groq", model: "groq" };
@@ -139,9 +165,19 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   // с рассуждениями high это 3 тикета) — ему пауза 15 секунд; у остальных
   // сбой случайный, хватит 3. Исчерпанную дневную квоту Gemini повтор не
   // спасёт: такой тикет помечается ошибкой, его можно разобрать заново позже.
+  //
+  // Повтор — к запасной модели (fallbackProvider): у MiMo бывают серии пустых
+  // ответов, и повтор к ней же 25.09 дважды подряд вернул пусто по тикету,
+  // который она же через минуту разобрала верно.
+  let answeredBy: ReconcileProvider = provider;
   if (!result.ok && !/^429|quota|RESOURCE_EXHAUSTED/i.test(result.error)) {
-    await new Promise((resolve) => setTimeout(resolve, provider.kind === "groq" ? 15_000 : 3000));
-    result = await reconcileIssue(provider, verdict.issue.description, thread, siblings);
+    const retry = fallbackProvider(provider) ?? provider;
+    await new Promise((resolve) => setTimeout(resolve, retry.kind === "groq" ? 15_000 : 3000));
+    result = await reconcileIssue(retry, verdict.issue.description, thread, siblings);
+    answeredBy = retry;
+  }
+  if (result.ok && answeredBy !== provider) {
+    result.verdict.reason = `${result.verdict.reason} (ответила запасная модель: ${providerLabel(answeredBy)})`.trim();
   }
   await prisma.reconcileVerdict.update({
     where: { id: verdict.id },
