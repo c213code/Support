@@ -30,6 +30,9 @@ export type AutoRunState = {
 
 type VerdictLite = { state: string; proposed: string | null };
 
+// Как часто подтягивать журнал, пока идёт шаг.
+const STEP_POLL_MS = 1500;
+
 export function countVerdicts(verdicts: VerdictLite[]): { done: number; counts: RunCounts } {
   const counts: RunCounts = { resolved: 0, inProgress: 0, pending: 0, unclear: 0, skipped: 0, error: 0 };
   for (const v of verdicts) {
@@ -78,7 +81,28 @@ export function useAutoReportRun() {
       const first = await fetchRun(runId, date);
       if (first) setRun(snapshot(first, false));
       for (;;) {
-        const step = await fetch(`/api/reconcile/${runId}/step`, { method: "POST" }).catch(() => null);
+        // Шаг — несколько тикетов одновременно, и ответ на него приходит,
+        // когда готов самый медленный. Но каждый тикет пишется в журнал сразу
+        // по готовности — поэтому, пока шаг идёт, подтягиваем журнал сами:
+        // полоса растёт по одному тикету, а не прыгает раз в шаг.
+        let polling = false;
+        const poll = setInterval(async () => {
+          if (polling) return;
+          polling = true;
+          const verdicts = await fetchRun(runId, date);
+          polling = false;
+          if (verdicts) {
+            // Опоздавший ответ не должен откатывать полосу назад.
+            setRun((prev) => {
+              if (prev?.runId !== runId || prev.finishedAt) return prev;
+              const next = snapshot(verdicts, false);
+              return next.done > prev.done ? next : prev;
+            });
+          }
+        }, STEP_POLL_MS);
+        const step = await fetch(`/api/reconcile/${runId}/step`, { method: "POST" })
+          .catch(() => null)
+          .finally(() => clearInterval(poll));
         const stepData = step?.ok ? await step.json().catch(() => null) : null;
         if (!stepData) {
           setRun((prev) =>
