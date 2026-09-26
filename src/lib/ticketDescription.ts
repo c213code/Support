@@ -1,6 +1,7 @@
 import { cleanTicketDescription, isNoiseOnly } from "@/lib/textClean";
 import { isAiSkip, rewriteTicketDescriptionWithAI } from "@/lib/ai";
 import { isAiCleaningEnabled } from "@/lib/settings";
+import { prisma } from "@/lib/prisma";
 
 // Готовит описание для тикета — или null, если по этому сообщению тикет
 // заводить не нужно (голое приветствие, одна ссылка, "рахмет", рабочая
@@ -65,4 +66,27 @@ export async function buildDescription(
     }
   }
   return cleanTicketDescription(contextual);
+}
+
+// Описание тикета из мини-аппа: «Ярлык — что написал куратор». Куратор
+// пишет развёрнуто, и в репорт руководству уходил весь его текст как есть.
+// Пишем суть так же, как для сообщений из чата (тот же промпт и тот же
+// рубильник aiCleaningEnabled), — но уже после ответа куратору: форма не
+// должна ждать модель. Меняем, только если описание всё ещё то, с которым
+// тикет заведён: поправленное дежурным руками не трогаем. Сбой, пустой
+// ответ или SKIP — остаётся regex-чистка.
+export async function rewriteSubmissionDescription(
+  issueId: string,
+  summary: string,
+  current: string
+): Promise<void> {
+  if (!(await isAiCleaningEnabled())) return;
+  const aiResult = await rewriteTicketDescriptionWithAI(summary);
+  if (!aiResult || isAiSkip(aiResult)) return;
+  const description = cleanTicketDescription(aiResult) || aiResult;
+  if (description === current) return;
+  await prisma.issue.updateMany({
+    where: { id: issueId, description: current },
+    data: { description },
+  });
 }

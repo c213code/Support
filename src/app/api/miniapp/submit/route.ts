@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { OFFICIAL_GROUPS } from "@/lib/groups";
@@ -15,6 +15,7 @@ import { insertSentIssue } from "@/lib/webhook/acknowledge";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
 import { uploadPhotos, type PhotoUpload } from "@/lib/telegram";
 import { postSubmissionToGroup } from "@/lib/submissionGroupPost";
+import { rewriteSubmissionDescription } from "@/lib/ticketDescription";
 
 // Сколько фото можно приложить к одному обращению. Больше пяти — это уже не
 // «покажи, что на экране», а выгрузка галереи, и в лимит запроса она не
@@ -203,9 +204,9 @@ export async function POST(request: NextRequest) {
   // Оно уходит в репорт руководству, поэтому почты, номера и пароли из полей
   // сюда не попадают — они в rawText, который видит только дежурный.
   //
-  // ИИ здесь больше не нужен: он вытаскивал суть из свободного текста, а
-  // теперь её задаёт сам ярлык. Остаётся regex-чистка — на случай, если
-  // куратор вписал контакты прямо в пояснение.
+  // Сразу — regex-чистка (на случай, если куратор вписал контакты прямо в
+  // пояснение); суть пояснения ИИ допишет после ответа куратору (ниже,
+  // rewriteSubmissionDescription), если куратор что-то написал сам.
   const summary = buildSummary(label, values);
   const details = buildDetails(label, values);
   const own = typeof values.description === "string" ? values.description : "";
@@ -299,6 +300,13 @@ export async function POST(request: NextRequest) {
     // У тикетов из формы её раньше не было вовсе.
     if (link) {
       await prisma.issue.update({ where: { id: issue.id }, data: { telegramLink: link } });
+    }
+    if (own.trim()) {
+      after(() =>
+        rewriteSubmissionDescription(issue.id, summary, cleaned).catch((err) =>
+          console.warn(`[miniapp] ИИ-описание не записалось: ${String(err).slice(0, 200)}`)
+        )
+      );
     }
 
     return NextResponse.json({ ok: true, issueId: issue.id });
