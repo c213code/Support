@@ -4,6 +4,8 @@ import { sendTelegramMessage, sendWebAppButton } from "@/lib/telegram";
 import { isSubmitterNotifyEnabled } from "@/lib/settings";
 import { miniAppUrl, submissionFormEnabled } from "@/lib/miniapp";
 import { STATUS_KK } from "@/lib/statusKk";
+import { buildSummary, findLabel } from "@/lib/submissionLabels";
+import { cleanTicketDescription } from "@/lib/textClean";
 
 // Ответ автору обращения, поданного формой мини-аппа: бот пишет ему в личку,
 // когда дежурный двигает статус.
@@ -36,7 +38,8 @@ export async function notifySubmitter(
 
     const submissions = await prisma.issueSubmission.findMany({
       where: { issueId },
-      select: { telegramUserId: true },
+      orderBy: { createdAt: "asc" },
+      select: { telegramUserId: true, labelId: true, labelFields: true },
     });
     // Обычный тикет из группы — там у бота свои ответы, дублировать в личку
     // некому и незачем.
@@ -44,11 +47,22 @@ export async function notifySubmitter(
 
     const issue = await prisma.issue.findUnique({
       where: { id: issueId },
-      select: { description: true, note: true },
+      select: { description: true, note: true, groupName: true },
     });
     if (!issue) return;
 
-    const parts = [`${STATUS_KK[status].emoji} ${notice}`, "", `«${issue.description}»`];
+    // Куратору цитируем его же обращение — «ярлык — что он написал», как
+    // было при подаче. Описание тикета на сайте пишет ИИ коротко
+    // (rewriteSubmissionDescription), но это для доски и репорта, а в личке
+    // человек должен узнать свои слова.
+    const first = submissions[0];
+    const label = first.labelId ? findLabel(issue.groupName, first.labelId) : null;
+    const summary = label
+      ? buildSummary(label, (first.labelFields ?? {}) as Record<string, string | string[]>)
+      : null;
+    const quote = summary ? cleanTicketDescription(summary) || summary : issue.description;
+
+    const parts = [`${STATUS_KK[status].emoji} ${notice}`, "", `«${quote}»`];
     // Итог показываем только на «решено»: на промежуточных статусах в заметке
     // лежит рабочая пометка дежурного, а не ответ куратору.
     const outcome = status === "RESOLVED" ? (note ?? issue.note)?.trim() : null;
