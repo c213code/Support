@@ -173,14 +173,23 @@ type PendingVerdict = { id: string; issueId: string; issue: { description: strin
 
 // Суждение по одному тикету запуска — пишет результат в его строку журнала.
 async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider): Promise<void> {
-  const context = await collectResolutionContext(verdict.issueId);
+  // Всё, что нужно модели, — одновременно: проверка «не продолжение ли»
+  // ходит в Groq до трёх раз подряд, и раньше модель разбора ждала её.
+  //
   // Та же общая поломка могла быть решена в другой группе (см.
   // findResolvedSiblings) — тогда есть о чём судить даже без нашего ответа
-  // в этом чате: часто здесь и не отвечали, ответили там.
-  const siblings = await findResolvedSiblings(verdict.issueId);
-  // Не продолжение ли это другого открытого тикета того же автора — тогда
-  // окно предложит объединить (как тикеты Амины за 24 и 25.09).
-  const mergeTargetId = (await findSplitOriginal(verdict.issueId))?.id ?? null;
+  // в этом чате: часто здесь и не отвечали, ответили там. Не продолжение ли
+  // это другого открытого тикета того же автора — тогда окно предложит
+  // объединить (как тикеты Амины за 24 и 25.09); сбой этой проверки разбор
+  // не роняет.
+  const [context, siblings, mergeTargetId] = await Promise.all([
+    collectResolutionContext(verdict.issueId),
+    findResolvedSiblings(verdict.issueId),
+    findSplitOriginal(verdict.issueId).then(
+      (original) => original?.id ?? null,
+      () => null
+    ),
+  ]);
   const thread = context.ok && context.context.exact ? context.context.thread : [];
   // Общие сообщения агентов в чате — даже при неточной переписке: ответ
   // «всем сразу» без стрелки и есть типичный случай, когда точной нет.
@@ -253,9 +262,12 @@ export async function stepRun(runId: string): Promise<{ remaining: number }> {
   // Шаг ждёт самый медленный ответ: медиана у моделей ~1 с, но каждый
   // десятый — 5–25 с. Чем больше тикетов в шаге, тем реже этот хвост
   // повторяется. Groq держим на 3 — его лимит 8000 токенов в минуту на ключ;
-  // у OpenRouter такого лимита нет. 6 × худшие 60 с + повтор укладываются
-  // в maxDuration маршрута (300 с), потому что идут одновременно.
-  const batch = provider.kind === "groq" ? 3 : 6;
+  // у OpenRouter такого лимита нет. Тикеты шага идут одновременно, поэтому
+  // шаг длится как самый долгий тикет (110 с + повтор к запасной), а не
+  // как их сумма — в maxDuration маршрута (300 с) влезает и 10. Хвост
+  // долгих размышлений MiMo обрезан (max_tokens в askOpenRouter), так что
+  // 30 тикетов — три шага вместо пяти.
+  const batch = provider.kind === "groq" ? 3 : 10;
   const now = new Date();
   const free = await prisma.reconcileVerdict.findMany({
     where: { runId, state: "pending", OR: claimFree(now) },

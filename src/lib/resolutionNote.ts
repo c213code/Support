@@ -244,6 +244,10 @@ export async function collectResolutionContext(
   // Плюс все реплики, которые вебхук уже привязал к этому тикету
   // (agentIssueId), даже вне окна: он решал это в момент сообщения — по
   // стрелке, по своему разговору, по ближайшему обращению (lib/agentThread.ts).
+  // Сообщения автора и бота — на неделю раньше обращения, а не вся история
+  // чата: раньше на каждый тикет перечитывались все ответы бота в группе
+  // за всё время. Цитируют и отвечают стрелкой на свежие.
+  const historyFrom = new Date(since.getTime() - REPLY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const [windowAgentMessages, linkedByWebhook, reporterMessages, botReplies] =
     await Promise.all([
       prisma.telegramMessage.findMany({
@@ -263,7 +267,11 @@ export async function collectResolutionContext(
       }),
       reporterIds.length > 0
         ? prisma.telegramMessage.findMany({
-            where: { chatId, receivedAt: { lte: replyUntil }, fromId: { in: reporterIds } },
+            where: {
+              chatId,
+              receivedAt: { gte: historyFrom, lte: replyUntil },
+              fromId: { in: reporterIds },
+            },
             select: MESSAGE_FIELDS,
             orderBy: { receivedAt: "asc" },
           })
@@ -272,7 +280,7 @@ export async function collectResolutionContext(
       // вебхуку, в TelegramMessage их нет — но BotReply помнит, к какому
       // тикету каждое. Агент часто отвечает стрелкой именно на них.
       prisma.botReply.findMany({
-        where: { chatId },
+        where: { chatId, sentAt: { gte: historyFrom } },
         select: { messageId: true, issueId: true, text: true },
       }),
     ]);

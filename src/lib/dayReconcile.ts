@@ -2,7 +2,7 @@ import { callGroqChat, GROQ_MODEL } from "@/lib/ai";
 import { maskSensitiveForAi } from "@/lib/textClean";
 import type { ThreadLine } from "@/lib/resolutionNote";
 import type { ResolvedSibling } from "@/lib/relatedIssue";
-import { buildReconcileMessages, reasoningParams, RECONCILE_RULES } from "@/lib/reconcilePrompt";
+import { buildReconcileMessages, modelFamily, reasoningParams, RECONCILE_RULES } from "@/lib/reconcilePrompt";
 import { buildAiContext } from "@/lib/projectContext";
 
 // Вечерний разбор: чем закончился каждый открытый тикет дня — по переписке в
@@ -257,8 +257,17 @@ async function askOpenRouter(model: string, userText: string, glossary: string):
       response_format: { type: "json_object" },
       // Почти все свежие модели — reasoning-типа: лимит с запасом на
       // размышления. 4000 не хватало: DeepSeek на трудной переписке
-      // исписал весь лимит размышлениями и вернул пустой ответ.
-      max_tokens: 8000,
+      // исписал весь лимит размышлениями и вернул пустой ответ. MiMo — 4000:
+      // на прогоне по истории ~5% тикетов уходили у неё за 4000 токенов
+      // размышлений, съедали пятую часть всех токенов, думали 70–240 с и
+      // были верны в трети случаев. Такой тикет лучше честно отдать человеку.
+      max_tokens: modelFamily(model) === "mimo" ? 4000 : 8000,
+      // DeepSeek на OpenRouter раздают ~26 провайдеров, от официального до
+      // fp4-сборок, и цена одного и того же запроса отличалась в десять раз.
+      // Сначала сам DeepSeek и DeepInfra (fp8, с кэшем), остальные — запасом.
+      ...(modelFamily(model) === "deepseek"
+        ? { provider: { order: ["deepseek", "deepinfra"], allow_fallbacks: true } }
+        : {}),
       usage: { include: true },
     }),
   }).catch((err: unknown) => err as Error);
@@ -274,16 +283,32 @@ async function askOpenRouter(model: string, userText: string, glossary: string):
     return { ok: false, error: `${res.status}: ${data?.error?.message?.slice(0, 160) ?? ""}`, ms };
   }
   const text = data?.choices?.[0]?.message?.content ?? "";
-  const verdict = parseVerdict(text);
-  if (!verdict) {
-    // Пустой ответ с finish_reason=length — модель исписала лимит
-    // размышлениями и до ответа не дошла; человеку это понятнее, чем «не JSON».
-    const error =
-      !text && data?.choices?.[0]?.finish_reason === "length"
-        ? "модель не уложилась в лимит размышлений — разберите заново или поставьте вручную"
-        : `не JSON по схеме: ${text.slice(0, 120)}`;
-    return { ok: false, error, ms };
+  const usage = data?.usage
+    ? {
+        inputTokens: data.usage.prompt_tokens ?? 0,
+        outputTokens: data.usage.completion_tokens ?? 0,
+        costUsd: data.usage.cost,
+      }
+    : null;
+  // Пустой ответ с finish_reason=length — модель исписала лимит
+  // размышлениями и к выводу не пришла. Это не сбой, а трудный тикет:
+  // «Непонятно» отдаёт его человеку сразу, без второй такой же долгой
+  // попытки у запасной модели.
+  if (!text && data?.choices?.[0]?.finish_reason === "length") {
+    return {
+      ok: true,
+      verdict: {
+        status: "UNCLEAR",
+        note: "",
+        evidence: "",
+        reason: "модель не пришла к выводу за отведённые размышления — посмотрите переписку",
+      },
+      usage,
+      ms,
+    };
   }
+  const verdict = parseVerdict(text);
+  if (!verdict) return { ok: false, error: `не JSON по схеме: ${text.slice(0, 120)}`, ms };
   return {
     ok: true,
     verdict,
