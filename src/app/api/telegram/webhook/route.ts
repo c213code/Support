@@ -21,6 +21,7 @@ import {
   attachFollowUpToTicket,
 } from "@/lib/webhook/messageIntake";
 import { resolveAgentTarget, type AgentTarget } from "@/lib/agentThread";
+import { applyAgentReaction } from "@/lib/webhook/reactionIntake";
 import { isSameRequestFollowUp } from "@/lib/ai";
 import { sendBotReply } from "@/lib/botReply";
 import { isAutoReplyEnabled, isAiCleaningEnabled } from "@/lib/settings";
@@ -52,6 +53,12 @@ export async function POST(request: NextRequest) {
 
   if (update?.callback_query) {
     await handleCallbackQuery(update.callback_query);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Реакция агента («👌» на обращение) — взял в работу. См. reactionIntake.
+  if (update?.message_reaction) {
+    await applyAgentReaction(update.message_reaction);
     return NextResponse.json({ ok: true });
   }
 

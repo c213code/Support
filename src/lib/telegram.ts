@@ -8,6 +8,24 @@ export type TelegramUpdate = {
   message?: TelegramMessagePayload;
   edited_message?: TelegramMessagePayload;
   callback_query?: TelegramCallbackQuery;
+  message_reaction?: TelegramMessageReaction;
+};
+
+// Кто-то поставил или снял реакцию на сообщение в группе. Telegram шлёт это,
+// только если бот — админ группы и "message_reaction" есть в allowed_updates
+// вебхука (по умолчанию его там нет). Анонимный админ приходит без user.
+export type TelegramReaction =
+  | { type: "emoji"; emoji: string }
+  | { type: "custom_emoji"; custom_emoji_id: string }
+  | { type: "paid" };
+
+export type TelegramMessageReaction = {
+  chat: { id: number };
+  message_id: number;
+  user?: { id: number; is_bot?: boolean };
+  date: number;
+  old_reaction: TelegramReaction[];
+  new_reaction: TelegramReaction[];
 };
 
 // Нажатие на inline-кнопку под сообщением бота — под вечерней сводкой
