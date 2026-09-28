@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { fieldVisible, type LabelField, type SubmissionLabel } from "@/lib/submissionLabels";
+import { useEffect, useRef, useState } from "react";
+import {
+  checksStudent,
+  fieldVisible,
+  type LabelField,
+  type SubmissionLabel,
+} from "@/lib/submissionLabels";
 import { currentInitData, haptic } from "@/lib/miniappClient";
 import { formatKzPhone } from "@/lib/phone";
 import styles from "./SubmissionForm.module.css";
 
-// Состояние автопроверки контакта на платформе: свободен ли новый номер или
-// почта. "unavailable" — проверить не вышло (инструмент выключен, платформа
-// молчит); тогда форма спрашивает то же самое вручную.
+// Состояние автопроверки контакта на платформе. Вопрос один — есть ли там
+// пользователь с таким контактом, — а смысл ответа зависит от поля: у нового
+// номера/почты (checkOccupancy) «нашёлся» значит «занят», у контакта
+// ученика (checksStudent) — «ученик найден». "unavailable" — проверить не
+// вышло (инструмент выключен, платформа молчит); тогда форма спрашивает то
+// же самое вручную или молчит.
 type CheckState =
   | { status: "loading" }
   | { status: "free" }
@@ -50,28 +58,40 @@ export function LabelFields({
   fieldId: (id: string) => string;
 }) {
   const [checks, setChecks] = useState<Record<string, CheckState>>({});
+  // Для какого значения получен результат: исправили почту — старое
+  // «✓ табылды» под ней показывать нельзя.
+  const [checkedFor, setCheckedFor] = useState<Record<string, string>>({});
+  // Какое значение по каждому полю уже проверено: эффект перезапускается от
+  // ввода в любое проверяемое поле, а проверок у куратора 60 в час.
+  const checked = useRef<Record<string, string>>({});
+  const isChecked = (f: LabelField) => Boolean(f.checkOccupancy) || checksStudent(f);
 
   // Поля, которые проверяются на платформе, и их текущие значения — по ним
   // же перезапускается эффект.
   const watched = label.fields
-    .filter((f) => f.checkOccupancy)
+    .filter(isChecked)
     .map((f) => `${f.id}=${typeof values[f.id] === "string" ? values[f.id] : ""}`)
     .join("|");
 
   useEffect(() => {
     const pending = label.fields
-      .filter((f) => f.checkOccupancy)
+      .filter(isChecked)
       .map((f) => ({ field: f, value: (typeof values[f.id] === "string" ? values[f.id] : "") as string }))
       .filter(({ field, value }) => {
         const v = value.trim();
         if (!fieldVisible(field, values)) return false;
-        return field.type === "email" ? v.includes("@") && v.length >= 5 : v.replace(/\D/g, "").length >= 9;
+        if (checked.current[field.id] === v) return false;
+        // В текстовом поле «почта немесе нөмір» может быть и то и другое.
+        const email = field.type === "email" || (field.type === "text" && v.includes("@"));
+        return email ? v.includes("@") && v.length >= 5 : v.replace(/\D/g, "").length >= 9;
       });
     if (pending.length === 0) return;
 
     let cancelled = false;
     const timer = setTimeout(async () => {
       for (const { field, value } of pending) {
+        checked.current[field.id] = value.trim();
+        setCheckedFor((prev) => ({ ...prev, [field.id]: value.trim() }));
         setChecks((prev) => ({ ...prev, [field.id]: { status: "loading" } }));
         try {
           const res = await fetch("/api/miniapp/check-contact", {
@@ -88,6 +108,8 @@ export function LabelFields({
           } | null;
           if (cancelled) return;
           if (!data?.available) {
+            // Не проверили — при следующем вводе попробуем снова.
+            delete checked.current[field.id];
             setChecks((prev) => ({ ...prev, [field.id]: { status: "unavailable" } }));
             continue;
           }
@@ -104,9 +126,10 @@ export function LabelFields({
           }));
           // Ответ платформы — это и есть ответ на вопрос «бар ма?»: по нему
           // открывается следующий вопрос, что делать с тем пользователем.
-          onChange("occupied", data.taken ? "yes" : "no");
+          if (field.checkOccupancy) onChange("occupied", data.taken ? "yes" : "no");
         } catch {
           if (!cancelled) {
+            delete checked.current[field.id];
             setChecks((prev) => ({ ...prev, [field.id]: { status: "unavailable" } }));
           }
         }
@@ -127,6 +150,30 @@ export function LabelFields({
     const state = checks[f.id]?.status;
     return state === "free" || state === "taken";
   });
+
+  // Под полем контакта ученика: нашли — кого (имя на платформе бывает
+  // мусорным, поэтому рядом встречный контакт), не нашли — предупреждение,
+  // но не запрет: ученик мог зарегистрироваться на другой контакт.
+  function studentNote(field: LabelField, value: string) {
+    const state = checks[field.id];
+    if (!state || state.status === "unavailable" || checkedFor[field.id] !== value) return null;
+    if (state.status === "loading") return <p className={styles.footer}>Тексерілуде…</p>;
+    if (state.status === "free") {
+      return (
+        <p className={`${styles.footer} ${styles.footerError}`}>
+          Платформада мұндай оқушы табылмады — дұрыс жазылғанын тексеріңіз
+        </p>
+      );
+    }
+    const byEmail = value.includes("@");
+    const other = byEmail ? state.phone : state.email;
+    const who = [state.name, other].filter(Boolean).join(" · ");
+    return (
+      <p className={`${styles.footer} ${styles.footerOk}`}>
+        ✓ Оқушы табылды{who ? `: ${who}` : ""}
+      </p>
+    );
+  }
 
   // Что показать под проверяемым полем.
   function checkNote(field: LabelField) {
@@ -290,6 +337,7 @@ export function LabelFields({
               )}
             </div>
             {field.checkOccupancy && checkNote(field)}
+            {checksStudent(field) && fieldVisible(field, values) && studentNote(field, value.trim())}
             {field.hint && <p className={styles.footer}>{field.hint}</p>}
             {invalid && <p className={`${styles.footer} ${styles.footerError}`}>Толтырыңыз</p>}
           </section>

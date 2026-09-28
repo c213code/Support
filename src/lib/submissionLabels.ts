@@ -891,6 +891,29 @@ export function findLabel(groupName: string, labelId: string): SubmissionLabel |
   return labelsForGroup(groupName).find((l) => l.id === labelId) ?? null;
 }
 
+// Поля, где куратор пишет контакт УЖЕ существующего ученика: по нему форма
+// сразу ищет ученика на платформе и показывает, кого нашла («✓ Айдана ·
+// +7…») или что не нашла никого. Опечатка в почте раньше выяснялась, только
+// когда дежурный открывал тикет и шёл переспрашивать. Не сюда: новые номер
+// и почта при смене (там обратный вопрос — свободны ли, checkOccupancy),
+// почта родителя и куратора, номер, на который «код не пришёл» (ученика ещё
+// может не быть), и повторяемые поля (в ЖЖ там имена).
+const STUDENT_CONTACT_IDS = new Set([
+  "studentEmail",
+  "studentPhone",
+  "studentContact",
+  "oldPhone",
+  "oldEmail",
+  "fromPhone",
+  "fromEmail",
+  "toPhone",
+  "toEmail",
+]);
+
+export function checksStudent(field: LabelField): boolean {
+  return STUDENT_CONTACT_IDS.has(field.id) && !field.repeatable && !field.checkOccupancy;
+}
+
 // Показывать ли поле при текущих ответах: у ярлыка «кірмей тұр» половина полей
 // зависит от того, прошёл ли ученик регистрацию.
 export function fieldVisible(
