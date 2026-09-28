@@ -1,0 +1,1 @@
+ALTER TABLE "ForwardDraft" ADD COLUMN "messageCount" INTEGER NOT NULL DEFAULT 0;

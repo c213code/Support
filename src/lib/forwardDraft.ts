@@ -53,8 +53,8 @@ function originName(message: TelegramMessagePayload): string {
   );
 }
 
-function buildPrompt(text: string, photoCount: number, direct: boolean): string {
-  const parts = [`${text.split("\n").filter(Boolean).length} хабарлама`];
+function buildPrompt(messageCount: number, photoCount: number, direct: boolean): string {
+  const parts = [`${messageCount} хабарлама`];
   if (photoCount > 0) parts.push(`${photoCount} сурет`);
   // Написали боту напрямую — сначала говорим, куда такое принимают: иначе
   // куратор так и будет писать в личку, а дежурный узнавать об этом
@@ -101,20 +101,22 @@ async function addToDraft(opts: {
 
   const photos = [...(fresh?.photoFileIds ?? []), ...opts.photoFileIds].slice(0, MAX_PHOTOS);
   const text = [fresh?.text ?? "", line].filter(Boolean).join("\n").slice(0, MAX_TEXT);
+  const messageCount = (fresh?.messageCount ?? 0) + 1;
 
   const draft = await prisma.forwardDraft.upsert({
     where: { telegramUserId: opts.userId },
     update: {
       text,
       photoFileIds: photos,
+      messageCount,
       // Прежний черновик просрочен — и его сообщение с кнопкой тоже: на
       // него больше не отвечаем, покажем новое.
       ...(fresh ? {} : { promptChatId: null, promptMessageId: null }),
     },
-    create: { telegramUserId: opts.userId, text, photoFileIds: photos },
+    create: { telegramUserId: opts.userId, text, photoFileIds: photos, messageCount },
   });
 
-  const prompt = buildPrompt(text, photos.length, opts.direct);
+  const prompt = buildPrompt(messageCount, photos.length, opts.direct);
   if (draft.promptChatId && draft.promptMessageId) {
     const edited = await editMessageText(draft.promptChatId, draft.promptMessageId, prompt, [
       [{ text: "📝 Өтініш жасау", web_app: { url } }],
