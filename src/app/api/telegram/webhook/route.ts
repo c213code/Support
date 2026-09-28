@@ -342,6 +342,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // Правка уже полученного сообщения — не новое сообщение. Раньше она шла
+  // по всему пути заново, и склейка «тот же человек за 5 минут» дописывала
+  // исправленный текст к оригиналу вместе с цитатой: у куратора выходило
+  // «…store толық…\n↩️ Ерасыл: …\n…память толып…» (28.09, разбор судил по
+  // этой каше). Теперь правка заменяет текст своего сообщения. Если это
+  // сообщение уже склеено с другими (серия: receivedAt подтянут к
+  // последнему) или само было приклеено к чужой строке — правку не
+  // трогаем: вырезать старую версию из склейки нечем, а дописывать — это
+  // та же каша.
+  if (update?.edited_message) {
+    const stored = await prisma.telegramMessage.findUnique({
+      where: { chatId_messageId: { chatId, messageId: message.message_id } },
+      select: { id: true, receivedAt: true },
+    });
+    const series = stored ? stored.receivedAt.getTime() - message.date * 1000 > 15_000 : true;
+    if (stored && !series) {
+      await prisma.telegramMessage.update({
+        where: { id: stored.id },
+        data: { text: contextualText },
+      });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   // Ответ на вопрос бота ("пришлите почту") — самый точный признак связи с
   // тикетом, поэтому проверяется первым: иначе присланная почта осталась бы
   // болтаться во "Входящих" отдельным сообщением, не привязанным ни к чему.
