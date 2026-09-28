@@ -18,6 +18,7 @@ import {
   applyAgentIntent,
   attachReplyToBotMessage,
   findSameAuthorActiveIssue,
+  followUpContext,
   attachFollowUpToTicket,
 } from "@/lib/webhook/messageIntake";
 import { resolveAgentTarget, type AgentTarget } from "@/lib/agentThread";
@@ -543,7 +544,13 @@ export async function POST(request: NextRequest) {
   // а именно её чаще всего и присылают вторым сообщением.
   if (preset && !savedMessage.usedForIssueId && (await isAiCleaningEnabled())) {
     const activeIssue = await findSameAuthorActiveIssue(chatId, fromId);
-    if (activeIssue && (await isSameRequestFollowUp(activeIssue.description, text))) {
+    if (
+      activeIssue &&
+      (await isSameRequestFollowUp(
+        await followUpContext(activeIssue.id, activeIssue.description),
+        text
+      ))
+    ) {
       // Только привязка, без ссылки в extraLinks — это тот же случай, а не
       // отдельное обращение (см. ATTACH_LINK_POLICY в lib/webhook/messageIntake).
       await prisma.telegramMessage.update({

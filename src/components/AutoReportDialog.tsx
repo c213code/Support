@@ -172,6 +172,7 @@ export function AutoReportDialog({
   // Тикеты, с которыми предлагается объединить (см. findSplitOriginal).
   const [mergeTargets, setMergeTargets] = useState<Record<string, MergeTarget>>({});
   const [mergingId, setMergingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Статус, выбранный человеком вместо предложенного моделью.
@@ -355,6 +356,38 @@ export function AutoReportDialog({
     }
   }
 
+  // Удалить тикет прямо из разбора: в журнал попадают и дубли, и мусор
+  // («рахмет», пересланное не по делу), и за каждым раньше приходилось идти
+  // на доску. Тот же DELETE, что у доски; строка журнала уходит вместе с
+  // тикетом (каскад).
+  async function removeIssue(verdict: Verdict) {
+    const text = verdict.issue.description.slice(0, 120);
+    if (!window.confirm(`Удалить тикет «${text}»? Это не отменить.`)) return;
+    setDeletingId(verdict.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/issues/${verdict.issueId}`, { method: "DELETE" });
+      if (!res.ok) {
+        setError("Не удалось удалить тикет");
+        return;
+      }
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(verdict.id);
+        return next;
+      });
+      setChoice((prev) => {
+        const next = { ...prev };
+        delete next[verdict.id];
+        return next;
+      });
+      await loadRuns();
+      onApplied();
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function choose(verdict: Verdict, value: string) {
     if (value === ESCALATE) {
       onEscalate?.(verdict.issueId);
@@ -512,6 +545,14 @@ export function AutoReportDialog({
                               Переписка в Telegram ↗
                             </a>
                           )}
+                          <button
+                            type="button"
+                            disabled={busy || deletingId !== null}
+                            onClick={() => removeIssue(v)}
+                            className="text-red-500 hover:underline disabled:opacity-50"
+                          >
+                            {deletingId === v.id ? "Удаляю…" : "🗑 Удалить тикет"}
+                          </button>
                         </p>
                         {(v.state === "done" || v.state === "error") && (
                           <WhyBlock verdictId={v.id} reason={v.reason} />

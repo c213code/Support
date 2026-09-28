@@ -1,12 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { shiftDateString, todayDateString } from "@/lib/date";
-import { isNoiseOnly } from "@/lib/textClean";
+import { isNoiseOnly, maskSensitiveForAi } from "@/lib/textClean";
 import { STATUS_META } from "@/lib/status";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { detectAgentIntent } from "@/lib/agentIntent";
 import { type AgentTarget } from "@/lib/agentThread";
-import { collectResolutionContext } from "@/lib/resolutionNote";
+import { collectResolutionContext, stripReplyQuote } from "@/lib/resolutionNote";
 import { isSameCaseFromAnotherPerson, summarizeResolutionNote } from "@/lib/ai";
 import { buildStatusReplyText, pickLanguage } from "@/lib/autoReply";
 import { sendBotReply } from "@/lib/botReply";
@@ -269,15 +269,46 @@ export async function findSameAuthorActiveIssue(
 ): Promise<{ id: string; description: string } | null> {
   if (!fromId) return null;
 
-  const lastUsed = await prisma.telegramMessage.findFirst({
-    where: { chatId, fromId, usedForIssueId: { not: null } },
-    orderBy: { receivedAt: "desc" },
-    select: { usedForIssueId: true },
-  });
-  if (!lastUsed?.usedForIssueId) return null;
+  // Два источника «последнего обращения автора»: его сообщение в этом чате,
+  // ставшее тикетом, и его заявка из мини-аппа, чей пост «Өтініш #…» лежит в
+  // этом же чате. Раньше смотрели только первое — и куратор, подавший
+  // обращение формой, а дальше писавший в группе без реплая («Осылай шығады
+  // ау», «Қалай шешсек болады», «Оқушы тіркелдім дейді»), получал на каждую
+  // такую реплику новый тикет по той же проблеме (28.09, #R8YZ7J). Берём
+  // более свежий; тот ли это случай, решает isSameRequestFollowUp.
+  const since = new Date(Date.now() - (FOLLOW_UP_DAYS + 1) * 24 * 60 * 60 * 1000);
+  const [lastUsed, lastSubmission] = await Promise.all([
+    prisma.telegramMessage.findFirst({
+      where: { chatId, fromId, usedForIssueId: { not: null } },
+      orderBy: { receivedAt: "desc" },
+      select: { usedForIssueId: true, receivedAt: true },
+    }),
+    prisma.issueSubmission.findFirst({
+      where: { telegramUserId: fromId, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      select: { issueId: true, createdAt: true },
+    }),
+  ]);
+  const submissionHere = lastSubmission
+    ? await prisma.botReply.findFirst({
+        where: {
+          issueId: lastSubmission.issueId,
+          chatId,
+          kind: { in: ["SUBMISSION", "SUBMISSION_TEST"] },
+        },
+        select: { id: true },
+      })
+    : null;
+  const candidateId =
+    lastSubmission &&
+    submissionHere &&
+    (!lastUsed || lastSubmission.createdAt > lastUsed.receivedAt)
+      ? lastSubmission.issueId
+      : lastUsed?.usedForIssueId ?? null;
+  if (!candidateId) return null;
 
   const issue = await prisma.issue.findUnique({
-    where: { id: lastUsed.usedForIssueId },
+    where: { id: candidateId },
     select: {
       id: true,
       description: true,
@@ -298,6 +329,48 @@ export async function findSameAuthorActiveIssue(
   }
 
   return issue;
+}
+
+// Что видит проверка «продолжение ли» (isSameRequestFollowUp): не только
+// описание тикета — по одному «Оқушы аккаунтқа кірмей тұр» ни «басқа
+// менеджер тіркеген», ни «қалай шешсек болады» не узнать как продолжение, и
+// 28.09 одна проблема разошлась на три тикета. Добавляем заявку из формы
+// (там видно, назван ли уже ученик) и последние реплики по тикету с обеих
+// сторон. Почты, телефоны и пароли маскируем — модель внешняя.
+export async function followUpContext(issueId: string, description: string): Promise<string> {
+  const [submission, recent] = await Promise.all([
+    prisma.issueSubmission.findFirst({
+      where: { issueId },
+      orderBy: { createdAt: "asc" },
+      select: { rawText: true },
+    }),
+    prisma.telegramMessage.findMany({
+      where: {
+        OR: [{ usedForIssueId: issueId }, { agentIssueId: issueId }],
+        text: { not: null },
+      },
+      orderBy: { receivedAt: "desc" },
+      take: 6,
+      select: { text: true, agentIssueId: true },
+    }),
+  ]);
+  const parts = [description];
+  if (submission?.rawText) {
+    parts.push(`Заявка из формы: ${maskSensitiveForAi(submission.rawText).slice(0, 400)}`);
+  }
+  if (recent.length > 0) {
+    parts.push(
+      "Последняя переписка по тикету:\n" +
+        recent
+          .reverse()
+          .map((m) => {
+            const who = m.agentIssueId === issueId ? "Агент" : "Куратор";
+            return `${who}: ${maskSensitiveForAi(stripReplyQuote(m.text ?? "", null)).slice(0, 200)}`;
+          })
+          .join("\n")
+    );
+  }
+  return parts.join("\n");
 }
 
 // Реплай на уже заведённое сообщение — частый паттерн "напоминание":
