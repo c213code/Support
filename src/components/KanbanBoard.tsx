@@ -466,11 +466,13 @@ export function KanbanBoard({
                           </div>
                         ) : (
                           !issue.hints?.emails.length &&
-                          !issue.hints?.phones.length && (
+                          !issue.hints?.phones.length &&
+                          issue.submission.studentContact && (
                             <p className="break-words">👤 {issue.submission.studentContact}</p>
                           )
                         )}
                         {issue.submission.fields.length === 0 &&
+                          issue.submission.lessonLink &&
                           (/^https?:\/\//i.test(issue.submission.lessonLink) ? (
                             <a
                               href={issue.submission.lessonLink}

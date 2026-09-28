@@ -8,7 +8,6 @@ import { ESCALATION_TEAMS, type EscalationTeam } from "@/lib/escalation";
 import { useAiCleaningEnabled } from "@/lib/useAiCleaningEnabled";
 import { IconRefresh } from "@/components/Icons";
 import { SubmissionPhoto } from "@/components/SubmissionPhoto";
-import { SubmissionChat } from "@/components/SubmissionChat";
 
 export type IssueFormValues = {
   groupName: string;
@@ -88,11 +87,6 @@ export function IssueForm({
   const [status, setStatus] = useState<IssueStatus>(
     initial?.status ?? "SENT"
   );
-  // Статус, выбранный человеком прямо в этом окне, важнее пришедшего с
-  // сервера: пока он ставил «Решено», ответ куратора мог вернуть тикет в
-  // работу (см. SubmissionChat), и подменить выбор под рукой — худшее из
-  // возможного. До первого клика, наоборот, показываем серверное состояние.
-  const [statusPickedHere, setStatusPickedHere] = useState(false);
   const [note, setNote] = useState(initial?.note ?? "");
   const [ticketLink, setTicketLink] = useState(initial?.ticketLink ?? "");
   const [escalatedTeam, setEscalatedTeam] = useState<EscalationTeam | "">(
@@ -194,7 +188,6 @@ export function IssueForm({
 
   function pickStatus(next: IssueStatus) {
     setStatus(next);
-    setStatusPickedHere(true);
     if (next === "ESCALATED" && !escalatedTeam) {
       setEscalatedTeam(ESCALATION_TEAMS[0]);
     }
@@ -361,7 +354,9 @@ export function IssueForm({
                 </span>
               )}
             </p>
-            <p className="break-words">👤 {initial.submission.studentContact}</p>
+            {initial.submission.studentContact && (
+              <p className="break-words">👤 {initial.submission.studentContact}</p>
+            )}
             {/* Ответы на поля ярлыка: то, что раньше приходилось выспрашивать
                 в переписке, форма собрала сразу. */}
             {initial.submission.fields && initial.submission.fields.length > 0 && (
@@ -374,7 +369,7 @@ export function IssueForm({
                 ))}
               </div>
             )}
-            {/^https?:\/\//i.test(initial.submission.lessonLink) ? (
+            {!initial.submission.lessonLink ? null : /^https?:\/\//i.test(initial.submission.lessonLink) ? (
               <a
                 href={initial.submission.lessonLink}
                 target="_blank"
@@ -391,16 +386,6 @@ export function IssueForm({
               count={initial.submission.photoCount}
             />
           </div>
-        )}
-        {/* У заявки из формы нет сообщения в группе, где можно было бы
-            переспросить, — поэтому переписка с куратором живёт здесь. */}
-        {initial?.submission && initial.id && (
-          <SubmissionChat
-            issueId={initial.id}
-            onIssueStatus={(serverStatus) => {
-              if (!statusPickedHere) setStatus(serverStatus);
-            }}
-          />
         )}
         {showSource && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs">
