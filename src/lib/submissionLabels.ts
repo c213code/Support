@@ -415,6 +415,29 @@ const MENTORHUB_LABEL: SubmissionLabel = {
   ],
 };
 
+// Live-сабақ — урок в прямом эфире через Google Meet. Разбирать его без двух
+// ссылок нельзя: по ссылке на урок дежурный находит его на платформе, по
+// ссылке на мит — сам эфир (не открывается, не тот мит, ученика не пускает).
+const LIVE_LESSON_LABEL: SubmissionLabel = {
+  id: "live-lesson",
+  emoji: "🎥",
+  title: "Live сабақ",
+  hint: "Тікелей эфир сабағы бойынша мәселе",
+  fields: [
+    { id: "studentEmail", label: "Оқушының поштасы", type: "email", required: true },
+    { ...LESSON_LINK, label: "Сабаққа сілтеме", placeholder: "https://juz40-edu.kz/..." },
+    {
+      id: "meetLink",
+      label: "Meet сілтемесі",
+      type: "link",
+      required: true,
+      placeholder: "https://meet.google.com/...",
+    },
+    DESCRIPTION,
+    SCREENSHOT,
+  ],
+};
+
 const OTHER_LABEL: SubmissionLabel = {
   id: "other",
   emoji: "📝",
@@ -844,6 +867,7 @@ const PRODUCT: SubmissionLabel[] = [
   },
   LOGIN_LABEL,
   REOPEN_LABEL,
+  LIVE_LESSON_LABEL,
   MENTORHUB_LABEL,
   PLATFORM_ERROR_LABEL,
   SCORE_LABEL,
