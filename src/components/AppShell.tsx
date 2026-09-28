@@ -126,8 +126,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {platformTool && (
           <Link
             href="/platform/change-email"
-            title="Смена почты ученику"
-            aria-label="Смена почты ученику"
+            title="Смена почты или номера ученику"
+            aria-label="Смена почты или номера ученику"
             className={linkClass(pathname === "/platform/change-email")}
           >
             {pathname === "/platform/change-email" && (

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
+import { formatKzPhone, normalizeKzPhone } from "@/lib/phone";
 
 type Student = {
   id: string;
@@ -12,11 +13,11 @@ type Student = {
   googleMail: string | null;
 };
 
-type ChangeResult = {
-  studentName: string;
-  oldEmail: string | null;
-  newEmail: string;
-};
+// Что меняем: почту (она же логин) или номер. Путь на платформе один —
+// /change целым профилем, — поэтому и инструмент один.
+type Field = "email" | "phone";
+
+type ChangeResult = { field: Field; studentName: string; from: string | null; to: string };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -32,12 +33,15 @@ export function ChangeEmailTool() {
   const [searching, setSearching] = useState(false);
 
   const [selected, setSelected] = useState<Student | null>(null);
+  const [field, setField] = useState<Field>("email");
   const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<ChangeResult | null>(null);
 
-  // Предзаполнение с карточки тикета: /platform/change-email?old=A&new=B.
+  // Предзаполнение с карточки тикета: /platform/change-email?old=A&new=B
+  // (почта) или ?field=phone&old=…&new=… (номер).
   // Читаем из window.location, а не useSearchParams — чтобы не тянуть Suspense
   // ради двух параметров. Старую почту кладём в поиск (ученик найдётся сам),
   // новую — в поле; ученика агент всё равно выбирает и подтверждает руками.
@@ -45,11 +49,16 @@ export function ChangeEmailTool() {
     const p = new URLSearchParams(window.location.search);
     const o = p.get("old");
     const n = p.get("new");
+    const phone = p.get("field") === "phone";
     if (!o && !n) return;
     // setState вне синхронного тела эффекта (как и другие эффекты здесь) —
     // синхронный setState линтер запрещает из-за каскадных рендеров.
     const t = setTimeout(() => {
-      if (n) setNewEmail(n);
+      if (phone) setField("phone");
+      if (n) {
+        if (phone) setNewPhone(formatKzPhone(n, ""));
+        else setNewEmail(n);
+      }
       if (o) setQuery(o);
     }, 0);
     return () => clearTimeout(t);
@@ -94,33 +103,59 @@ export function ChangeEmailTool() {
   function reset() {
     setSelected(null);
     setNewEmail("");
+    setNewPhone("");
     setConfirming(false);
     setDone(null);
     setQuery("");
     setResults([]);
   }
 
+  const phoneTarget = normalizeKzPhone(newPhone);
+  const target = field === "email" ? newEmail.trim() : phoneTarget ?? "";
+  const targetValid = field === "email" ? EMAIL_RE.test(target) : Boolean(phoneTarget);
+  const current = field === "email" ? selected?.email : selected?.phoneNumber;
+
+  function chooseField(next: Field) {
+    setField(next);
+    setConfirming(false);
+  }
+
   async function submit() {
     if (!selected) return;
     setSubmitting(true);
     try {
-      const res = await fetch("/api/platform/students/change-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selected.id, newEmail: newEmail.trim() }),
-      });
+      const res = await fetch(
+        field === "email"
+          ? "/api/platform/students/change-email"
+          : "/api/platform/students/change-phone",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            field === "email"
+              ? { id: selected.id, newEmail: target }
+              : { id: selected.id, newPhone: target }
+          ),
+        }
+      );
       const data = await res.json().catch(() => null);
+      const what = field === "email" ? "почту" : "номер";
       if (!res.ok) {
-        toast(data?.error ?? `Не удалось сменить почту (HTTP ${res.status})`, "error");
+        toast(data?.error ?? `Не удалось сменить ${what} (HTTP ${res.status})`, "error");
         return;
       }
       if (!data?.result) {
         toast("Пустой ответ сервера — проверь вручную", "error");
         return;
       }
-      setDone(data.result);
+      const r = data.result;
+      setDone(
+        field === "email"
+          ? { field, studentName: r.studentName, from: r.oldEmail, to: r.newEmail }
+          : { field, studentName: r.studentName, from: r.oldPhone, to: r.newPhone }
+      );
       setConfirming(false);
-      toast("Почта изменена", "success");
+      toast(field === "email" ? "Почта изменена" : "Номер изменён", "success");
     } catch {
       toast("Сеть недоступна", "error");
     } finally {
@@ -131,20 +166,21 @@ export function ChangeEmailTool() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <h1 className="mb-1 text-lg font-semibold text-slate-900">
-        Смена почты ученику
+        Смена почты или номера ученику
       </h1>
       <p className="mb-6 text-sm text-slate-500">
-        Основная платформа JUZ40. Меняются вместе почта и логин ученика.
+        Основная платформа JUZ40. Почта — это и логин ученика, меняются вместе.
       </p>
 
       {/* Успех */}
       {done && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
           <p className="text-sm font-medium text-emerald-800">
-            Почта изменена у {done.studentName || "ученика"}
+            {done.field === "email" ? "Почта изменена" : "Номер изменён"} у{" "}
+            {done.studentName || "ученика"}
           </p>
           <p className="mt-1 font-mono text-sm text-emerald-700">
-            {done.oldEmail ?? "—"} → {done.newEmail}
+            {done.from || "—"} → {done.to}
           </p>
           <button
             onClick={reset}
@@ -199,29 +235,60 @@ export function ChangeEmailTool() {
               {fullName(selected)}
             </p>
             <p className="font-mono text-xs text-slate-500">
-              Текущая: {selected.email ?? "—"}
+              {selected.email ?? "без почты"} · {selected.phoneNumber ?? "без номера"}
             </p>
           </div>
 
-          <label className="mb-1 block text-sm text-slate-600">
-            Новая почта
+          <div role="radiogroup" aria-label="Что меняем" className="mb-4 inline-flex rounded-lg bg-slate-100 p-0.5 text-sm">
+            {(["email", "phone"] as const).map((f) => (
+              <button
+                key={f}
+                role="radio"
+                aria-checked={field === f}
+                onClick={() => chooseField(f)}
+                className={`rounded-md px-3 py-1 transition ${
+                  field === f ? "bg-white font-medium text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                {f === "email" ? "Почта" : "Номер"}
+              </button>
+            ))}
+          </div>
+
+          <label htmlFor="change-target" className="mb-1 block text-sm text-slate-600">
+            {field === "email" ? "Новая почта" : "Новый номер"}
           </label>
-          <input
-            value={newEmail}
-            onChange={(e) => {
-              setNewEmail(e.target.value);
-              setConfirming(false);
-            }}
-            placeholder="student@juz40.kz"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
-          />
+          {field === "email" ? (
+            <input
+              id="change-target"
+              value={newEmail}
+              onChange={(e) => {
+                setNewEmail(e.target.value);
+                setConfirming(false);
+              }}
+              placeholder="student@juz40.kz"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+            />
+          ) : (
+            <input
+              id="change-target"
+              inputMode="tel"
+              value={newPhone}
+              onChange={(e) => {
+                setNewPhone(formatKzPhone(e.target.value, newPhone));
+                setConfirming(false);
+              }}
+              placeholder="+7 (775) 666 55 33"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-brand-500"
+            />
+          )}
 
           {/* Предпросмотр A → B перед подтверждением */}
           {confirming && (
             <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
               <p className="text-sm text-amber-800">Подтверди смену:</p>
               <p className="mt-1 font-mono text-sm text-amber-900">
-                {selected.email ?? "—"} → {newEmail.trim()}
+                {current || "—"} → {target}
               </p>
             </div>
           )}
@@ -229,7 +296,7 @@ export function ChangeEmailTool() {
           <div className="mt-4 flex items-center gap-2">
             {!confirming ? (
               <button
-                disabled={!EMAIL_RE.test(newEmail.trim())}
+                disabled={!targetValid || target === current}
                 onClick={() => setConfirming(true)}
                 className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-40"
               >

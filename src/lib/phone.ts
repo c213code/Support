@@ -34,3 +34,20 @@ export function formatKzPhone(input: string, previous: string): string {
   if (rest.length > 8) out += ` ${rest.slice(8, 10)}`;
   return out;
 }
+
+// Номер в том виде, в каком его хранит платформа JUZ40: "+7XXXXXXXXXX" — для
+// поиска и смены номера ученику (/platform/change-email). Дежурный вставляет
+// номер как прислали — «+7 (775) 666 55 33», «87756665533», «7756665533».
+// Поиск платформы находит «+7…», «7…» и номер без семёрки, но не «8…».
+//
+// Только строка из цифр и разделителей: почта или имя с цифрами — не номер.
+export function normalizeKzPhone(input: string): string | null {
+  const trimmed = input.trim();
+  if (!/^[\d\s()+-]+$/.test(trimmed)) return null;
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length === 10 && digits.startsWith("7")) return `+7${digits}`;
+  if (digits.length === 11 && (digits.startsWith("7") || digits.startsWith("8"))) {
+    return `+7${digits.slice(1)}`;
+  }
+  return null;
+}

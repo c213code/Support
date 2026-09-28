@@ -1,6 +1,6 @@
 // Клиент к основной платформе JUZ40 (api.juz40-edu.kz) — отдельная система,
-// НЕ наша БД. Пока используется только для смены почты ученику через
-// инструмент /platform/change-email.
+// НЕ наша БД. Инструменты дежурного: смена почты или номера ученику
+// (/platform/change-email) и обнуление результата ДТ (/platform/reset-unt).
 //
 // Аутентификация — сервис-аккаунтом (env), а не токеном конкретного агента:
 // логинимся раз, кэшируем JWT до истечения, релогинимся при 401. Креды живут
@@ -43,6 +43,7 @@ export class PlatformError extends Error {
       | "auth_failed"
       | "not_found"
       | "email_taken"
+      | "phone_taken"
       | "upstream_error"
   ) {
     super(message);
@@ -263,6 +264,80 @@ export type ChangeEmailResult = {
   newEmail: string;
 };
 
+export type ChangePhoneResult = {
+  studentName: string;
+  oldPhone: string | null;
+  newPhone: string;
+};
+
+// Тело записи /change из прочитанного профиля — ровно то, что шлёт сама
+// админ-панель, с заменой только нужных полей.
+function changeBody(u: StudentRaw, patch: { email?: string; phoneNumber?: string }) {
+  return {
+    id: u.id,
+    firstname: u.firstname,
+    lastname: u.lastname,
+    // Панель шлёт null в оба parent-поля (ФИО родителя ведётся отдельно),
+    // повторяем — иначе поведение разойдётся с UI.
+    parentFirstname: null,
+    parentLastname: null,
+    instagramLink: u.instagramLink,
+    profilePhotoUrl: u.profilePhotoUrl,
+    firstSubjectId: u.subjectCombination?.first?.id ?? null,
+    secondSubjectId: u.subjectCombination?.second?.id ?? null,
+    parentPhoneNumber: u.parent?.phoneNumber ?? null,
+    regionId: u.region?.id ?? null,
+    schoolId: u.school?.id ?? null,
+    grade: u.grade,
+    learningGoal: u.learningGoal,
+    // email и username — одно и то же (логин ученика), меняются вместе.
+    email: patch.email ?? u.username,
+    username: patch.email ?? u.username,
+    phoneNumber: patch.phoneNumber ?? u.phoneNumber,
+    googleMail: u.googleMail,
+  };
+}
+
+// Запись через /change и подтверждение перечитыванием. HTTP 200 ещё не
+// значит, что поле сменилось (эндпоинт мог тихо ничего не сделать), —
+// иначе покажем зелёный «успех» на несделанную смену (тот молчаливый
+// провал, о котором предупреждает CLAUDE.md). С несколькими попытками:
+// чтение после записи у платформы отстаёт (реплика), и первая проверка
+// ловила устаревшее значение — на живом тесте это давало ложный «не
+// изменилась» при удавшейся смене.
+async function writeAndConfirm(
+  id: string,
+  body: ReturnType<typeof changeBody>,
+  what: { failed: string; unchanged: string },
+  applied: (after: StudentRaw) => boolean
+): Promise<void> {
+  const res = await authed(`/v1/admin/users/${id}/change`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    // Тело ответа платформы может нести внутренние детали/трейсы — логируем
+    // на сервере, но наружу отдаём общий текст (клиент увидит только его).
+    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    console.warn(`[platform] /change HTTP ${res.status}: ${detail}`);
+    throw new PlatformError(`${what.failed} (HTTP ${res.status})`, "upstream_error");
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 500));
+    const after = await getStudentRaw(id).catch(() => null);
+    if (after && applied(after)) return;
+  }
+  throw new PlatformError(
+    `Платформа приняла запрос, но ${what.unchanged} — проверь вручную`,
+    "upstream_error"
+  );
+}
+
+function studentName(u: StudentRaw): string {
+  return [u.firstname, u.lastname].filter(Boolean).join(" ").trim();
+}
+
 export async function changeStudentEmail(
   id: string,
   newEmail: string
@@ -291,74 +366,50 @@ export async function changeStudentEmail(
     );
   }
 
-  // 2) read-modify-write целым объектом.
+  // 2) read-modify-write целым объектом; 3) перечитать и подтвердить.
   const u = await getStudentRaw(id);
-  const body = {
-    id: u.id,
-    firstname: u.firstname,
-    lastname: u.lastname,
-    // Панель шлёт null в оба parent-поля (ФИО родителя ведётся отдельно),
-    // повторяем — иначе поведение разойдётся с UI.
-    parentFirstname: null,
-    parentLastname: null,
-    instagramLink: u.instagramLink,
-    profilePhotoUrl: u.profilePhotoUrl,
-    firstSubjectId: u.subjectCombination?.first?.id ?? null,
-    secondSubjectId: u.subjectCombination?.second?.id ?? null,
-    parentPhoneNumber: u.parent?.phoneNumber ?? null,
-    regionId: u.region?.id ?? null,
-    schoolId: u.school?.id ?? null,
-    grade: u.grade,
-    learningGoal: u.learningGoal,
-    // email и username — одно и то же (логин ученика), меняются вместе.
-    email: newEmail,
-    username: newEmail,
-    phoneNumber: u.phoneNumber,
-    googleMail: u.googleMail,
-  };
+  await writeAndConfirm(
+    id,
+    changeBody(u, { email: newEmail }),
+    { failed: "Смена почты не прошла", unchanged: "почта не изменилась" },
+    (after) => (after.username ?? "").toLowerCase() === newEmail.toLowerCase()
+  );
+  return { studentName: studentName(u), oldEmail: u.username, newEmail };
+}
 
-  const res = await authed(`/v1/admin/users/${id}/change`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    // Тело ответа платформы может нести внутренние детали/трейсы — логируем
-    // на сервере, но наружу отдаём общий текст (клиент увидит только его).
-    const detail = (await res.text().catch(() => "")).slice(0, 300);
-    console.warn(`[platform] /change HTTP ${res.status}: ${detail}`);
-    throw new PlatformError(
-      `Смена почты не прошла (HTTP ${res.status})`,
-      "upstream_error"
-    );
-  }
-
-  // 3) HTTP 200 ещё не значит, что почта сменилась (эндпоинт мог тихо
-  // ничего не сделать). Перечитываем и подтверждаем — иначе покажем зелёный
-  // «успех» на несделанную смену (ровно тот молчаливый провал, о котором
-  // предупреждает CLAUDE.md). С несколькими попытками: чтение после записи у
-  // платформы отстаёт (реплика), и первая проверка ловит устаревшее значение
-  // — на живом тесте это давало ложный «не изменилась» при удавшейся смене.
-  let confirmed = false;
-  for (let attempt = 0; attempt < 3 && !confirmed; attempt++) {
-    if (attempt > 0) await new Promise((r) => setTimeout(r, 500));
-    const after = await getStudentRaw(id).catch(() => null);
-    if (after && (after.username ?? "").toLowerCase() === newEmail.toLowerCase()) {
-      confirmed = true;
+// Смена номера — тот же /change, другое поле. newPhone уже приведён к
+// "+7XXXXXXXXXX" (normalizeKzPhone): в таком виде его хранит платформа.
+export async function changeStudentPhone(
+  id: string,
+  newPhone: string
+): Promise<ChangePhoneResult> {
+  // Номер, занятый другим учеником, — частая причина «номер өзгертсем
+  // ошибка шығады»: скажем об этом прямо, а не кодом платформы. Как и у
+  // почты, сбой самой предпроверки смену не блокирует.
+  try {
+    const existing = await searchStudents(newPhone, 5);
+    const other = existing.find((s) => s.id !== id && s.phoneNumber === newPhone);
+    if (other) {
+      throw new PlatformError(
+        `Этот номер уже у другого ученика (${[other.firstname, other.lastname].filter(Boolean).join(" ") || other.email || "без имени"})`,
+        "phone_taken"
+      );
     }
-  }
-  if (!confirmed) {
-    throw new PlatformError(
-      "Платформа приняла запрос, но почта не изменилась — проверь вручную",
-      "upstream_error"
+  } catch (err) {
+    if (err instanceof PlatformError && err.code === "phone_taken") throw err;
+    console.warn(
+      `[platform] предпроверка занятости номера не удалась, полагаемся на платформу: ${String(err)}`
     );
   }
 
-  return {
-    studentName: [u.firstname, u.lastname].filter(Boolean).join(" ").trim(),
-    oldEmail: u.username,
-    newEmail,
-  };
+  const u = await getStudentRaw(id);
+  await writeAndConfirm(
+    id,
+    changeBody(u, { phoneNumber: newPhone }),
+    { failed: "Смена номера не прошла", unchanged: "номер не изменился" },
+    (after) => after.phoneNumber === newPhone
+  );
+  return { studentName: studentName(u), oldPhone: u.phoneNumber, newPhone };
 }
 
 // --- деңгейлік тест (УНТ/ДТ): обнуление результата ---

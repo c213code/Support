@@ -14,6 +14,7 @@ const STATUS_BY_CODE: Record<PlatformError["code"], number> = {
   auth_failed: 502,
   not_found: 404,
   email_taken: 409,
+  phone_taken: 409,
   upstream_error: 502,
 };
 

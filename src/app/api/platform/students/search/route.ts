@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getCurrentIdentity } from "@/lib/auth";
 import { platformEnabled, searchStudents, PlatformError } from "@/lib/platform";
+import { normalizeKzPhone } from "@/lib/phone";
 
-// Поиск ученика в основной платформе JUZ40 перед сменой почты. Только для
+// Поиск ученика в основной платформе JUZ40 перед сменой почты или номера. Только для
 // вошедших агентов и только если инструмент настроен (заданы PLATFORM_* env).
 export async function POST(request: NextRequest) {
   const identity = await getCurrentIdentity();
@@ -26,7 +27,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const students = await searchStudents(query);
+    // Номер «8 775 …» платформа не находит — ищем в её формате "+7…".
+    const students = await searchStudents(normalizeKzPhone(query) ?? query);
     return NextResponse.json({ students });
   } catch (err) {
     if (err instanceof PlatformError) {

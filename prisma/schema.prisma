@@ -616,6 +616,20 @@ model PlatformEmailChange {
   @@index([studentId, at])
 }
 
+// Журнал смен номера ученику — то же, что PlatformEmailChange, для номера.
+model PlatformPhoneChange {
+  id          String   @id @default(cuid())
+  actor       String
+  studentId   String
+  studentName String?
+  oldPhone    String
+  newPhone    String
+  at          DateTime @default(now())
+
+  @@index([at])
+  @@index([studentId, at])
+}
+
 // Журнал обнулений результата деңгейлік теста (/platform/reset-unt) —
 // DELETE в основной платформе необратим (не "мягкое" удаление). Пишем ПОСЛЕ
 // успешного удаления (тот же принцип, что у PlatformEmailChange): журналировать
