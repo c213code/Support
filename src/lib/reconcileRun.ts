@@ -166,7 +166,12 @@ function resolverFor(
     const said = general.find((g) => g.text.includes(verdict.evidence));
     if (said) return said.author;
   }
-  return context.ok && context.context.exact ? resolverName(context.context) : null;
+  if (!context.ok || !context.context.exact) return null;
+  // Наши не писали, решил сам куратор («тауып алдым») — в репорт не должно
+  // уйти «Ерош шешті» от того, кто нажал «Применить».
+  const thread = context.context.thread;
+  if (thread.length > 0 && thread.every((line) => line.from === "curator")) return "Куратор өзі";
+  return resolverName(context.context);
 }
 
 type PendingVerdict = { id: string; issueId: string; issue: { description: string } };

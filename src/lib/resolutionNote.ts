@@ -203,6 +203,19 @@ export async function collectResolutionContext(
       select: { chatId: true, sentAt: true },
     });
     if (post) anchor = { chatId: post.chatId, at: post.sentAt };
+  } else {
+    // У тикета из формы обращение — сам пост «Өтініш #…», а сообщения с
+    // usedForIssueId — уже ответы куратора на него. Начинать с первого из
+    // них нельзя: оно само оказывалось «до обращения» и выпадало из ленты
+    // («қарамай-ақ қойсаңыздар болады, тауып алдым», 28.09).
+    const post = await prisma.botReply.findFirst({
+      where: { issueId, deleted: false, kind: { in: ["SUBMISSION", "SUBMISSION_TEST"] } },
+      orderBy: { sentAt: "asc" },
+      select: { chatId: true, sentAt: true },
+    });
+    if (post && post.chatId === anchor.chatId && post.sentAt < anchor.at) {
+      anchor = { chatId: post.chatId, at: post.sentAt };
+    }
   }
   if (!anchor) {
     return { ok: false, reason: "no-issue-messages" };
@@ -424,21 +437,17 @@ export async function collectResolutionContext(
     }
   }
 
-  // Привязанные — надёжно. Ничем не привязанные реплики берём, только если
-  // надёжных нет вовсе: это уже догадка, и в окне она помечается иначе
-  // ("собрано по переписке", а не "из твоего ответа").
-  if (linked.length > 0) {
-    // Ответы куратора — только после первой нашей реплики (до неё идёт само
-    // обращение, оно уже в описании) и только те, что про этот тикет
-    // наверняка: привязанные к нему или ответ стрелкой на реплику по нему.
-    // Сообщения без стрелки не берём: куратор за день пишет несколько
-    // обращений подряд, и следующее его обращение читалось бы как ответ по
-    // этому («Тс осылай ашылмай тұр» после «Методист ашып берді»).
-    const agentIdSet = new Set(ownAgentIds.map((id) => id.toString()));
-    const firstAt = linkedMessages[0].message.receivedAt;
-    const curatorLines: { message: ChatMessage; text: string }[] = [];
+  // Ответы куратора — только те, что про этот тикет наверняка: привязанные
+  // к нему или ответ стрелкой на реплику или пост по нему, и только после
+  // since (до него идёт само обращение, оно уже в описании). Сообщения без
+  // стрелки не берём: куратор за день пишет несколько обращений подряд, и
+  // следующее его обращение читалось бы как ответ по этому («Тс осылай
+  // ашылмай тұр» после «Методист ашып берді»).
+  const agentIdSet = new Set(ownAgentIds.map((id) => id.toString()));
+  function curatorLinesAfter(since: Date): { message: ChatMessage; text: string }[] {
+    const lines: { message: ChatMessage; text: string }[] = [];
     for (const message of reporterMessages) {
-      if (message.receivedAt <= firstAt || !message.text) continue;
+      if (message.receivedAt <= since || !message.text) continue;
       if (message.fromId != null && agentIdSet.has(message.fromId.toString())) continue;
       const belongs =
         message.usedForIssueId != null
@@ -446,8 +455,17 @@ export async function collectResolutionContext(
           : message.replyToMessageId != null && ownerOf(message) === "ours";
       if (!belongs) continue;
       const text = maskSensitiveForAi(stripReplyQuote(message.text, quotedTextOf(message)));
-      if (text) curatorLines.push({ message, text });
+      if (text) lines.push({ message, text });
     }
+    return lines;
+  }
+
+  // Привязанные — надёжно. Ничем не привязанные реплики берём, только если
+  // надёжных нет вовсе: это уже догадка, и в окне она помечается иначе
+  // ("собрано по переписке", а не "из твоего ответа").
+  if (linked.length > 0) {
+    // Ответы куратора — после первой нашей реплики.
+    const curatorLines = curatorLinesAfter(linkedMessages[0].message.receivedAt);
     const thread: ThreadLine[] = [
       ...linkedMessages.map((l) => ({ ...l, from: "agent" as const })),
       ...curatorLines.map((l) => ({ ...l, from: "curator" as const })),
@@ -465,6 +483,27 @@ export async function collectResolutionContext(
         resolver: lastLinked
           ? { fromId: lastLinked.fromId, authorName: lastLinked.authorName }
           : null,
+      },
+    };
+  }
+
+  // Наши не отвечали, но куратор сам написал по тикету — реплаем на пост
+  // «Өтініш #…» или на своё обращение: «қарамай-ақ қойсаңыздар болады,
+  // тауып алдым» (28.09, тикет висел «Отправлено», разбор пропускал его как
+  // «переписка найдена догадкой»). Такая реплика привязана точно — судить
+  // по ней можно; решил ли он сам, определит модель (правило 1 промпта).
+  const curatorOnly = curatorLinesAfter(anchor.at);
+  if (curatorOnly.length > 0) {
+    return {
+      ok: true,
+      context: {
+        agentTexts: [],
+        thread: curatorOnly
+          .slice(-MAX_AGENT_MESSAGES)
+          .map(({ text }) => ({ from: "curator" as const, text })),
+        general: general.slice(-MAX_GENERAL_MESSAGES),
+        exact: true,
+        resolver: null,
       },
     };
   }
