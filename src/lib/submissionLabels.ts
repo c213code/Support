@@ -415,7 +415,7 @@ const MENTORHUB_LABEL: SubmissionLabel = {
   ],
 };
 
-// Live-сабақ — урок в прямом эфире через Google Meet. Разбирать его без двух
+// Live-сабақ — урок в прямом эфире через Google Meet (Әдістеме и Product). Разбирать его без двух
 // ссылок нельзя: по ссылке на урок дежурный находит его на платформе, по
 // ссылке на мит — сам эфир (не открывается, не тот мит, ученика не пускает).
 const LIVE_LESSON_LABEL: SubmissionLabel = {
@@ -651,6 +651,7 @@ const METHODOLOGY: SubmissionLabel[] = [
   },
   SCORE_LABEL,
   REOPEN_LABEL,
+  LIVE_LESSON_LABEL,
   SUGGESTION_LABEL,
   OTHER_WITH_LESSON,
 ];
