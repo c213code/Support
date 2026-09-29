@@ -922,8 +922,19 @@ const STUDENT_CONTACT_IDS = new Set([
   "toEmail",
 ]);
 
+// Проверка — только подсказка под полем, отправку она не блокирует. И не
+// там, где куратор сам ответил «Тіркеуден өтпеген»: такого ученика на
+// платформе нет или он не дорегистрирован по определению, и «табылмады,
+// дұрыс жазылғанын тексеріңіз» только сбило бы с толку.
 export function checksStudent(field: LabelField): boolean {
-  return STUDENT_CONTACT_IDS.has(field.id) && !field.repeatable && !field.checkOccupancy;
+  const notRegisteredBranch =
+    field.showIf?.field === "registered" && field.showIf.equals.every((v) => v === "no");
+  return (
+    STUDENT_CONTACT_IDS.has(field.id) &&
+    !field.repeatable &&
+    !field.checkOccupancy &&
+    !notRegisteredBranch
+  );
 }
 
 // Показывать ли поле при текущих ответах: у ярлыка «кірмей тұр» половина полей
