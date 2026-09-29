@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
-import { platformEnabled, searchStudents } from "@/lib/platform";
+import { findStudentByContact, isStudentRegistered, platformEnabled } from "@/lib/platform";
 
 // Занят ли новый номер (или почта) на платформе — подсказка прямо в форме
 // мини-аппа, пока куратор его вводит.
@@ -35,26 +35,15 @@ const MIN_QUERY = 5;
 // было бы перебирать номера и почты чужих людей.
 const MAX_CHECKS_PER_HOUR = 60;
 
-// В поиск уходит нормализованный номер, а не то, что видно в поле: форма
-// показывает «+7 (777) 777 77 77», а на платформе тот же номер может лежать
-// как «+77777777777» или даже «+7 ( (7) 77) 777 77 77». Пробуем варианты по
-// очереди, пока не найдём совпадение.
-// Вариантов ровно два: на свободном номере отрабатывают оба, и каждый лишний
-// запрос — лишняя секунда ожидания под полем.
-function phoneQueries(contact: string): string[] {
-  let digits = contact.replace(/\D/g, "");
-  if (digits.length === 11 && digits.startsWith("8")) digits = `7${digits.slice(1)}`;
-  if (digits.length === 10) digits = `7${digits}`;
-  const local = digits.length === 11 ? digits.slice(1) : digits;
-  return [...new Set([`+${digits}`, local])].filter((q) => q.length >= MIN_DIGITS);
-}
-
 export async function POST(request: NextRequest) {
   if (!submissionFormEnabled()) return NextResponse.json({ available: false });
 
   const body = (await request.json().catch(() => null)) as {
     initData?: unknown;
     contact?: unknown;
+    // Поле контакта уже существующего ученика (checksStudent): тогда нужен
+    // ещё и ответ, закончил ли он регистрацию.
+    student?: unknown;
   } | null;
 
   const check = verifyInitData(typeof body?.initData === "string" ? body.initData : "");
@@ -91,21 +80,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Точное совпадение, а не «похоже»: тот же search цепляет и куски имени,
-    // и по ним объявлять контакт занятым нельзя. У телефона сравниваем по
-    // цифрам — на платформе они записаны как попало.
-    const tail = digits.slice(-MIN_DIGITS);
-    const matches = (user: { email: string | null; phoneNumber: string | null }) =>
-      isEmail
-        ? (user.email ?? "").toLowerCase() === contact.toLowerCase()
-        : (user.phoneNumber ?? "").replace(/\D/g, "").endsWith(tail);
-
-    let match: Awaited<ReturnType<typeof searchStudents>>[number] | undefined;
-    for (const query of isEmail ? [contact] : phoneQueries(contact)) {
-      const found = await searchStudents(query, 5);
-      match = found.find(matches);
-      if (match) break;
-    }
+    const match = await findStudentByContact(contact);
+    // Регистрацию спрашиваем только у поля ученика и только у найденного:
+    // эндпоинт понимает лишь логин и на чужое отвечает тем же false.
+    const registered =
+      match && body?.student === true && match.email
+        ? await isStudentRegistered(match.email).catch(() => null)
+        : null;
 
     const name = match
       ? [match.firstname, match.lastname].filter(Boolean).join(" ").trim()
@@ -116,6 +97,7 @@ export async function POST(request: NextRequest) {
       name: name || null,
       email: match?.email || null,
       phone: match?.phoneNumber || null,
+      registered,
     });
   } catch (err) {
     // Платформа недоступна — честно говорим «проверить не смогли», иначе

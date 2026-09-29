@@ -201,6 +201,51 @@ export async function searchStudents(
   return (list as Record<string, unknown>[]).map(toSummary);
 }
 
+// Ученик по контакту — точное совпадение, а не «похоже»: search цепляет и
+// куски имени, и по ним объявлять ученика найденным нельзя. У телефона
+// сравниваем по цифрам — на платформе они записаны как попало («+7…»,
+// «+7 ( (7) 77) …»), и пробуем два вида запроса: «+7…» и без кода страны
+// (номер с «8…» платформа не находит вовсе).
+const PHONE_TAIL = 9;
+
+function phoneQueries(contact: string): string[] {
+  let digits = contact.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("8")) digits = `7${digits.slice(1)}`;
+  if (digits.length === 10) digits = `7${digits}`;
+  const local = digits.length === 11 ? digits.slice(1) : digits;
+  return [...new Set([`+${digits}`, local])].filter((q) => q.length >= PHONE_TAIL);
+}
+
+export async function findStudentByContact(contact: string): Promise<StudentSummary | null> {
+  const value = contact.trim();
+  const isEmail = value.includes("@");
+  const tail = value.replace(/\D/g, "").slice(-PHONE_TAIL);
+  if (!isEmail && tail.length < PHONE_TAIL) return null;
+  const matches = (user: StudentSummary) =>
+    isEmail
+      ? (user.email ?? "").toLowerCase() === value.toLowerCase()
+      : (user.phoneNumber ?? "").replace(/\D/g, "").endsWith(tail);
+  for (const query of isEmail ? [value] : phoneQueries(value)) {
+    const found = (await searchStudents(query, 5)).find(matches);
+    if (found) return found;
+  }
+  return null;
+}
+
+// Завершил ли ученик регистрацию: GET /v1/users/username/{логин}/registered —
+// тот же запрос делает админ-панель, открывая аккаунт. false — аккаунт есть,
+// но регистрация не закончена: на входе ученик видит «Сіз тіркелуді әлі
+// аяқтамадыңыз», и чинить тут нечего — ему надо дойти по ссылке из SMS или
+// почты. Эндпоинт понимает только логин (почту): по номеру и по
+// несуществующему логину он тоже отвечает false, поэтому спрашиваем его
+// только о найденном ученике и по его username. null — ответ не прочитан.
+export async function isStudentRegistered(username: string): Promise<boolean | null> {
+  const res = await authed(`/v1/users/username/${encodeURIComponent(username)}/registered`);
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as unknown;
+  return typeof body === "boolean" ? body : null;
+}
+
 // Полный объект ученика (вложенный) — источник для read-modify-write.
 type StudentRaw = {
   id: string;
@@ -218,6 +263,8 @@ type StudentRaw = {
   region: { id: string } | null;
   school: { id: string } | null;
   parent: { phoneNumber: string | null } | null;
+  // Потоки, к которым подключён ученик: пусто — курс ему не подключён.
+  streams?: unknown[] | null;
 };
 
 async function getStudentRaw(id: string): Promise<StudentRaw> {
@@ -256,6 +303,13 @@ async function getStudentRaw(id: string): Promise<StudentRaw> {
     );
   }
   return raw;
+}
+
+// Сколько потоков подключено ученику — «курс көрінбейді» часто просто
+// потому, что курс не подключён. null — прочитать не вышло.
+export async function studentStreamCount(id: string): Promise<number | null> {
+  const raw = await getStudentRaw(id).catch(() => null);
+  return Array.isArray(raw?.streams) ? raw.streams.length : null;
 }
 
 export type ChangeEmailResult = {

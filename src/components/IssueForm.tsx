@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { GroupPresetDTO } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
 import { ISSUE_STATUSES, STATUS_META, type IssueStatus } from "@/lib/status";
@@ -46,6 +46,43 @@ export type IssueFormInitial = Partial<{
     fields?: Array<{ label: string; value: string; service: boolean }>;
   } | null;
 }>;
+
+type StudentStatus = {
+  available: boolean;
+  contact: string | null;
+  found?: boolean;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  registered?: boolean | null;
+  streams?: number | null;
+};
+
+// Строка «🔎 Платформа» в окне тикета.
+function StudentStatusLine({ status }: { status: StudentStatus }) {
+  if (!status.found) {
+    return (
+      <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+        🔎 Платформа: по «{status.contact}» ученик не найден
+      </p>
+    );
+  }
+  const who = [status.name, status.email, status.phone].filter(Boolean).join(" · ");
+  return (
+    <p className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600">
+      🔎 Платформа: {who}
+      {status.registered === true && <span className="text-emerald-700"> · регистрация завершена</span>}
+      {status.registered === false && (
+        <span className="font-medium text-red-600"> · ⚠ регистрация не завершена (ссылка из SMS/почты)</span>
+      )}
+      {typeof status.streams === "number" && (
+        <span className={status.streams === 0 ? "font-medium text-red-600" : ""}>
+          {" "}· потоков: {status.streams}
+        </span>
+      )}
+    </p>
+  );
+}
 
 type Props = {
   groups: GroupPresetDTO[];
@@ -120,6 +157,25 @@ export function IssueForm({
   >("idle");
 
   const author = initial?.createdBy ?? currentAgent;
+
+  // Что платформа знает об ученике тикета (GET /api/issues/[id]/student-status):
+  // есть ли аккаунт, закончена ли регистрация, подключены ли курсы. За этим
+  // раньше ходили в админку руками.
+  const [student, setStudent] = useState<StudentStatus | null>(null);
+  const issueId = initial?.id;
+  useEffect(() => {
+    if (!issueId) return;
+    let cancelled = false;
+    fetch(`/api/issues/${issueId}/student-status`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: StudentStatus | null) => {
+        if (!cancelled && data?.available && data.contact) setStudent(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [issueId]);
 
   async function handleToggleSource() {
     if (showSource) {
@@ -344,6 +400,7 @@ export function IssueForm({
           className={`${inputClass} resize-y`}
           placeholder="Оқушы аккаунтына кіре алмай жатыр..."
         />
+        {student && <StudentStatusLine status={student} />}
         {initial?.submission && initial.id && (
           <div className="space-y-1.5 rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600">
             <p>

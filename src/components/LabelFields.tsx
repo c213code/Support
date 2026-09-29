@@ -25,6 +25,8 @@ type CheckState =
       name: string | null;
       email: string | null;
       phone: string | null;
+      // Закончил ли найденный ученик регистрацию (только у полей ученика).
+      registered: boolean | null;
     }
   | { status: "unavailable" };
 
@@ -97,7 +99,11 @@ export function LabelFields({
           const res = await fetch("/api/miniapp/check-contact", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ initData: currentInitData(), contact: value.trim() }),
+            body: JSON.stringify({
+              initData: currentInitData(),
+              contact: value.trim(),
+              student: checksStudent(field),
+            }),
           });
           const data = (await res.json().catch(() => null)) as {
             available?: boolean;
@@ -105,6 +111,7 @@ export function LabelFields({
             name?: string | null;
             email?: string | null;
             phone?: string | null;
+            registered?: boolean | null;
           } | null;
           if (cancelled) return;
           if (!data?.available) {
@@ -121,6 +128,7 @@ export function LabelFields({
                   name: data.name ?? null,
                   email: data.email ?? null,
                   phone: data.phone ?? null,
+                  registered: typeof data.registered === "boolean" ? data.registered : null,
                 }
               : { status: "free" },
           }));
@@ -169,9 +177,19 @@ export function LabelFields({
     const other = byEmail ? state.phone : state.email;
     const who = [state.name, other].filter(Boolean).join(" · ");
     return (
-      <p className={`${styles.footer} ${styles.footerOk}`}>
-        ✓ Оқушы табылды{who ? `: ${who}` : ""}
-      </p>
+      <>
+        <p className={`${styles.footer} ${styles.footerOk}`}>
+          ✓ Оқушы табылды{who ? `: ${who}` : ""}
+        </p>
+        {/* Регистрация не закончена — частая причина «кіре алмай тұр», и
+            чинить тут нечего: ученику надо дойти по ссылке из SMS или почты.
+            Куратор видит это сразу и может не ждать дежурного. */}
+        {state.registered === false && (
+          <p className={`${styles.footer} ${styles.footerError}`}>
+            ⚠ Оқушы тіркеуді аяқтамаған — SMS немесе поштаға келген сілтеме арқылы аяқтауы керек
+          </p>
+        )}
+      </>
     );
   }
 
