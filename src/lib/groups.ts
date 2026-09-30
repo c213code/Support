@@ -1,13 +1,23 @@
-// Единственные 4 официальные support-группы в Telegram. Привязка чата к
-// группе (GroupPreset.chatId) должна идти строго через них — личные чаты
-// ("Жеке чат: Имя") заводятся отдельно, вручную, при создании тикета.
-export const OFFICIAL_GROUPS = [
+// Группы, куда куратор подаёт обращение формой мини-аппа: у каждой свой
+// набор типовых проблем (LABELS_BY_GROUP в lib/submissionLabels.ts).
+export const FORM_GROUPS = [
   { name: "Әдістеме & IT", emoji: "🎲", order: 1 },
   { name: "Сату - Платформа", emoji: "💵", order: 2 },
   { name: "IT & Product", emoji: "📚", order: 3 },
   { name: "IT + Сервис", emoji: "📥", order: 4 },
 ] as const;
 
+// Единственные официальные support-группы в Telegram. Привязка чата к
+// группе (GroupPreset.chatId) должна идти строго через них — личные чаты
+// ("Жеке чат: Имя") заводятся отдельно, вручную, при создании тикета.
+// IELTS — рабочий чат без формы: ярлыков под него нет, обращения приходят
+// только сообщениями из самого чата.
+export const OFFICIAL_GROUPS = [
+  ...FORM_GROUPS,
+  { name: "IELTS", emoji: "🎓", order: 5 },
+] as const;
+
+export type FormGroupName = (typeof FORM_GROUPS)[number]["name"];
 export type OfficialGroupName = (typeof OFFICIAL_GROUPS)[number]["name"];
 
 export const OFFICIAL_GROUP_NAMES: readonly string[] = OFFICIAL_GROUPS.map(
@@ -44,6 +54,11 @@ const GROUP_COLORS: Record<
     bg: "bg-orange-50",
     text: "text-orange-700",
     border: "border-orange-300",
+  },
+  IELTS: {
+    bg: "bg-pink-50",
+    text: "text-pink-700",
+    border: "border-pink-300",
   },
 };
 

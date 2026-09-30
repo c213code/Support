@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { OFFICIAL_GROUPS } from "@/lib/groups";
+import { FORM_GROUPS } from "@/lib/groups";
 import { LabelFields } from "@/components/LabelFields";
 import { fillFromForward } from "@/lib/forwardFill";
 import {
@@ -524,7 +524,7 @@ export function SubmissionForm({
 
   if (sent) {
     const hue = GROUP_HUE[sent.groupName];
-    const group = OFFICIAL_GROUPS.find((g) => g.name === sent.groupName);
+    const group = FORM_GROUPS.find((g) => g.name === sent.groupName);
     return (
       <div className={styles.success} role="status">
         <div className={styles.successMark}>
@@ -622,7 +622,7 @@ export function SubmissionForm({
           Қай топқа жіберу
         </span>
         <div className={styles.groups} role="group" aria-labelledby="group-label">
-          {OFFICIAL_GROUPS.map((g) => {
+          {FORM_GROUPS.map((g) => {
             const selected = groupName === g.name;
             return (
               <button

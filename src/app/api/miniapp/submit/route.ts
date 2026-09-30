@@ -1,7 +1,7 @@
 import { after, NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { OFFICIAL_GROUPS } from "@/lib/groups";
+import { FORM_GROUPS } from "@/lib/groups";
 import { cleanTicketDescription, isNoiseOnly } from "@/lib/textClean";
 import {
   buildDetails,
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
     where: { createdAt: { lt: new Date(now - ATTEMPT_RETENTION_MS) } },
   });
 
-  const group = OFFICIAL_GROUPS.find((g) => g.name === field(form, "groupName", 100));
+  const group = FORM_GROUPS.find((g) => g.name === field(form, "groupName", 100));
   if (!group) return reply(400, T.noGroup);
 
   // Какую типовую проблему выбрал куратор и что ответил в её полях. Состав

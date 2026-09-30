@@ -153,7 +153,7 @@ async function checkDatabase() {
     const preset = presets.find((p) => p.name === group.name);
     if (!preset) fail(`группа «${group.name}» не заведена`, "нужен seed");
     else if (!preset.chatId) {
-      warn(`группа «${group.name}» не привязана к чату`, "обращения из формы придут, из чата — нет");
+      warn(`группа «${group.name}» не привязана к чату`, "тикеты из этого чата сами не заводятся");
     } else ok(`группа «${group.name}» привязана к чату`);
   }
 }

@@ -1,4 +1,4 @@
-import type { OfficialGroupName } from "@/lib/groups";
+import type { FormGroupName } from "@/lib/groups";
 
 // Типовые проблемы («ярлыки») на первом экране формы мини-аппа и поля, которые
 // форма спрашивает под каждую.
@@ -888,7 +888,7 @@ const PRODUCT: SubmissionLabel[] = [
   OTHER_WITH_LESSON,
 ];
 
-export const LABELS_BY_GROUP: Record<OfficialGroupName, SubmissionLabel[]> = {
+export const LABELS_BY_GROUP: Record<FormGroupName, SubmissionLabel[]> = {
   "Сату - Платформа": SALES,
   "Әдістеме & IT": METHODOLOGY,
   "IT + Сервис": SERVICE,
@@ -896,7 +896,7 @@ export const LABELS_BY_GROUP: Record<OfficialGroupName, SubmissionLabel[]> = {
 };
 
 export function labelsForGroup(groupName: string): SubmissionLabel[] {
-  return LABELS_BY_GROUP[groupName as OfficialGroupName] ?? [];
+  return LABELS_BY_GROUP[groupName as FormGroupName] ?? [];
 }
 
 export function findLabel(groupName: string, labelId: string): SubmissionLabel | null {

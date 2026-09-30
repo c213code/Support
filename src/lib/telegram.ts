@@ -97,6 +97,8 @@ export type TelegramMessagePayload = {
   forward_date?: number;
   forward_sender_name?: string;
   document?: { file_name?: string };
+  // Служебное: обычная группа превратилась в супергруппу, это её новый id.
+  migrate_to_chat_id?: number;
   voice?: unknown;
   video?: unknown;
   // Сообщение, на которое ответили ("Reply"). Telegram не разворачивает
@@ -116,7 +118,9 @@ export type TelegramMessagePayload = {
 
 export function buildMessageLink(chatId: number, messageId: number): string {
   // Для супергрупп (id вида -100xxxxxxxxxx) публичная ссылка на сообщение
-  // строится через внутренний id без префикса "-100".
+  // строится через внутренний id без префикса "-100". У обычной группы
+  // ссылок на сообщения нет вовсе — ни в самом Telegram, ни такой: адрес
+  // получится, но никуда не откроется, пока группу не сделают супергруппой.
   const idStr = String(chatId);
   const internalId = idStr.startsWith("-100") ? idStr.slice(4) : idStr.replace("-", "");
   return `https://t.me/c/${internalId}/${messageId}`;

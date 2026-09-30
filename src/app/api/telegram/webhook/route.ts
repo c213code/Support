@@ -65,6 +65,25 @@ export async function POST(request: NextRequest) {
 
   const message = update?.message ?? update?.edited_message;
 
+  // Обычная группа стала супергруппой (включили историю для новых
+  // участников, темы, публичную ссылку): Telegram выдаёт чату новый id и
+  // сообщает об этом один раз — служебным сообщением в старом чате. Без
+  // переноса привязка остаётся на мёртвом id, и тикеты из чата молча
+  // перестают заводиться. Стоит раньше фильтра по is_bot: у анонимного
+  // админа автор такого сообщения — GroupAnonymousBot.
+  if (message?.migrate_to_chat_id != null) {
+    const movedTo = String(message.migrate_to_chat_id);
+    // chatId уникален: если новый чат уже привязали руками, трогать нечего.
+    const taken = await prisma.groupPreset.findUnique({ where: { chatId: movedTo } });
+    if (!taken) {
+      await prisma.groupPreset.updateMany({
+        where: { chatId: String(message.chat.id) },
+        data: { chatId: movedTo },
+      });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   // Отвечаем 200 сразу же на всё, что нам не интересно, чтобы Telegram
   // не считал вебхук сломанным и не слал повторно.
   if (!message || message.from?.is_bot) {
