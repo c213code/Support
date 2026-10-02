@@ -12,30 +12,43 @@ import { isOwnAgentMessage, type TelegramMessageReaction } from "@/lib/telegram"
 // Поэтому реакция своего агента переводит тикет «Отправлено» → «В работе».
 // Только из «Отправлено»: реакцию ставят и на решённое («рахмет» → 👍), и
 // откатывать статус по ней нельзя. Какая именно реакция — не важно: любая
-// значит «увидел», а «решено» реакцией не ставится — ему нужна заметка.
-// Снятая реакция ничего не откатывает.
+// значит «увидел». Снятая реакция ничего не откатывает.
+//
+// Исключение — 👍 на обращение из формы мини-аппа: им дежурный закрывает
+// заявку, и тикет становится «Решено» из любого статуса. Куратору бот сам
+// пишет в личку «Өтінішіңіз шешілді» (notifySubmitter) — у такой заявки
+// других ответов нет. У обращений из чата 👍 по-прежнему значит «увидел»:
+// там её ставят и на «рахмет», и решать по ней тикет нельзя.
 //
 // Тот же рубильник, что у реплик агентов (chatIntentEnabled, «👂 Читать мои
 // ответы»): и то и другое молча меняет статус, который уйдёт в репорт.
 // source "chat": в группе реакцию уже видно — бот туда не пишет, только
 // обновляет строку статуса под своим постом.
+const RESOLVE_REACTION = "👍";
+
 export async function applyAgentReaction(reaction: TelegramMessageReaction): Promise<void> {
   const userId = reaction.user?.id;
   if (!userId || reaction.user?.is_bot || !isOwnAgentMessage(userId)) return;
-  const added = reaction.new_reaction.some(
+  const added = reaction.new_reaction.filter(
     (r) => !reaction.old_reaction.some((o) => JSON.stringify(o) === JSON.stringify(r))
   );
-  if (!added) return;
+  if (added.length === 0) return;
   if (!(await isChatIntentEnabled())) return;
 
   const issueId = await issueForMessage(String(reaction.chat.id), reaction.message_id);
   if (!issueId) return;
   const issue = await prisma.issue.findUnique({ where: { id: issueId }, select: { status: true } });
-  if (issue?.status !== "SENT") return;
+  if (!issue) return;
+
+  const thumbsUp = added.some((r) => r.type === "emoji" && r.emoji === RESOLVE_REACTION);
+  const fromForm =
+    thumbsUp && (await prisma.issueSubmission.count({ where: { issueId } })) > 0;
+  const status = fromForm ? "RESOLVED" : "IN_PROGRESS";
+  if (fromForm ? issue.status === "RESOLVED" : issue.status !== "SENT") return;
 
   await changeIssueStatus({
     issueId,
-    status: "IN_PROGRESS",
+    status,
     actor: telegramIdToAgent(userId),
     source: "chat",
   });
