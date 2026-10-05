@@ -266,7 +266,7 @@ export async function attachReplyToBotMessage(
 export async function findSameAuthorActiveIssue(
   chatId: string,
   fromId: bigint | null
-): Promise<{ id: string; description: string } | null> {
+): Promise<{ id: string; description: string; reportDate: string } | null> {
   if (!fromId) return null;
 
   // Два источника «последнего обращения автора»: его сообщение в этом чате,
@@ -337,7 +337,21 @@ export async function findSameAuthorActiveIssue(
 // 28.09 одна проблема разошлась на три тикета. Добавляем заявку из формы
 // (там видно, назван ли уже ученик) и последние реплики по тикету с обеих
 // сторон. Почты, телефоны и пароли маскируем — модель внешняя.
-export async function followUpContext(issueId: string, description: string): Promise<string> {
+//
+// И сколько тикету дней: с 05.10 модель не знала, что тикет вчерашний и по
+// нему уже ответили, и новое обращение куратора с утра («Сәлеметсіздер ме,
+// тапсырмаларды аша алмай жатырмын») приклеила к его вчерашнему тикету о
+// просроченных дедлайнах — по общему слову «тапсырма».
+// Дней между двумя датами YYYY-MM-DD.
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(to) - Date.parse(from)) / (24 * 60 * 60 * 1000));
+}
+
+export async function followUpContext(
+  issueId: string,
+  description: string,
+  reportDate: string
+): Promise<string> {
   const [submission, recent] = await Promise.all([
     prisma.issueSubmission.findFirst({
       where: { issueId },
@@ -354,7 +368,11 @@ export async function followUpContext(issueId: string, description: string): Pro
       select: { text: true, agentIssueId: true },
     }),
   ]);
-  const parts = [description];
+  const age = daysBetween(reportDate, todayDateString());
+  const parts = [
+    description,
+    `Тикет заведён: ${age <= 0 ? "сегодня" : age === 1 ? "вчера" : `${age} дн. назад`}`,
+  ];
   if (submission?.rawText) {
     parts.push(`Заявка из формы: ${maskSensitiveForAi(submission.rawText).slice(0, 400)}`);
   }

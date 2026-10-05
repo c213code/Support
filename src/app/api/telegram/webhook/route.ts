@@ -566,8 +566,10 @@ export async function POST(request: NextRequest) {
     if (
       activeIssue &&
       (await isSameRequestFollowUp(
-        await followUpContext(activeIssue.id, activeIssue.description),
-        text
+        await followUpContext(activeIssue.id, activeIssue.description, activeIssue.reportDate),
+        // С пометкой вложения: «осындай проблема» под скриншотом — про
+        // скриншот, а без пометки модель читала это как отсылку к тикету.
+        attachment ? `${attachment}\n${text}` : text
       ))
     ) {
       // Только привязка, без ссылки в extraLinks — это тот же случай, а не
