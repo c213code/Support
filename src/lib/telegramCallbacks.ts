@@ -10,6 +10,11 @@ export const ISSUE_ESCALATE_PREFIX = "issue_escalate:";
 // команды (до 12 байт для "Мобайл" в UTF-8), запас лучше не тратить на
 // многословный префикс.
 export const ISSUE_ESCALATE_TEAM_PREFIX = "esc_team:";
+// Второй шаг передачи — кто в команде: "esc_who:<cuid>:<telegramId>" либо
+// "esc_who:<cuid>:x" (без конкретного человека). Telegram-id, а не номер в
+// списке: список в DEV_TEAM_MEMBERS могут поменять, пока кнопка висит, и
+// номер тогда указал бы на другого человека. 9 + 25 + 1 + до 10 = 45 байт.
+export const ISSUE_ESCALATE_WHO_PREFIX = "esc_who:";
 export const ISSUE_NOTE_PREFIX = "issue_note:";
 // Запускает разбор дня по одному тикету — не сама сводка (см.
 // startReviewSession в dailyReview.ts), а отдельная кнопка под ней: чтобы

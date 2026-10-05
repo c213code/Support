@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
-import { ESCALATION_TEAMS, isEscalationTeam } from "@/lib/escalation";
+import { ESCALATION_TEAMS, escalationNote, isEscalationTeam } from "@/lib/escalation";
+import { devMemberByTelegramId, teamMembers } from "@/lib/devTeams";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { resetForwardDraft } from "@/lib/forwardDraft";
@@ -29,6 +30,7 @@ import {
   ISSUE_STATUS_PREFIX,
   ISSUE_ESCALATE_PREFIX,
   ISSUE_ESCALATE_TEAM_PREFIX,
+  ISSUE_ESCALATE_WHO_PREFIX,
   ISSUE_NOTE_PREFIX,
   ISSUE_RESOLVE_PREFIX,
   ISSUE_PENDING_PREFIX,
@@ -235,26 +237,92 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
 
     const existing = await prisma.issue.findUnique({
       where: { id: issueId },
-      select: { status: true, telegramLink: true, createdBy: true },
+      select: { status: true, telegramLink: true, createdBy: true, note: true },
     });
     if (!existing) {
       await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
       return;
     }
 
+    // Статус меняем уже здесь, а не после выбора человека: если до второго
+    // шага не дойдут, тикет всё равно числится переданным нужной команде.
+    // Заметка — та же, что на сайте («Передано: Backend»): без неё в репорт
+    // уходило безликое «Передано другой команде».
     await changeIssueStatus({
       issueId,
       status: "ESCALATED",
       escalatedTeam: team,
+      ...(existing.note?.trim() ? {} : { note: escalationNote(team, "") }),
       actor: telegramIdToAgent(query.from.id),
       source: "app",
     });
     await answerCallbackQuery(query.id, `Передано: ${team} ⚠️`);
+
+    // Кто именно в команде — то же сообщение, переписанное на месте, а не
+    // новое (экраны бота не множим). Пока не выбрали, разбор стоит: иначе
+    // карточка следующего тикета уехала бы, а вопрос остался висеть выше.
+    const members = teamMembers(team);
+    if (query.message && members.length > 0) {
+      const memberButtons = members.map((m) => ({
+        text: m.lead ? `★ ${m.name}` : m.name,
+        callback_data: `${ISSUE_ESCALATE_WHO_PREFIX}${issueId}:${m.telegramId}`,
+      }));
+      const rows = [];
+      for (let i = 0; i < memberButtons.length; i += 2) rows.push(memberButtons.slice(i, i + 2));
+      rows.push([{ text: "Без конкретного", callback_data: `${ISSUE_ESCALATE_WHO_PREFIX}${issueId}:x` }]);
+      await editMessageText(query.message.chat.id, query.message.message_id, `Кому в ${team}?`, rows);
+      return;
+    }
     if (query.message) {
       // Это сообщение — только клавиатура выбора команды, использована,
       // больше не нужна. Карточка разбора (dailyReview.ts) — отдельное
       // сообщение в том же чате, её и двигаем к следующему тикету.
       await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
+      await advanceReviewSession(String(query.message.chat.id));
+    }
+    return;
+  }
+
+  if (data.startsWith(ISSUE_ESCALATE_WHO_PREFIX)) {
+    const [issueId, who] = data.slice(ISSUE_ESCALATE_WHO_PREFIX.length).split(":");
+    const issue = issueId
+      ? await prisma.issue.findUnique({
+          where: { id: issueId },
+          select: { status: true, escalatedTeam: true, note: true },
+        })
+      : null;
+    if (!issue) {
+      await answerCallbackQuery(query.id, "Тикет не найден — возможно, уже удалён", true);
+      return;
+    }
+    // Между шагами тикет могли решить или вернуть на сайте — тогда кнопка
+    // устарела, и вернуть ему «Передано» было бы ошибкой.
+    if (issue.status !== "ESCALATED" || !isEscalationTeam(issue.escalatedTeam)) {
+      await answerCallbackQuery(query.id, "Статус тикета уже поменяли — откройте его заново", true);
+      return;
+    }
+    const team = issue.escalatedTeam;
+    const member = who === "x" ? null : devMemberByTelegramId(team, Number(who));
+    if (who !== "x" && !member) {
+      await answerCallbackQuery(query.id, "Этого человека уже нет в списке команды", true);
+      return;
+    }
+
+    // Заметку переписываем, только если её писал не человек: пустая или
+    // наша же «Передано: …».
+    const autoNote = !issue.note?.trim() || issue.note.trim().startsWith("Передано:");
+    await changeIssueStatus({
+      issueId,
+      status: "ESCALATED",
+      escalatedAssignee: member?.name ?? null,
+      ...(autoNote ? { note: escalationNote(team, member?.name ?? "") } : {}),
+      actor: telegramIdToAgent(query.from.id),
+      source: "app",
+    });
+    const summary = `Передано: ${team}${member ? ` → ${member.name}` : ""}`;
+    await answerCallbackQuery(query.id, `${summary} ⚠️`);
+    if (query.message) {
+      await editMessageText(query.message.chat.id, query.message.message_id, `⚠️ ${summary}`, null);
       await advanceReviewSession(String(query.message.chat.id));
     }
     return;

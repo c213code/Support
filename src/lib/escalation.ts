@@ -13,3 +13,10 @@ export function isEscalationTeam(value: unknown): value is EscalationTeam {
     (ESCALATION_TEAMS as readonly string[]).includes(value)
   );
 }
+
+// Заметка по умолчанию при передаче — она же уходит в репорт: «Передано:
+// Backend (Даука)». Одна на сайт и на разбор в Telegram, чтобы в репорте
+// не было двух написаний одного и того же.
+export function escalationNote(team: EscalationTeam, assignee: string): string {
+  return `Передано: ${team}${assignee.trim() ? ` (${assignee.trim()})` : ""}`;
+}

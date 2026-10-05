@@ -5,6 +5,8 @@ import type { GroupPresetDTO } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
 import { ISSUE_STATUSES, STATUS_META, type IssueStatus } from "@/lib/status";
 import { ESCALATION_TEAMS, type EscalationTeam } from "@/lib/escalation";
+import { useDevTeams } from "@/lib/useDevTeams";
+import { AssigneePicker } from "@/components/AssigneePicker";
 import { useAiCleaningEnabled } from "@/lib/useAiCleaningEnabled";
 import { IconRefresh } from "@/components/Icons";
 import { SubmissionPhoto } from "@/components/SubmissionPhoto";
@@ -129,6 +131,7 @@ export function IssueForm({
   const [escalatedTeam, setEscalatedTeam] = useState<EscalationTeam | "">(
     (initial?.escalatedTeam as EscalationTeam | null) ?? ""
   );
+  const devTeams = useDevTeams();
   const [escalatedAssignee, setEscalatedAssignee] = useState(
     initial?.escalatedAssignee ?? ""
   );
@@ -521,7 +524,19 @@ export function IssueForm({
                 <button
                   key={t}
                   type="button"
-                  onClick={() => setEscalatedTeam(t)}
+                  onClick={() => {
+                    // Человек из прежней команды в новой не работает.
+                    if (
+                      t !== escalatedTeam &&
+                      escalatedTeam &&
+                      (devTeams[escalatedTeam] ?? []).some(
+                        (m) => m.name === escalatedAssignee.trim()
+                      )
+                    ) {
+                      setEscalatedAssignee("");
+                    }
+                    setEscalatedTeam(t);
+                  }}
                   className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition ${
                     escalatedTeam === t
                       ? "border-orange-500 bg-orange-100 text-orange-700 ring-1 ring-orange-200"
@@ -537,12 +552,12 @@ export function IssueForm({
             <label className="text-xs font-medium text-slate-500">
               Кто занимается (необязательно)
             </label>
-            <input
-              type="text"
+            <AssigneePicker
+              teams={devTeams}
+              team={escalatedTeam}
               value={escalatedAssignee}
-              onChange={(e) => setEscalatedAssignee(e.target.value)}
-              placeholder="Например: Аян"
-              className={inputClass}
+              onChange={setEscalatedAssignee}
+              inputClassName={inputClass}
             />
           </div>
         </div>

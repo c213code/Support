@@ -2,8 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { IssueDTO } from "@/lib/types";
-import { ESCALATION_TEAMS, type EscalationTeam } from "@/lib/escalation";
+import {
+  ESCALATION_TEAMS,
+  escalationNote,
+  type EscalationTeam,
+} from "@/lib/escalation";
+import { useDevTeams } from "@/lib/useDevTeams";
 import { Modal } from "@/components/Modal";
+import { AssigneePicker } from "@/components/AssigneePicker";
 import { IconSend } from "@/components/Icons";
 
 export type EscalateValues = {
@@ -11,10 +17,6 @@ export type EscalateValues = {
   escalatedAssignee: string;
   note: string;
 };
-
-function escalationNote(team: EscalationTeam, assignee: string): string {
-  return `Передано: ${team}${assignee.trim() ? ` (${assignee.trim()})` : ""}`;
-}
 
 // Спрашиваем "кому передали" в момент перевода тикета в статус "Передано"
 // — та же логика, что у ResolveDialog для "Решено": решение/передача без
@@ -40,6 +42,7 @@ export function EscalateDialog({
   const [noteTouched, setNoteTouched] = useState(Boolean(issue.note?.trim()));
   const [saving, setSaving] = useState(false);
   const assigneeRef = useRef<HTMLInputElement>(null);
+  const devTeams = useDevTeams();
 
   // Пока заметку не тронули руками — держим её синхронной с выбранной
   // командой ("Передано: Backend (Аян)"), чтобы в репорте сразу было видно
@@ -48,8 +51,13 @@ export function EscalateDialog({
   // через эффект — обновление состояния внутри useEffect вызывает
   // каскадный лишний рендер.
   function handleTeamChange(next: EscalationTeam) {
+    // Человек из прежней команды в новой не работает — сбрасываем. Имя,
+    // вписанное руками, не трогаем: его в списке и не было.
+    const fromOldTeam = (devTeams[team] ?? []).some((m) => m.name === assignee.trim());
+    const nextAssignee = fromOldTeam && next !== team ? "" : assignee;
     setTeam(next);
-    if (!noteTouched) setNote(escalationNote(next, assignee));
+    setAssignee(nextAssignee);
+    if (!noteTouched) setNote(escalationNote(next, nextAssignee));
   }
 
   function handleAssigneeChange(next: string) {
@@ -124,14 +132,14 @@ export function EscalateDialog({
           >
             Кто занимается (необязательно)
           </label>
-          <input
-            id="escalate-assignee"
-            ref={assigneeRef}
-            type="text"
+          <AssigneePicker
+            teams={devTeams}
+            team={team}
             value={assignee}
-            onChange={(e) => handleAssigneeChange(e.target.value)}
-            placeholder="Например: Аян"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+            onChange={handleAssigneeChange}
+            inputId="escalate-assignee"
+            inputRef={assigneeRef}
+            inputClassName="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
         </div>
 
