@@ -27,6 +27,9 @@ import { isSameRequestFollowUp } from "@/lib/ai";
 import { sendBotReply } from "@/lib/botReply";
 import { isAutoReplyEnabled, isAiCleaningEnabled } from "@/lib/settings";
 import { NOTIFY_RESOLVED_PREFIX } from "@/lib/telegramCallbacks";
+import { devChatId } from "@/lib/devTeams";
+import { detectManualHandoff } from "@/lib/devHandoff";
+import { redactSecrets } from "@/lib/textClean";
 import {
   buildMessageLink,
   extractAuthorName,
@@ -126,6 +129,41 @@ export async function POST(request: NextRequest) {
   const fromId = message.from?.id != null ? BigInt(message.from.id) : null;
 
   const chatId = String(message.chat.id);
+
+  // Чат разработчиков — не группа поддержки: обращений там нет, тикеты из него
+  // не заводятся, во «Входящие» ничего не попадает. Раньше он шёл общим путём,
+  // и каждое сообщение разработчика ложилось во «Входящие» как новое. Нужен он
+  // для одного — увидеть, что агент сам передал тикет разработчикам
+  // (lib/devHandoff.ts).
+  if (chatId === devChatId()) {
+    // В форуме сообщение без реплая приходит с reply_to_message = корень
+    // топика. Это не ответ, и цитату «корня» к тексту не клеим.
+    const realReply =
+      message.reply_to_message != null &&
+      message.reply_to_message.message_id !== message.message_thread_id;
+    // Ключи доступа из curl в базу не кладём — см. redactSecrets.
+    const stored = redactSecrets(realReply ? contextualText : text);
+    await prisma.telegramMessage.upsert({
+      where: { chatId_messageId: { chatId, messageId: message.message_id } },
+      update: { text: stored, threadId: message.message_thread_id ?? null },
+      create: {
+        chatId,
+        messageId: message.message_id,
+        chatTitle: message.chat.title ?? null,
+        fromId,
+        fromUsername: message.from?.username ?? null,
+        authorName,
+        text: stored,
+        replyToMessageId: realReply ? message.reply_to_message!.message_id : null,
+        threadId: message.message_thread_id ?? null,
+        messageLink: buildMessageLink(message.chat.id, message.message_id),
+        archived: true,
+        viewed: true,
+      },
+    });
+    await detectManualHandoff(message, text);
+    return NextResponse.json({ ok: true });
+  }
 
   // Кнопка меню с формой обращения должна стоять всегда, а не только сразу
   // после /start: Telegram подменяет её меню команд, и вернуть её потом

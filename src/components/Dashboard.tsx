@@ -447,13 +447,26 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                                   )}
                                 </span>
                               ))}
-                              {issue.escalatedTeam && (
+                              {(issue.escalatedTeam || issue.handoffLink) && (
                                 <p className="mt-1 flex items-center gap-1 text-xs text-orange-600">
                                   <IconSend className="h-3.5 w-3.5 shrink-0" />
-                                  Передано: {issue.escalatedTeam}
+                                  Передано: {issue.escalatedTeam ?? "разработчикам"}
                                   {issue.escalatedAssignee
                                     ? ` (${issue.escalatedAssignee})`
                                     : ""}
+                                  {issue.handoffLink && (
+                                    <>
+                                      {" · "}
+                                      <a
+                                        href={issue.handoffLink}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="underline decoration-orange-300 underline-offset-2 hover:text-orange-700"
+                                      >
+                                        в чате разработчиков
+                                      </a>
+                                    </>
+                                  )}
                                 </p>
                               )}
                               <p className="mt-1 text-sm text-slate-500">

@@ -500,13 +500,26 @@ export function KanbanBoard({
                         onError={onBotReplyError}
                       />
                     )}
-                    {issue.escalatedTeam && (
+                    {(issue.escalatedTeam || issue.handoffLink) && (
                       <p className="mt-1 flex items-center gap-1 text-xs text-orange-600">
                         <IconSend className="h-3 w-3 shrink-0" />
-                        Передано: {issue.escalatedTeam}
+                        Передано: {issue.escalatedTeam ?? "разработчикам"}
                         {issue.escalatedAssignee
                           ? ` (${issue.escalatedAssignee})`
                           : ""}
+                        {issue.handoffLink && (
+                          <>
+                            {" · "}
+                            <a
+                              href={issue.handoffLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="underline decoration-orange-300 underline-offset-2 hover:text-orange-700"
+                            >
+                              в чате разработчиков
+                            </a>
+                          </>
+                        )}
                       </p>
                     )}
                     {issue.ticketLink && (

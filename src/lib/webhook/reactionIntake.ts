@@ -3,6 +3,7 @@ import { changeIssueStatus } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { isChatIntentEnabled } from "@/lib/settings";
 import { isOwnAgentMessage, type TelegramMessageReaction } from "@/lib/telegram";
+import { devChatId } from "@/lib/devTeams";
 
 // Реакция агента на обращение — «ок, қараймын» без слов: 👌 на пост
 // «Өтініш #…» или на сообщение куратора. Раньше тикет от неё не менялся и
@@ -29,6 +30,9 @@ const RESOLVE_REACTION = "👍";
 export async function applyAgentReaction(reaction: TelegramMessageReaction): Promise<void> {
   const userId = reaction.user?.id;
   if (!userId || reaction.user?.is_bot || !isOwnAgentMessage(userId)) return;
+  // В чате разработчиков 👍 на сообщение со ссылкой — «ок, гляну», а не
+  // «обращение решено».
+  if (String(reaction.chat.id) === devChatId()) return;
   const added = reaction.new_reaction.filter(
     (r) => !reaction.old_reaction.some((o) => JSON.stringify(o) === JSON.stringify(r))
   );

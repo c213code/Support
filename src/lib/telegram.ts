@@ -63,9 +63,27 @@ export type InlineKeyboardButton =
   | { text: string; web_app: { url: string } };
 export type InlineKeyboard = InlineKeyboardButton[][];
 
+// Разметка текста. Нужна в чате разработчиков (lib/devHandoff.ts): ссылку
+// прячут под словом (text_link — в самом тексте её нет), а отметку человека
+// без @username Telegram отдаёт только здесь, с его id (text_mention).
+export type TelegramEntity = {
+  type: string;
+  offset: number;
+  length: number;
+  url?: string;
+  user?: { id: number; is_bot?: boolean; username?: string; first_name?: string };
+};
+
 export type TelegramMessagePayload = {
   message_id: number;
   date: number;
+  // Топик форума (чат разработчиков: топик на команду). В форуме сообщение
+  // без реплая всё равно приходит с reply_to_message — это корень топика,
+  // а не ответ кому-то; отличается тем, что его id равен message_thread_id.
+  message_thread_id?: number;
+  is_topic_message?: boolean;
+  entities?: TelegramEntity[];
+  caption_entities?: TelegramEntity[];
   chat: {
     id: number;
     type: string;

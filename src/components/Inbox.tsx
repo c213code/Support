@@ -103,6 +103,9 @@ export function Inbox() {
   const [attachingFromId, setAttachingFromId] = useState<string | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("");
   const [tab, setTab] = useState<"messages" | "board">("board");
+  // Сколько старых сообщений чата разработчиков ещё не убрано (не в архиве или
+  // с ключами доступа в тексте) — см. /api/telegram/dev-chat-cleanup.
+  const [devChatPending, setDevChatPending] = useState(0);
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [resolvingIssueId, setResolvingIssueId] = useState<string | null>(null);
   // Окно «Авто-репорт» (см. AutoReportDialog): ИИ разбирает переписку дня.
@@ -659,6 +662,38 @@ export function Inbox() {
         });
         await loadIssues(date);
         toast("Статусы обновлены");
+      },
+    });
+  }
+
+  useEffect(() => {
+    if (tab !== "messages") return;
+    let cancelled = false;
+    fetch("/api/telegram/dev-chat-cleanup")
+      .then((res) => (res.ok ? res.json() : { pending: 0 }))
+      .then((data) => {
+        if (!cancelled) setDevChatPending(Number(data.pending) || 0);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [tab]);
+
+  function handleDevChatCleanup() {
+    confirm({
+      title: "Убрать чат разработчиков?",
+      body: "Старые сообщения из него уйдут в архив, а ключи доступа из curl (Bearer, токены) будут вычищены из текста в базе. В самом Telegram ничего не меняется.",
+      confirmLabel: "Убрать",
+      onConfirm: async () => {
+        const res = await fetch("/api/telegram/dev-chat-cleanup", { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast(data.error ?? "Не получилось", "error");
+          return;
+        }
+        setDevChatPending(0);
+        toast(`В архив: ${data.archived}, вычищено ключей: ${data.redacted}`);
       },
     });
   }
@@ -1485,6 +1520,20 @@ export function Inbox() {
 
       {tab === "messages" && (
         <>
+      {devChatPending > 0 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <span>
+            В базе {devChatPending} старых сообщений чата разработчиков — не в
+            архиве или с ключами доступа из curl.
+          </span>
+          <button
+            onClick={handleDevChatCleanup}
+            className="rounded-md bg-amber-600 px-2.5 py-1 font-medium text-white hover:bg-amber-700"
+          >
+            Убрать
+          </button>
+        </div>
+      )}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           onClick={() => setGroupFilter("")}

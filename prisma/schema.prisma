@@ -69,6 +69,15 @@ model TelegramMessage {
   // цитаты в `text` для этого не годится: Telegram обрезает её до 200
   // символов, и сопоставление по строке разъезжается.
   replyToMessageId Int?
+  // Чат разработчиков — форум с топиком на команду (Бэк, Фронт…). По топику
+  // ручной передачи понятно, какой команде передали (см. lib/devHandoff.ts).
+  // В обычных группах поддержки не заполняется.
+  threadId         Int?
+  // @username автора — только из чата разработчиков. Агенты отмечают
+  // разработчика через @username, а в DEV_TEAM_MEMBERS лежат Telegram-id:
+  // по своим же сохранённым сообщениям бот узнаёт, чей это username, без
+  // отдельного списка, который пришлось бы вести руками.
+  fromUsername     String?
   messageLink      String
   archived         Boolean  @default(false)
   // Просмотрено ли сообщение на сайте — для индикатора "новое/просмотрено"
@@ -448,6 +457,11 @@ model Issue {
   // поля на тикете, а не связь с чем-то, что живёт своей жизнью.
   escalatedTeam     String?
   escalatedAssignee String?
+  // Сообщение в чате разработчиков, которым тикет им передали (агент сам или,
+  // позже, бот). Есть ссылка — передача уже прозвучала, и бот её не
+  // повторяет.
+  handoffLink       String?
+  handoffAt         DateTime?
   createdBy         String
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt

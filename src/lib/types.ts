@@ -29,6 +29,9 @@ export type IssueDTO = {
   ticketLink: string | null;
   escalatedTeam: string | null;
   escalatedAssignee: string | null;
+  // Сообщение в чате разработчиков, которым тикет им передали (см.
+  // lib/devHandoff.ts).
+  handoffLink?: string | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

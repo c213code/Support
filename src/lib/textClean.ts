@@ -226,6 +226,30 @@ export function maskSensitiveForAi(raw: string): string {
     .trim();
 }
 
+// Ключи доступа из рабочей переписки с разработчиками — насовсем, ещё до
+// записи в базу. Агенты присылают туда curl из DevTools целиком, вместе с
+// «Authorization: Bearer eyJ…» — живым токеном пользователя, который годится
+// для входа от его имени. Хранить его нам незачем: разработчик видит
+// исходное сообщение в Telegram, а у нас остаётся смысл без ключа.
+//
+// Не maskSensitiveForAi: там нужно спрятать почту и телефон от внешней
+// модели, а здесь почта ученика — как раз то, по чему его ищут, и её не
+// трогаем. Только то, что открывает доступ.
+const BEARER_TOKEN = /(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi;
+// JWT: base64url-заголовок всегда начинается с «eyJ» ({"…). Без точек —
+// оборванный токен, Telegram режет длинные сообщения посреди него.
+const JWT_TOKEN = /eyJ[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]+){0,2}/g;
+const SECRET_HEADER = /((?:Authorization|Cookie|X-Api-Key|X-Auth-Token)\s*:\s*)[^'"\n]+/gi;
+const SECRET_PARAM = /([?&](?:access_token|refresh_token|token|api_key|apikey|password)=)[^&\s'"]+/gi;
+
+export function redactSecrets(raw: string): string {
+  return raw
+    .replace(SECRET_HEADER, "$1<скрыто>")
+    .replace(BEARER_TOKEN, "$1<скрыто>")
+    .replace(JWT_TOKEN, "<токен скрыт>")
+    .replace(SECRET_PARAM, "$1<скрыто>");
+}
+
 // Логины и пароли из текста — насовсем.
 //
 // Вынесено из чистки описания, потому что то же самое нужно разбору

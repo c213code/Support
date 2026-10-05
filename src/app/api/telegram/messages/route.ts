@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { dayRangeUtc } from "@/lib/date";
+import { devChatId } from "@/lib/devTeams";
 
 export async function GET(request: NextRequest) {
   const archivedParam = request.nextUrl.searchParams.get("archived");
@@ -9,6 +10,11 @@ export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date");
 
   const where: Record<string, unknown> = { archived };
+  // Чат разработчиков во «Входящих» не нужен: обращений там нет. Новые его
+  // сообщения и так ложатся архивными (см. вебхук), а старые, сохранённые до
+  // этого, прячем здесь — без правки данных.
+  const devChat = devChatId();
+  if (devChat) where.chatId = { not: devChat };
   if (date) {
     const { start, end } = dayRangeUtc(date);
     where.receivedAt = { gte: start, lt: end };

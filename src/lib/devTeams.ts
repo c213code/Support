@@ -11,6 +11,12 @@
 import { isEscalationTeam, type EscalationTeam } from "@/lib/escalation";
 
 const DEV_TEAM_MEMBERS_ENV = "DEV_TEAM_MEMBERS";
+// Чат разработчиков — форум с топиком на команду. Тоже env: для живых тестов
+// его подменяют на свою тестовую группу, чтобы не писать в настоящую.
+//   DEV_CHAT_ID="-1001759146038"
+//   DEV_TEAM_TOPICS="Backend:19671,Frontend:19672,Product:19673,Мобайл:30569"
+const DEV_CHAT_ID_ENV = "DEV_CHAT_ID";
+const DEV_TEAM_TOPICS_ENV = "DEV_TEAM_TOPICS";
 
 export type DevMember = {
   team: EscalationTeam;
@@ -27,29 +33,64 @@ export type DevMember = {
 // разу на запись, а не на каждый запрос.
 const warnedEntries = new Set<string>();
 
-export function devTeamMembers(): DevMember[] {
-  const raw = (process.env[DEV_TEAM_MEMBERS_ENV] ?? "")
+function readEnv(name: string): string {
+  return (process.env[name] ?? "")
     .trim()
-    .replace(new RegExp(`^${DEV_TEAM_MEMBERS_ENV}\\s*=\\s*`), "")
+    .replace(new RegExp(`^${name}\\s*=\\s*`), "")
     .replace(/^["']|["']$/g, "");
-  return raw
+}
+
+function readEnvList(name: string): string[] {
+  return readEnv(name)
     .split(",")
     .map((entry) => entry.trim())
-    .filter(Boolean)
-    .flatMap((entry) => {
-      const [team, name, idStr, flag] = entry.split(":").map((part) => part.trim());
-      const telegramId = Number(idStr);
-      if (!isEscalationTeam(team) || !name || !Number.isFinite(telegramId) || telegramId === 0) {
-        if (!warnedEntries.has(entry)) {
-          warnedEntries.add(entry);
-          console.warn(
-            `[devTeams] ${DEV_TEAM_MEMBERS_ENV}: не разобрана запись «${entry}» — нужно «Команда:Имя:telegramId[:lead]», команда из ESCALATION_TEAMS`
-          );
-        }
-        return [];
-      }
-      return [{ team, name, telegramId, lead: flag?.toLowerCase() === "lead" }];
-    });
+    .filter(Boolean);
+}
+
+function warnOnce(name: string, entry: string, expected: string): void {
+  const key = `${name}|${entry}`;
+  if (warnedEntries.has(key)) return;
+  warnedEntries.add(key);
+  console.warn(`[devTeams] ${name}: не разобрана запись «${entry}» — нужно «${expected}», команда из ESCALATION_TEAMS`);
+}
+
+export function devTeamMembers(): DevMember[] {
+  return readEnvList(DEV_TEAM_MEMBERS_ENV).flatMap((entry) => {
+    const [team, name, idStr, flag] = entry.split(":").map((part) => part.trim());
+    const telegramId = Number(idStr);
+    if (!isEscalationTeam(team) || !name || !Number.isFinite(telegramId) || telegramId === 0) {
+      warnOnce(DEV_TEAM_MEMBERS_ENV, entry, "Команда:Имя:telegramId[:lead]");
+      return [];
+    }
+    return [{ team, name, telegramId, lead: flag?.toLowerCase() === "lead" }];
+  });
+}
+
+export function devChatId(): string | null {
+  return readEnv(DEV_CHAT_ID_ENV) || null;
+}
+
+function devTeamTopics(): Array<{ team: EscalationTeam; topicId: number }> {
+  return readEnvList(DEV_TEAM_TOPICS_ENV).flatMap((entry) => {
+    const [team, idStr] = entry.split(":").map((part) => part.trim());
+    const topicId = Number(idStr);
+    if (!isEscalationTeam(team) || !Number.isInteger(topicId) || topicId <= 0) {
+      warnOnce(DEV_TEAM_TOPICS_ENV, entry, "Команда:idТопика");
+      return [];
+    }
+    return [{ team, topicId }];
+  });
+}
+
+export function teamForTopic(topicId: number | null | undefined): EscalationTeam | null {
+  if (!topicId) return null;
+  return devTeamTopics().find((t) => t.topicId === topicId)?.team ?? null;
+}
+
+// Человек по Telegram-id в любой команде — для отметки в чате разработчиков,
+// где команду ещё надо узнать.
+export function devMemberAnywhere(telegramId: number): DevMember | null {
+  return devTeamMembers().find((m) => m.telegramId === telegramId) ?? null;
 }
 
 // Лид первым: ему чаще всего и передают, когда не знают, кто именно.
