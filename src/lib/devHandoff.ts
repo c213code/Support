@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { parseMessageLink } from "@/lib/botMessageDelete";
-import { buildMessageLink, type TelegramEntity, type TelegramMessagePayload } from "@/lib/telegram";
+import {
+  buildMessageLink,
+  editMessageText,
+  type TelegramEntity,
+  type TelegramMessagePayload,
+} from "@/lib/telegram";
 import { devChatId, devMemberAnywhere, teamForTopic, type DevMember } from "@/lib/devTeams";
 import { isAgentTelegramId, telegramIdToAgent } from "@/lib/agentTelegram";
 import { isChatIntentEnabled } from "@/lib/settings";
@@ -144,6 +149,20 @@ async function mentionedMembers(text: string, entities: TelegramEntity[]): Promi
   return [...ids].map(devMemberAnywhere).filter((m): m is DevMember => m !== null);
 }
 
+// Агент передал сам — черновик бота (lib/handoffDraft.ts) снимается, чтобы
+// бот не повторил в чате разработчиков то, что там уже прозвучало.
+async function cancelPendingHandoff(issueId: string, manualLink: string): Promise<void> {
+  const row = await prisma.pendingHandoff.findUnique({ where: { issueId } });
+  if (!row) return;
+  await prisma.pendingHandoff.delete({ where: { id: row.id } });
+  await editMessageText(
+    row.chatId,
+    row.messageId,
+    `✅ Уже передано вручную: ${manualLink}\nЧерновик бота не отправлен.`,
+    null
+  );
+}
+
 export function devMessageLink(message: TelegramMessagePayload): string {
   const base = buildMessageLink(message.chat.id, message.message_id);
   if (!message.message_thread_id) return base;
@@ -183,10 +202,12 @@ export async function detectManualHandoff(
     if (!issue) continue;
 
     if (!issue.handoffLink) {
+      const link = devMessageLink(message);
       await prisma.issue.update({
         where: { id: issueId },
-        data: { handoffLink: devMessageLink(message), handoffAt: new Date() },
+        data: { handoffLink: link, handoffAt: new Date() },
       });
+      await cancelPendingHandoff(issueId, link);
     }
 
     if (!canChangeStatus || issue.status === "RESOLVED" || issue.status === "ESCALATED") continue;

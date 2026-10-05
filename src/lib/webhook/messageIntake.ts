@@ -20,6 +20,7 @@ import {
 import {
   buildMessageLink,
   extractAuthorName,
+  hasMediaAttachment,
   sendTelegramMessage,
   type TelegramMessagePayload,
 } from "@/lib/telegram";
@@ -250,6 +251,7 @@ export async function attachReplyToBotMessage(
       text: contextualText,
       replyToMessageId: message.reply_to_message?.message_id ?? null,
       messageLink,
+      hasMedia: hasMediaAttachment(message),
       usedForIssueId: issue.id,
       archived: true,
       viewed: true,
@@ -469,6 +471,7 @@ export async function attachFollowUpToTicket(
         text: contextualText,
         replyToMessageId: message.reply_to_message?.message_id ?? null,
         messageLink,
+        hasMedia: hasMediaAttachment(message),
         usedForIssueId: issue.id,
         archived: true,
         viewed: true,

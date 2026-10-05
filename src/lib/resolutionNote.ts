@@ -197,8 +197,10 @@ export async function collectResolutionContext(
     ? { chatId: issueMessages[0].chatId, at: issueMessages[0].receivedAt }
     : null;
   if (!anchor) {
+    // Кроме передачи разработчикам: тот пост лежит в их чате, а не там,
+    // где шёл разговор с куратором.
     const post = await prisma.botReply.findFirst({
-      where: { issueId, deleted: false },
+      where: { issueId, deleted: false, kind: { not: "HANDOFF" } },
       orderBy: { sentAt: "asc" },
       select: { chatId: true, sentAt: true },
     });

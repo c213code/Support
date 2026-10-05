@@ -29,6 +29,7 @@ import { isAutoReplyEnabled, isAiCleaningEnabled } from "@/lib/settings";
 import { NOTIFY_RESOLVED_PREFIX } from "@/lib/telegramCallbacks";
 import { devChatId } from "@/lib/devTeams";
 import { detectManualHandoff } from "@/lib/devHandoff";
+import { applyHandoffReply } from "@/lib/handoffDraft";
 import { redactSecrets } from "@/lib/textClean";
 import {
   buildMessageLink,
@@ -36,6 +37,7 @@ import {
   extractReplyContextLine,
   captionAttachmentMarker,
   extractText,
+  hasMediaAttachment,
   isOwnAgentMessage,
   sendTelegramMessage,
   type TelegramUpdate,
@@ -186,6 +188,16 @@ export async function POST(request: NextRequest) {
   // и есть автор такого ответа, а та проверка иначе тихо архивирует
   // сообщение как обычное и до этой ветки просто не дойдёт.
   const repliedToId = message.reply_to_message?.message_id;
+
+  // Реплай на черновик передачи разработчикам: ссылка — заменить ссылку,
+  // текст — заменить текст (см. lib/handoffDraft.ts).
+  if (
+    repliedToId != null &&
+    message.chat.type === "private" &&
+    (await applyHandoffReply(chatId, repliedToId, text))
+  ) {
+    return NextResponse.json({ ok: true });
+  }
 
   // Ответ реплаем на черновик автоответа ("Свой текст — ответь реплаем"):
   // отправляем в группу ровно то, что человек написал. Проверяется здесь
@@ -552,6 +564,7 @@ export async function POST(request: NextRequest) {
         text: contextualText,
         replyToMessageId: message.reply_to_message?.message_id ?? null,
         messageLink,
+        hasMedia: hasMediaAttachment(message),
         // Своя строка серии тоже помнит пропуск. Без этого память жила
         // ровно одно сообщение: третья фраза подряд находила эту строку
         // как "последнее сообщение автора", видела в ней пропуск = false и
@@ -583,6 +596,7 @@ export async function POST(request: NextRequest) {
       text: contextualText,
       replyToMessageId: message.reply_to_message?.message_id ?? null,
       messageLink,
+      hasMedia: hasMediaAttachment(message),
       // Запоминаем решение, а не только применяем его: следующее сообщение
       // этого же человека склеится с этим, и там о пропуске нужно знать.
       skippedAutoIssue: skipAutoCreate,

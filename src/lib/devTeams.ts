@@ -82,6 +82,10 @@ function devTeamTopics(): Array<{ team: EscalationTeam; topicId: number }> {
   });
 }
 
+export function topicForTeam(team: EscalationTeam): number | null {
+  return devTeamTopics().find((t) => t.team === team)?.topicId ?? null;
+}
+
 export function teamForTopic(topicId: number | null | undefined): EscalationTeam | null {
   if (!topicId) return null;
   return devTeamTopics().find((t) => t.topicId === topicId)?.team ?? null;

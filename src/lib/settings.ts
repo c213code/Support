@@ -176,3 +176,22 @@ export async function setSubmissionToGroupEnabled(enabled: boolean): Promise<voi
     create: { id: SETTINGS_ID, submissionToGroup: enabled },
   });
 }
+
+// Бот передаёт тикет разработчикам сам — черновик в личку, в их чат только
+// по кнопке (см. lib/handoffDraft.ts). Выключено по умолчанию: это бот пишет
+// в чужой чат от нашего имени.
+export async function isHandoffEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({
+    where: { id: SETTINGS_ID },
+    select: { handoffEnabled: true },
+  });
+  return row?.handoffEnabled ?? false;
+}
+
+export async function setHandoffEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { id: SETTINGS_ID },
+    update: { handoffEnabled: enabled },
+    create: { id: SETTINGS_ID, handoffEnabled: enabled },
+  });
+}

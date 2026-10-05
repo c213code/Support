@@ -30,6 +30,7 @@ export function useBotSettings() {
   );
   const [submitterNotify, setSubmitterNotify] = useState<boolean | null>(null);
   const [submissionToGroup, setSubmissionToGroup] = useState<boolean | null>(null);
+  const [handoffEnabled, setHandoffEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     // Не загрузилось (например, сессия истекла) — тумблер остаётся в
@@ -46,6 +47,7 @@ export function useBotSettings() {
     load("/api/settings/status-reply", setStatusReplyEnabled);
     load("/api/settings/submitter-notify", setSubmitterNotify);
     load("/api/settings/submission-to-group", setSubmissionToGroup);
+    load("/api/settings/handoff", setHandoffEnabled);
   }, []);
 
   async function toggleAiCleaning() {
@@ -183,6 +185,32 @@ export function useBotSettings() {
     );
   }
 
+  async function toggleHandoff() {
+    const next = !handoffEnabled;
+    // Бот начнёт писать в чат разработчиков (после кнопки в личке) — как и у
+    // остальных «бот пишет людям», спрашиваем прямо.
+    if (next && !window.confirm("При передаче тикета разработчикам бот пришлёт тебе в личку черновик, а после «Отправить» напишет в топик команды. Включить?")) {
+      return;
+    }
+    setHandoffEnabled(next);
+    const res = await fetch("/api/settings/handoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (!res.ok || isSessionLost(res)) {
+      setHandoffEnabled(!next);
+      toast("Не удалось переключить передачу разработчикам", "error");
+      return;
+    }
+    toast(
+      next
+        ? "При передаче придёт черновик в личку"
+        : "Бот разработчикам не пишет",
+      next ? "success" : "info"
+    );
+  }
+
   async function toggleSubmissionToGroup() {
     const next = !submissionToGroup;
     // Включение заставляет бота публиковать обращения там, где сидят
@@ -237,6 +265,7 @@ export function useBotSettings() {
     statusReplyEnabled,
     submitterNotify,
     submissionToGroup,
+    handoffEnabled,
     toggleAiCleaning,
     toggleAutoReply,
     toggleChatIntent,
@@ -245,5 +274,6 @@ export function useBotSettings() {
     toggleStatusReply,
     toggleSubmitterNotify,
     toggleSubmissionToGroup,
+    toggleHandoff,
   };
 }

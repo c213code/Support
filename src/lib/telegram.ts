@@ -134,6 +134,14 @@ export type TelegramMessagePayload = {
   };
 };
 
+// Адрес Bot API. В проде не задаётся — всегда api.telegram.org. Переменная
+// нужна тестам: дев-сервер направляют на локальную заглушку, которая
+// записывает вызовы и отвечает «ок», — так проверяется весь путь отправки,
+// не написав ни одного сообщения в настоящий Telegram.
+function botApiBase(): string {
+  return (process.env.TELEGRAM_API_BASE ?? "https://api.telegram.org").replace(/\/+$/, "");
+}
+
 export function buildMessageLink(chatId: number, messageId: number): string {
   // Для супергрупп (id вида -100xxxxxxxxxx) публичная ссылка на сообщение
   // строится через внутренний id без префикса "-100". У обычной группы
@@ -223,6 +231,12 @@ export function captionAttachmentMarker(message: TelegramMessagePayload): string
   return null;
 }
 
+// Есть ли вложение, по которому видно проблему (скриншот, запись экрана,
+// файл). Стикер и голосовое — не то: разработчику по ним ничего не понять.
+export function hasMediaAttachment(message: TelegramMessagePayload): boolean {
+  return Boolean(message.photo?.length || message.video || message.document);
+}
+
 // file_id самого крупного размера присланного фото. Telegram шлёт один
 // снимок несколькими размерами по возрастанию, последний — оригинал; мелкие
 // нужны ленте чатов, а не нам: на скриншоте куратора важно прочитать текст
@@ -298,7 +312,7 @@ async function callBotApi(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BOT_API_TIMEOUT_MS);
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    const res = await fetch(`${botApiBase()}/bot${token}/${method}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -451,7 +465,7 @@ export async function uploadPhotos(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BOT_UPLOAD_TIMEOUT_MS);
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    const res = await fetch(`${botApiBase()}/bot${token}/${method}`, {
       method: "POST",
       body: form,
       signal: controller.signal,
@@ -549,7 +563,7 @@ export async function getFileDownloadUrl(fileId: string): Promise<string | null>
     result?: { file_path?: string };
   } | null;
   const path = data?.result?.file_path;
-  return path ? `https://api.telegram.org/file/bot${token}/${path}` : null;
+  return path ? `${botApiBase()}/file/bot${token}/${path}` : null;
 }
 
 // Сообщение с кнопкой, открывающей мини-апп. Отдельно от sendTelegramMessage:

@@ -73,6 +73,10 @@ model TelegramMessage {
   // ручной передачи понятно, какой команде передали (см. lib/devHandoff.ts).
   // В обычных группах поддержки не заполняется.
   threadId         Int?
+  // Было ли в сообщении фото, видео или файл. В тексте этого не видно:
+  // подпись к скриншоту хранится без пометки. Нужно передаче разработчикам —
+  // им ссылка на сообщение со скриншотом полезнее первого «Сәлеметсіз бе».
+  hasMedia         Boolean  @default(false)
   // @username автора — только из чата разработчиков. Агенты отмечают
   // разработчика через @username, а в DEV_TEAM_MEMBERS лежат Telegram-id:
   // по своим же сохранённым сообщениям бот узнаёт, чей это username, без
@@ -163,6 +167,11 @@ model AppSetting {
   // Включённым оно делает форму видимой всей группе — коллеги знают, что
   // вопрос задан, а ответ реплаем приклеивается к тому же тикету.
   submissionToGroup  Boolean  @default(false)
+  // Бот передаёт тикет разработчикам сам, если агент не сделал этого в их
+  // чате: ИИ пишет текст, черновик уходит агенту в личку, в топик команды
+  // попадает только после «Отправить» (см. lib/handoffDraft.ts). Пишет в
+  // чужой чат от нашего имени — поэтому выключено, включает человек.
+  handoffEnabled     Boolean  @default(false)
   updatedAt          DateTime @updatedAt
 }
 
@@ -354,6 +363,30 @@ model PendingAutoReply {
   @@index([issueId])
 }
 
+// Черновик передачи разработчикам, ждущий решения агента в личке. Текст и
+// ссылки — здесь, а не в callback_data: в 64 байта они не влезут. Один на
+// тикет: новая передача того же тикета заменяет старый черновик.
+model PendingHandoff {
+  id           String   @id @default(cuid())
+  // Личка агента и id сообщения с черновиком — по ним находятся кнопки и
+  // реплай-правка.
+  chatId       String
+  messageId    Int
+  issue        Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueId      String   @unique
+  team         String
+  assigneeName String?
+  assigneeTgId BigInt?
+  // Что уйдёт разработчику: текст (ИИ или правка агента) и ссылка на
+  // сообщение куратора — выбранная и все варианты (с фото, первое, пост).
+  body         String
+  link         String?
+  linkOptions  String[] @default([])
+  createdAt    DateTime @default(now())
+
+  @@unique([chatId, messageId])
+}
+
 model ReviewSession {
   chatId       String   @id
   reportDate   String
@@ -475,6 +508,7 @@ model Issue {
 
   events         IssueEvent[]
   pendingReplies PendingAutoReply[]
+  pendingHandoff PendingHandoff?
   botReplies     BotReply[]
   notePrompts    PendingNotePrompt[]
   sourceMessages TelegramMessage[]   @relation("issueSource")

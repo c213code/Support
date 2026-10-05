@@ -1222,6 +1222,62 @@ export async function explainLogError(event: LogErrorEvent): Promise<string | nu
   }
 }
 
+// Текст передачи разработчикам (lib/handoffDraft.ts): агент нажал «Передать
+// → Backend → Даука», а в чате разработчиков сам не написал. Пишем так же,
+// как пишут агенты руками — одно-два предложения: что сломалось и что нужно
+// сделать, без приветствий и пересказа переписки. Ссылку, отметку человека и
+// почту ученика добавляет код — модель их не видит (почты и телефоны во
+// входе замаскированы) и выдумывать не должна.
+const HANDOFF_BRIEF_TIMEOUT_MS = 12000;
+
+const HANDOFF_BRIEF_SYSTEM_PROMPT = `Ты помогаешь агенту поддержки онлайн-школы JUZ40 передать проблему разработчикам. Тебе дают описание тикета и сообщения куратора (почты и телефоны в них скрыты). Ответ — json.
+
+Напиши короткое сообщение разработчику, как пишут сами агенты: 1-2 предложения — что не работает (где, у кого) и что нужно сделать или проверить. Без приветствий, без «пожалуйста посмотрите», без имён, без названия команды (оно и так видно по топику) и без пересказа переписки. Если в сообщениях есть точное название курса, урока, теста, кнопки или текст ошибки — сохрани его как есть.
+
+Язык — тот же, на котором писал куратор (обычно казахский). Не выдумывай того, чего нет в тексте: не понятно, что нужно сделать, — опиши только проблему.
+
+Пример: куратор «Сәлеметсіз бе, ҰБТ жаттығуын оқушыға қайта ашып беру керек еді, бір рет қана тапсырып қойыпты» → {"brief":"Оқушыға Жаттығу ҰБТ-ны қайта ашып беру керек, бір рет тапсырып қойған."}
+
+Ответь строго json: {"brief":"..."}`;
+
+export async function writeHandoffBrief(params: {
+  description: string;
+  curatorText: string;
+  team: string;
+}): Promise<string | null> {
+  if (groqApiKeys().length === 0) return null;
+  const input = `Команда: ${params.team}\nОписание тикета: ${params.description}\nСообщения куратора:\n${params.curatorText}`;
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 700,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: HANDOFF_BRIEF_SYSTEM_PROMPT + (await buildAiContext(input)) },
+          { role: "user", content: input },
+        ],
+      },
+      HANDOFF_BRIEF_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      console.warn("[groq] writeHandoffBrief: ответ без content");
+      return null;
+    }
+    const parsed = JSON.parse(content);
+    const brief = typeof parsed?.brief === "string" ? parsed.brief.trim() : "";
+    if (!brief) console.warn("[groq] writeHandoffBrief: в json нет brief");
+    return brief || null;
+  } catch (err) {
+    console.warn(`[groq] writeHandoffBrief упал: ${String(err).slice(0, 300)}`);
+    return null;
+  }
+}
+
 // Живая проверка Groq по кнопке в панели "⚡ Groq". Все ИИ-функции этого
 // проекта по дизайну молча откатываются на fallback при любой ошибке модели
 // (ключ/квота/снятая модель/пустой content из-за reasoning_effort — см.

@@ -6,6 +6,10 @@ import type { BotReplyDTO } from "@/lib/types";
 // Публикация обращения (см. lib/submissionGroupPost.ts): в рабочей группе
 // или, пока рубильник выключен, в служебном канале — репетицией.
 const SUBMISSION_KIND = "SUBMISSION";
+// Передача в чат разработчиков (lib/handoffDraft.ts). Пост с отметкой
+// человека в HTML — «Исправить» правит текст без разметки и сломал бы её,
+// поэтому у него только «Удалить».
+const HANDOFF_KIND = "HANDOFF";
 const SUBMISSION_TEST_KIND = "SUBMISSION_TEST";
 
 // Что бот сказал в рабочей группе по этому тикету — прямо на карточке,
@@ -88,7 +92,9 @@ export function BotReplies({
                   ? "📨"
                   : reply.kind === SUBMISSION_TEST_KIND
                     ? "🧪"
-                    : "🤖"}
+                    : reply.kind === HANDOFF_KIND
+                      ? "🛠"
+                      : "🤖"}
               </span>
               {/* Публикация самого обращения — это тот же текст, что уже
                   расписан полями выше: карточка показывала его дважды и
@@ -105,7 +111,7 @@ export function BotReplies({
                   устройство дежурного — телефон, где наведения нет вовсе,
                   и спрятанное под hover там просто не существует. */}
               <span className="flex shrink-0 gap-1.5">
-                {reply.kind !== SUBMISSION_KIND && reply.kind !== SUBMISSION_TEST_KIND && (
+                {reply.kind !== SUBMISSION_KIND && reply.kind !== SUBMISSION_TEST_KIND && reply.kind !== HANDOFF_KIND && (
                   <button
                     onClick={() => {
                       setEditingId(reply.id);

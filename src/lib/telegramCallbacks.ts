@@ -15,6 +15,10 @@ export const ISSUE_ESCALATE_TEAM_PREFIX = "esc_team:";
 // списке: список в DEV_TEAM_MEMBERS могут поменять, пока кнопка висит, и
 // номер тогда указал бы на другого человека. 9 + 25 + 1 + до 10 = 45 байт.
 export const ISSUE_ESCALATE_WHO_PREFIX = "esc_who:";
+// Черновик передачи разработчикам в личке (lib/handoffDraft.ts): "ho:s" —
+// отправить, "ho:x" — не отправлять, "ho:l<номер>" — выбрать ссылку. Какой
+// черновик — по самому сообщению с кнопками, как у автоответа.
+export const HANDOFF_PREFIX = "ho:";
 export const ISSUE_NOTE_PREFIX = "issue_note:";
 // Запускает разбор дня по одному тикету — не сама сводка (см.
 // startReviewSession в dailyReview.ts), а отдельная кнопка под ней: чтобы

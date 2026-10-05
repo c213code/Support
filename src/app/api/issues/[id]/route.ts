@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
@@ -7,6 +7,8 @@ import { isEscalationTeam } from "@/lib/escalation";
 import { AUTO_ISSUE_CREATOR } from "@/lib/telegram";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { cleanTicketDescription } from "@/lib/textClean";
+import { agentTelegramId } from "@/lib/agentTelegram";
+import { startHandoff } from "@/lib/handoffDraft";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -60,7 +62,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   const existing = await prisma.issue.findUnique({
     where: { id },
-    select: { createdBy: true, status: true, telegramLink: true },
+    select: {
+      createdBy: true,
+      status: true,
+      telegramLink: true,
+      escalatedTeam: true,
+      escalatedAssignee: true,
+    },
   });
 
   // Тикет завёл бот сам (по входящему сообщению) — как только с ним
@@ -85,6 +93,26 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       actor: identity?.name ?? null,
       source: "app",
     });
+  }
+
+  // Передали команде (или передали другому человеку) — черновик сообщения
+  // разработчикам в личку тому, кто нажал (lib/handoffDraft.ts; выключено,
+  // пока не включён рубильник). Только на само действие «Передать»: форма
+  // редактирования шлёт статус ESCALATED при каждом сохранении, и без этой
+  // проверки любая правка текста заново предлагала бы передачу. После ответа
+  // — ИИ пишет текст несколько секунд, окно ждать этого не должно.
+  const escalationChanged =
+    nextStatus === "ESCALATED" &&
+    (existing?.status !== "ESCALATED" ||
+      (data.escalatedTeam !== undefined && data.escalatedTeam !== existing?.escalatedTeam) ||
+      (data.escalatedAssignee !== undefined && data.escalatedAssignee !== existing?.escalatedAssignee));
+  if (escalationChanged) {
+    const recipient = identity ? agentTelegramId(identity.name) : null;
+    after(() =>
+      startHandoff(id, recipient).catch((err: unknown) =>
+        console.warn(`[handoff] черновик не подготовлен: ${String(err).slice(0, 200)}`)
+      )
+    );
   }
 
   const issue = await prisma.issue.findUnique({ where: { id } });

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
 import { ESCALATION_TEAMS, escalationNote, isEscalationTeam } from "@/lib/escalation";
 import { devMemberByTelegramId, teamMembers } from "@/lib/devTeams";
+import { handleHandoffCallback, startHandoff } from "@/lib/handoffDraft";
 import { changeIssueStatus } from "@/lib/issueStatus";
 import { telegramIdToAgent } from "@/lib/agentTelegram";
 import { resetForwardDraft } from "@/lib/forwardDraft";
@@ -158,6 +159,7 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
   // «🗑 Удалить» / «Оставить» после /delete <ссылка> — вся логика, включая
   // проверку, что нажал агент, в src/lib/botMessageDelete.ts.
   if (await handleBotMessageDeleteCallback(query)) return;
+  if (await handleHandoffCallback(query)) return;
 
   if (data.startsWith(ISSUE_STATUS_PREFIX)) {
     const [issueId, status] = data.slice(ISSUE_STATUS_PREFIX.length).split(":");
@@ -280,6 +282,8 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
       await editMessageReplyMarkup(query.message.chat.id, query.message.message_id, null);
       await advanceReviewSession(String(query.message.chat.id));
     }
+    // Людей в команде не задано — второго шага нет, черновик сразу.
+    await startHandoff(issueId, query.from.id);
     return;
   }
 
@@ -325,6 +329,9 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
       await editMessageText(query.message.chat.id, query.message.message_id, `⚠️ ${summary}`, null);
       await advanceReviewSession(String(query.message.chat.id));
     }
+    // Черновик сообщения разработчикам — тому, кто нажал (если рубильник
+    // «Передача разработчикам» включён; иначе ничего не происходит).
+    await startHandoff(issueId, query.from.id);
     return;
   }
 
