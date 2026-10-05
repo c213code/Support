@@ -1284,19 +1284,37 @@ export async function writeHandoffBrief(params: {
 // телефоны модель не видит — во входе они замаскированы.
 const JIRA_BUG_TIMEOUT_MS = 15000;
 
-const JIRA_BUG_SYSTEM_PROMPT = `Ты помогаешь агенту поддержки онлайн-школы JUZ40 завести баг в Jira для разработчиков. Тебе дают описание тикета и сообщения куратора (обычно на казахском; почты и телефоны скрыты). Ответ — json.
+// Правила — из скилла «bug-report-writer», которым баги оформляют руками:
+// компонент, шаги воспроизведения, приоритет по влиянию, ничего не
+// выдумывать, элементы называть так, как называет куратор.
+const JIRA_BUG_SYSTEM_PROMPT = `Ты помогаешь агенту поддержки онлайн-школы JUZ40 завести баг в Jira для разработчиков: чётко, по делу, без воды. Тебе дают описание тикета и сообщения куратора (обычно на казахском; почты и телефоны скрыты). Ответ — json.
 
 Напиши по-русски:
-- summary: заголовок бага, одна строка до 100 символов — что сломано и где («Формула LaTeX не рендерится в мобильном приложении, отображается как сырой код»). Без тегов в квадратных скобках, без имён.
-- problem: «Описание проблемы» — 1-3 предложения: что делал пользователь, где (курс, урок, тест, экран — названия сохраняй как есть) и что пошло не так.
+- summary: заголовок, одно предложение до 100 символов — что сломано и где («Формула LaTeX не рендерится в мобильном приложении, отображается как сырой код»). Без тегов в квадратных скобках, без имён.
+- component: где баг — страница, экран, модуль, тест, курс («Домашнее задание в курсе SMART ШІЛДЕ 11 сынып», «Мобильное приложение, экран теста»). Пустая строка, если не понять.
+- problem: «Описание проблемы» — 2-4 предложения: что видит пользователь и чем это отличается от правильного поведения. Названия курсов, уроков, тестов, кнопок и текст ошибки сохраняй как есть.
+- steps: «Шаги воспроизведения» — массив коротких шагов, как дойти до ошибки. Правдоподобно по тому, что описано, но без выдуманных цифр, id и значений. Пустой массив, если по сообщениям шаги не понять.
 - actual: «Фактический результат» — что происходит сейчас, одной фразой.
 - expected: «Ожидаемый результат» — как должно быть, одной фразой.
+- priority: "low" — косметика; "medium" — неудобно, но работать можно; "high" — ломает основной сценарий (не открывается урок/тест, не засчитывается результат, не проходит оплата); "critical" — не работает у всех или массово, потеряны данные или деньги.
+- priorityReason: в нескольких словах, почему такой приоритет.
 
-Не выдумывай: чего нет в сообщениях (причин, технических деталей), того не пиши. Если ожидаемый результат не назван — опиши очевидно правильное поведение без подробностей.
+Элементы интерфейса называй так, как их называет куратор, даже если это неточно. Не выдумывай: чего нет в сообщениях (причин, технических деталей, чисел), того не пиши.
 
-Ответь строго json: {"summary":"...","problem":"...","actual":"...","expected":"..."}`;
+Ответь строго json: {"summary":"...","component":"...","problem":"...","steps":["..."],"actual":"...","expected":"...","priority":"medium","priorityReason":"..."}`;
 
-export type JiraBugDraft = { summary: string; problem: string; actual: string; expected: string };
+export type JiraPriority = "low" | "medium" | "high" | "critical";
+
+export type JiraBugDraft = {
+  summary: string;
+  component: string;
+  problem: string;
+  steps: string[];
+  actual: string;
+  expected: string;
+  priority: JiraPriority;
+  priorityReason: string;
+};
 
 export async function writeJiraBug(params: {
   description: string;
@@ -1311,7 +1329,7 @@ export async function writeJiraBug(params: {
       {
         model: GROQ_MODEL,
         temperature: 0,
-        max_tokens: 1200,
+        max_tokens: 1600,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: JIRA_BUG_SYSTEM_PROMPT + (await buildAiContext(input)) },
@@ -1328,11 +1346,20 @@ export async function writeJiraBug(params: {
     }
     const parsed = JSON.parse(content) as Partial<Record<keyof JiraBugDraft, unknown>>;
     const pick = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-    const draft = {
+    const priority = pick(parsed.priority).toLowerCase();
+    const draft: JiraBugDraft = {
       summary: pick(parsed.summary),
+      component: pick(parsed.component),
       problem: pick(parsed.problem),
+      steps: Array.isArray(parsed.steps)
+        ? parsed.steps.map(pick).filter(Boolean).slice(0, 10)
+        : [],
       actual: pick(parsed.actual),
       expected: pick(parsed.expected),
+      priority: (["low", "medium", "high", "critical"] as const).includes(priority as JiraPriority)
+        ? (priority as JiraPriority)
+        : "medium",
+      priorityReason: pick(parsed.priorityReason),
     };
     if (!draft.summary || !draft.problem) {
       console.warn("[groq] writeJiraBug: в json нет summary/problem");

@@ -5,16 +5,28 @@ import type { EscalationTeam } from "@/lib/escalation";
 import { Modal } from "@/components/Modal";
 
 type JiraUser = { accountId: string; displayName: string };
+type Priority = "low" | "medium" | "high" | "critical";
 type Draft = {
   summary: string;
+  component: string;
   problem: string;
+  steps: string;
   actual: string;
   expected: string;
+  priority: Priority;
+  priorityReason: string;
   telegramLink: string | null;
   photoCount: number;
   aiFailed: boolean;
 };
 export type CreatedBug = { key: string; url: string; sprint: string | null; attached: number; warnings: string[] };
+
+const PRIORITY_LABEL: Record<Priority, string> = {
+  low: "Низкий",
+  medium: "Средний",
+  high: "Высокий",
+  critical: "Критический",
+};
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
@@ -87,9 +99,12 @@ export function JiraBugDialog({
           team,
           assignee,
           summary: draft.summary,
+          component: draft.component,
           problem: draft.problem,
+          steps: draft.steps,
           actual: draft.actual,
           expected: draft.expected,
+          priority: draft.priority,
           telegramLink: draft.telegramLink,
           accountId: user?.accountId ?? null,
           displayName: user?.displayName ?? null,
@@ -139,12 +154,50 @@ export function JiraBugDialog({
                 className={inputClass}
               />
             </label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_11rem]">
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-slate-500">Компонент</span>
+                <input
+                  value={draft.component}
+                  onChange={(e) => update("component", e.target.value)}
+                  placeholder="Страница, экран, тест"
+                  className={inputClass}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-slate-500">Приоритет</span>
+                <select
+                  value={draft.priority}
+                  onChange={(e) => update("priority", e.target.value as Priority)}
+                  className={inputClass}
+                >
+                  {(Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => (
+                    <option key={p} value={p}>
+                      {PRIORITY_LABEL[p]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {draft.priorityReason && (
+              <p className="-mt-1 text-[11px] text-slate-400">ИИ: {draft.priorityReason}</p>
+            )}
             <label className="block space-y-1">
               <span className="text-xs font-medium text-slate-500">Описание проблемы</span>
               <textarea
                 value={draft.problem}
                 onChange={(e) => update("problem", e.target.value)}
-                rows={3}
+                rows={4}
+                className={inputClass}
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-slate-500">Шаги воспроизведения — по одному в строке</span>
+              <textarea
+                value={draft.steps}
+                onChange={(e) => update("steps", e.target.value)}
+                rows={4}
+                placeholder={"Открыть курс…\nПерейти в урок…\nНажать…"}
                 className={inputClass}
               />
             </label>
@@ -200,7 +253,7 @@ export function JiraBugDialog({
               </label>
             </div>
             <p className="text-xs text-slate-400">
-              Bug · Medium · в активный спринт
+              Bug · в активный спринт
               {draft.photoCount > 0 ? ` · скриншотов приложим: ${draft.photoCount}` : " · скриншотов нет"}
             </p>
           </>

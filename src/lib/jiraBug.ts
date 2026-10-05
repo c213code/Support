@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { EscalationTeam } from "@/lib/escalation";
 import { teamMembers } from "@/lib/devTeams";
-import { writeJiraBug } from "@/lib/ai";
+import { writeJiraBug, type JiraPriority } from "@/lib/ai";
 import { curatorTextFor, linkOptionsFor, seriesRows, submissionPostLink } from "@/lib/handoffDraft";
 import type { JiraUser } from "@/lib/jira";
 
@@ -46,9 +46,14 @@ export async function bugPhotoFileIds(issueId: string): Promise<string[]> {
 
 export type BugDraft = {
   summary: string;
+  component: string;
   problem: string;
+  // Шаги — построчно: так их удобно править в одном поле.
+  steps: string;
   actual: string;
   expected: string;
+  priority: JiraPriority;
+  priorityReason: string;
   telegramLink: string | null;
   photoCount: number;
   aiFailed: boolean;
@@ -77,9 +82,13 @@ export async function prepareBugDraft(issueId: string, team: EscalationTeam): Pr
   });
   return {
     summary: taggedSummary(team, ai?.summary ?? issue.description),
+    component: ai?.component ?? "",
     problem: ai?.problem ?? issue.description,
+    steps: (ai?.steps ?? []).join("\n"),
     actual: ai?.actual ?? "",
     expected: ai?.expected ?? "",
+    priority: ai?.priority ?? "medium",
+    priorityReason: ai?.priorityReason ?? "",
     // Та же ссылка, что первой предлагается разработчику: сообщение со
     // скриншотом, если оно есть.
     telegramLink: linkOptionsFor(issue, series, postLink)[0] ?? null,

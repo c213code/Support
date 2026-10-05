@@ -4,9 +4,13 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentIdentity } from "@/lib/auth";
 import { isEscalationTeam } from "@/lib/escalation";
 import { createJiraBug, jiraConfigured, JiraError } from "@/lib/jira";
+import type { JiraPriority } from "@/lib/ai";
 import { bugPhotoFileIds, jiraTeamTag, rememberJiraAccount, taggedSummary } from "@/lib/jiraBug";
 
 type Params = { params: Promise<{ id: string }> };
+
+const isPriority = (v: unknown): v is JiraPriority =>
+  v === "low" || v === "medium" || v === "high" || v === "critical";
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
@@ -43,9 +47,18 @@ export async function POST(request: NextRequest, { params }: Params) {
     const created = await createJiraBug({
       fields: {
         summary: taggedSummary(body.team, summary),
+        component: str(body.component, 300),
         problem,
+        // Шаги приходят построчно из одного поля; «1.», «2)» в начале строки
+        // убираем — нумерует сам список в Jira.
+        steps: str(body.steps, 3000)
+          .split("\n")
+          .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
+          .filter(Boolean)
+          .slice(0, 15),
         actual: str(body.actual, 3000),
         expected: str(body.expected, 3000),
+        priority: isPriority(body.priority) ? body.priority : "medium",
         telegramLink: str(body.telegramLink, 300) || null,
       },
       assigneeAccountId: accountId,

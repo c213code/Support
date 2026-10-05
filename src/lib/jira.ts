@@ -1,4 +1,5 @@
 import { getFileDownloadUrl } from "@/lib/telegram";
+import type { JiraPriority } from "@/lib/ai";
 
 // Баг в Jira из тикета поддержки (кнопка «🐞 Баг в Jira» в окне «Передать»).
 //
@@ -123,15 +124,41 @@ function section(title: string, body: string): AdfNode[] {
 
 export type JiraBugFields = {
   summary: string;
+  component: string;
   problem: string;
+  steps: string[];
   actual: string;
   expected: string;
+  priority: JiraPriority;
   telegramLink: string | null;
 };
 
+// Названия приоритетов в Jira (стандартная схема). Не та схема в проекте —
+// баг всё равно заведётся, с Medium (см. createJiraBug).
+const PRIORITY_NAME: Record<JiraPriority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  critical: "Highest",
+};
+
+function stepsList(steps: string[]): AdfNode[] {
+  const items = steps.map((s) => s.trim()).filter(Boolean);
+  if (items.length === 0) return [];
+  return [
+    paragraph(textNode("Шаги воспроизведения:", true)),
+    {
+      type: "orderedList",
+      content: items.map((item) => ({ type: "listItem", content: [paragraph(textNode(item))] })),
+    },
+  ];
+}
+
 export function bugDescription(f: JiraBugFields): AdfNode {
   const content: AdfNode[] = [
+    ...section("Компонент:", f.component),
     ...section("Описание проблемы:", f.problem),
+    ...stepsList(f.steps),
     ...section("Фактический результат:", f.actual),
     ...section("Ожидаемый результат:", f.expected),
   ];
@@ -177,21 +204,34 @@ export async function createJiraBug(params: {
   assigneeAccountId: string | null;
   photoFileIds: string[];
 }): Promise<CreatedBug> {
-  const created = await jiraFetch<{ key: string }>("/rest/api/3/issue", {
-    method: "POST",
-    body: JSON.stringify({
-      fields: {
-        project: { key: jiraProject() },
-        issuetype: { name: "Bug" },
-        summary: params.fields.summary.slice(0, 250),
-        description: bugDescription(params.fields),
-        priority: { name: "Medium" },
-        ...(params.assigneeAccountId ? { assignee: { accountId: params.assigneeAccountId } } : {}),
-      },
-    }),
-  });
+  const create = (priority: string) =>
+    jiraFetch<{ key: string }>("/rest/api/3/issue", {
+      method: "POST",
+      body: JSON.stringify({
+        fields: {
+          project: { key: jiraProject() },
+          issuetype: { name: "Bug" },
+          summary: params.fields.summary.slice(0, 250),
+          description: bugDescription(params.fields),
+          priority: { name: priority },
+          ...(params.assigneeAccountId ? { assignee: { accountId: params.assigneeAccountId } } : {}),
+        },
+      }),
+    });
 
   const warnings: string[] = [];
+  const wanted = PRIORITY_NAME[params.fields.priority] ?? "Medium";
+  let created: { key: string };
+  try {
+    created = await create(wanted);
+  } catch (err) {
+    // В проекте своя схема приоритетов — заводим с Medium, как раньше, и
+    // говорим об этом, а не теряем баг.
+    if (wanted === "Medium" || !(err instanceof JiraError) || !/priority/i.test(err.message)) throw err;
+    created = await create("Medium");
+    warnings.push(`приоритет «${wanted}» Jira не приняла — поставлен Medium`);
+  }
+
   let sprint: string | null = null;
   try {
     const active = await activeSprint();
