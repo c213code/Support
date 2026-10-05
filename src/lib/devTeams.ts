@@ -19,14 +19,33 @@ export type DevMember = {
   lead: boolean;
 };
 
+// Запись, которую не смогли разобрать, раньше пропадала молча — 05.10 так
+// из окна «Передать» пропал Еркебулан, первый в списке. Если вставить в
+// значение на Vercel строку целиком («DEV_TEAM_MEMBERS=Product:…») или с
+// кавычками, первая запись читается с чужой командой и отбрасывается. Такой
+// префикс и кавычки срезаем, а остальное непонятное пишем в лог — по одному
+// разу на запись, а не на каждый запрос.
+const warnedEntries = new Set<string>();
+
 export function devTeamMembers(): DevMember[] {
-  const raw = process.env[DEV_TEAM_MEMBERS_ENV] ?? "";
+  const raw = (process.env[DEV_TEAM_MEMBERS_ENV] ?? "")
+    .trim()
+    .replace(new RegExp(`^${DEV_TEAM_MEMBERS_ENV}\\s*=\\s*`), "")
+    .replace(/^["']|["']$/g, "");
   return raw
     .split(",")
-    .map((entry) => entry.split(":").map((part) => part.trim()))
-    .flatMap(([team, name, idStr, flag]) => {
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .flatMap((entry) => {
+      const [team, name, idStr, flag] = entry.split(":").map((part) => part.trim());
       const telegramId = Number(idStr);
       if (!isEscalationTeam(team) || !name || !Number.isFinite(telegramId) || telegramId === 0) {
+        if (!warnedEntries.has(entry)) {
+          warnedEntries.add(entry);
+          console.warn(
+            `[devTeams] ${DEV_TEAM_MEMBERS_ENV}: не разобрана запись «${entry}» — нужно «Команда:Имя:telegramId[:lead]», команда из ESCALATION_TEAMS`
+          );
+        }
         return [];
       }
       return [{ team, name, telegramId, lead: flag?.toLowerCase() === "lead" }];
