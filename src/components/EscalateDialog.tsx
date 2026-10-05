@@ -10,6 +10,7 @@ import {
 import { useDevTeams } from "@/lib/useDevTeams";
 import { Modal } from "@/components/Modal";
 import { AssigneePicker } from "@/components/AssigneePicker";
+import { JiraBugDialog } from "@/components/JiraBugDialog";
 import { IconSend } from "@/components/Icons";
 
 export type EscalateValues = {
@@ -42,7 +43,14 @@ export function EscalateDialog({
   const [noteTouched, setNoteTouched] = useState(Boolean(issue.note?.trim()));
   const [saving, setSaving] = useState(false);
   const assigneeRef = useRef<HTMLInputElement>(null);
-  const devTeams = useDevTeams();
+  const { teams: devTeams, jiraEnabled } = useDevTeams();
+  // Баг в Jira заводят до передачи — тогда ссылка на него уже есть и в
+  // сообщении разработчику, и в репорте. У продукта багов не бывает.
+  const [jiraOpen, setJiraOpen] = useState(false);
+  const [jiraLink, setJiraLink] = useState(issue.ticketLink);
+  // Что после создания бага не вышло: спринт, часть скриншотов.
+  const [jiraWarnings, setJiraWarnings] = useState<string[]>([]);
+  const canCreateBug = jiraEnabled && team !== "Product";
 
   // Пока заметку не тронули руками — держим её синхронной с выбранной
   // командой ("Передано: Backend (Аян)"), чтобы в репорте сразу было видно
@@ -143,6 +151,30 @@ export function EscalateDialog({
           />
         </div>
 
+        {jiraLink ? (
+          <a
+            href={jiraLink}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+          >
+            🐞 Jira: {jiraLink.split("/").pop()}
+            {jiraWarnings.length > 0 && (
+              <span className="font-normal text-amber-700"> · {jiraWarnings.join("; ")}</span>
+            )}
+          </a>
+        ) : (
+          canCreateBug && (
+            <button
+              type="button"
+              onClick={() => setJiraOpen(true)}
+              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-100"
+            >
+              🐞 Баг в Jira
+            </button>
+          )
+        )}
+
         <div className="space-y-1">
           <label
             htmlFor="escalate-note"
@@ -192,6 +224,19 @@ export function EscalateDialog({
           </button>
         </div>
       </form>
+      {jiraOpen && (
+        <JiraBugDialog
+          issueId={issue.id}
+          team={team}
+          assignee={assignee.trim()}
+          onCancel={() => setJiraOpen(false)}
+          onCreated={(bug) => {
+            setJiraLink(bug.url);
+            setJiraWarnings(bug.warnings);
+            setJiraOpen(false);
+          }}
+        />
+      )}
     </Modal>
   );
 }

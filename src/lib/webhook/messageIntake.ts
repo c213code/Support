@@ -21,6 +21,7 @@ import {
   buildMessageLink,
   extractAuthorName,
   hasMediaAttachment,
+  largestPhotoFileId,
   sendTelegramMessage,
   type TelegramMessagePayload,
 } from "@/lib/telegram";
@@ -252,6 +253,7 @@ export async function attachReplyToBotMessage(
       replyToMessageId: message.reply_to_message?.message_id ?? null,
       messageLink,
       hasMedia: hasMediaAttachment(message),
+      photoFileId: largestPhotoFileId(message) ?? null,
       usedForIssueId: issue.id,
       archived: true,
       viewed: true,
@@ -472,6 +474,7 @@ export async function attachFollowUpToTicket(
         replyToMessageId: message.reply_to_message?.message_id ?? null,
         messageLink,
         hasMedia: hasMediaAttachment(message),
+        photoFileId: largestPhotoFileId(message) ?? null,
         usedForIssueId: issue.id,
         archived: true,
         viewed: true,

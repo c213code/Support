@@ -88,12 +88,13 @@ async function findManualHandoff(issueId: string, since: Date): Promise<string |
   return null;
 }
 
-type SeriesRow = {
+export type SeriesRow = {
   chatId: string;
   messageId: number;
   fromId: bigint | null;
   receivedAt: Date;
   hasMedia: boolean;
+  photoFileId: string | null;
   messageLink: string;
   text: string | null;
 };
@@ -103,13 +104,14 @@ type SeriesRow = {
 // ученика → «тапсырмалар ашылмайды». Тикет заводится по первому, а суть,
 // скрин и почта часто лежат в непривязанных: пришли раньше, чем тикет
 // завёлся. Без них разработчику уходило бы одно приветствие.
-async function seriesRows(issueId: string): Promise<SeriesRow[]> {
+export async function seriesRows(issueId: string): Promise<SeriesRow[]> {
   const select = {
     chatId: true,
     messageId: true,
     fromId: true,
     receivedAt: true,
     hasMedia: true,
+    photoFileId: true,
     messageLink: true,
     text: true,
   } as const;
@@ -140,7 +142,7 @@ async function seriesRows(issueId: string): Promise<SeriesRow[]> {
 }
 
 // Какие ссылки предложить разработчику — по порядку полезности.
-function linkOptionsFor(
+export function linkOptionsFor(
   issue: { id: string; telegramLink: string | null },
   series: SeriesRow[],
   postLink: string | null
@@ -152,7 +154,7 @@ function linkOptionsFor(
   return Array.from(new Set(all)).slice(0, MAX_LINK_OPTIONS);
 }
 
-async function submissionPostLink(issueId: string): Promise<string | null> {
+export async function submissionPostLink(issueId: string): Promise<string | null> {
   const post = await prisma.botReply.findFirst({
     where: { issueId, deleted: false, kind: "SUBMISSION" },
     orderBy: { sentAt: "asc" },
@@ -236,7 +238,7 @@ type Submission = { rawText: string; studentContact: string } | null;
 
 // Текст куратора для модели: серия сообщений и заявка из формы, без почт и
 // телефонов (модель внешняя).
-function curatorTextFor(series: SeriesRow[], submission: Submission): string {
+export function curatorTextFor(series: SeriesRow[], submission: Submission): string {
   const texts = [submission?.rawText, ...series.map((m) => m.text)].filter(
     (t): t is string => Boolean(t)
   );

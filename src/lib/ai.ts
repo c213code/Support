@@ -1278,6 +1278,73 @@ export async function writeHandoffBrief(params: {
   }
 }
 
+// Черновик бага в Jira (lib/jira.ts, кнопка «🐞 Баг в Jira»): заголовок и
+// три раздела шаблона, которым баги заводят руками (DV-7648). Язык — русский,
+// как в Jira. Тег «[BUG][BACK]» ставит код по команде, а не модель; почты и
+// телефоны модель не видит — во входе они замаскированы.
+const JIRA_BUG_TIMEOUT_MS = 15000;
+
+const JIRA_BUG_SYSTEM_PROMPT = `Ты помогаешь агенту поддержки онлайн-школы JUZ40 завести баг в Jira для разработчиков. Тебе дают описание тикета и сообщения куратора (обычно на казахском; почты и телефоны скрыты). Ответ — json.
+
+Напиши по-русски:
+- summary: заголовок бага, одна строка до 100 символов — что сломано и где («Формула LaTeX не рендерится в мобильном приложении, отображается как сырой код»). Без тегов в квадратных скобках, без имён.
+- problem: «Описание проблемы» — 1-3 предложения: что делал пользователь, где (курс, урок, тест, экран — названия сохраняй как есть) и что пошло не так.
+- actual: «Фактический результат» — что происходит сейчас, одной фразой.
+- expected: «Ожидаемый результат» — как должно быть, одной фразой.
+
+Не выдумывай: чего нет в сообщениях (причин, технических деталей), того не пиши. Если ожидаемый результат не назван — опиши очевидно правильное поведение без подробностей.
+
+Ответь строго json: {"summary":"...","problem":"...","actual":"...","expected":"..."}`;
+
+export type JiraBugDraft = { summary: string; problem: string; actual: string; expected: string };
+
+export async function writeJiraBug(params: {
+  description: string;
+  curatorText: string;
+  team: string;
+}): Promise<JiraBugDraft | null> {
+  if (groqApiKeys().length === 0) return null;
+  const input = `Команда: ${params.team}\nОписание тикета: ${params.description}\nСообщения куратора:\n${params.curatorText}`;
+
+  try {
+    const data = (await callGroqChat(
+      {
+        model: GROQ_MODEL,
+        temperature: 0,
+        max_tokens: 1200,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: JIRA_BUG_SYSTEM_PROMPT + (await buildAiContext(input)) },
+          { role: "user", content: input },
+        ],
+      },
+      JIRA_BUG_TIMEOUT_MS
+    )) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      console.warn("[groq] writeJiraBug: ответ без content");
+      return null;
+    }
+    const parsed = JSON.parse(content) as Partial<Record<keyof JiraBugDraft, unknown>>;
+    const pick = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const draft = {
+      summary: pick(parsed.summary),
+      problem: pick(parsed.problem),
+      actual: pick(parsed.actual),
+      expected: pick(parsed.expected),
+    };
+    if (!draft.summary || !draft.problem) {
+      console.warn("[groq] writeJiraBug: в json нет summary/problem");
+      return null;
+    }
+    return draft;
+  } catch (err) {
+    console.warn(`[groq] writeJiraBug упал: ${String(err).slice(0, 300)}`);
+    return null;
+  }
+}
+
 // Живая проверка Groq по кнопке в панели "⚡ Groq". Все ИИ-функции этого
 // проекта по дизайну молча откатываются на fallback при любой ошибке модели
 // (ключ/квота/снятая модель/пустой content из-за reasoning_effort — см.

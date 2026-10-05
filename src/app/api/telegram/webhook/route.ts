@@ -38,6 +38,7 @@ import {
   captionAttachmentMarker,
   extractText,
   hasMediaAttachment,
+  largestPhotoFileId,
   isOwnAgentMessage,
   sendTelegramMessage,
   type TelegramUpdate,
@@ -565,6 +566,7 @@ export async function POST(request: NextRequest) {
         replyToMessageId: message.reply_to_message?.message_id ?? null,
         messageLink,
         hasMedia: hasMediaAttachment(message),
+        photoFileId: largestPhotoFileId(message) ?? null,
         // Своя строка серии тоже помнит пропуск. Без этого память жила
         // ровно одно сообщение: третья фраза подряд находила эту строку
         // как "последнее сообщение автора", видела в ней пропуск = false и
@@ -597,6 +599,7 @@ export async function POST(request: NextRequest) {
       replyToMessageId: message.reply_to_message?.message_id ?? null,
       messageLink,
       hasMedia: hasMediaAttachment(message),
+      photoFileId: largestPhotoFileId(message) ?? null,
       // Запоминаем решение, а не только применяем его: следующее сообщение
       // этого же человека склеится с этим, и там о пропуске нужно знать.
       skippedAutoIssue: skipAutoCreate,

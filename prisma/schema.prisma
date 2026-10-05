@@ -77,6 +77,9 @@ model TelegramMessage {
   // подпись к скриншоту хранится без пометки. Нужно передаче разработчикам —
   // им ссылка на сообщение со скриншотом полезнее первого «Сәлеметсіз бе».
   hasMedia         Boolean  @default(false)
+  // Telegram file_id самого крупного размера фото — чтобы приложить скриншот
+  // куратора к багу в Jira (lib/jira.ts). Сами байты хранит Telegram.
+  photoFileId      String?
   // @username автора — только из чата разработчиков. Агенты отмечают
   // разработчика через @username, а в DEV_TEAM_MEMBERS лежат Telegram-id:
   // по своим же сохранённым сообщениям бот узнаёт, чей это username, без
@@ -385,6 +388,17 @@ model PendingHandoff {
   createdAt    DateTime @default(now())
 
   @@unique([chatId, messageId])
+}
+
+// Чей это аккаунт в Jira: разработчик из DEV_TEAM_MEMBERS (по Telegram-id)
+// → его accountId. Имена не совпадают («Іңкәр» у нас, «Inkar Tolegen» в
+// Jira), поэтому сопоставление запоминается, когда агент первый раз выбирает
+// исполнителя бага, — дальше подставляется само.
+model DevJiraAccount {
+  telegramId  BigInt   @id
+  accountId   String
+  displayName String
+  updatedAt   DateTime @updatedAt
 }
 
 model ReviewSession {

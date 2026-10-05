@@ -131,7 +131,7 @@ export function IssueForm({
   const [escalatedTeam, setEscalatedTeam] = useState<EscalationTeam | "">(
     (initial?.escalatedTeam as EscalationTeam | null) ?? ""
   );
-  const devTeams = useDevTeams();
+  const { teams: devTeams } = useDevTeams();
   const [escalatedAssignee, setEscalatedAssignee] = useState(
     initial?.escalatedAssignee ?? ""
   );
