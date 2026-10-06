@@ -16,6 +16,7 @@ export type BotReplyKind =
   | "FOLLOW_UP"
   | "IN_PROGRESS"
   | "PENDING"
+  | "NEXT_DAY"
   | "ESCALATED"
   | "RESOLVED";
 

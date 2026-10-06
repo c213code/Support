@@ -343,7 +343,7 @@ export async function stepRun(runId: string): Promise<{ remaining: number }> {
 
 // Статусы, которые разбор может поставить сам. «Передано» — нет: для него
 // нужна команда, а её из чата надёжно не вытащить. «Непонятно» — не статус.
-const APPLICABLE = new Set<IssueStatus>(["RESOLVED", "IN_PROGRESS", "PENDING"]);
+const APPLICABLE = new Set<IssueStatus>(["RESOLVED", "IN_PROGRESS", "PENDING", "NEXT_DAY"]);
 
 export type ApplyOutcome = { verdictId: string; applied: boolean; reason?: string };
 

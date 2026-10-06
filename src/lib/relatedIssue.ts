@@ -29,7 +29,7 @@ const WINDOW_MINUTES = 30;
 // сам.
 const MIN_SIMILARITY = 0.15;
 
-const OPEN_STATUSES = ["SENT", "IN_PROGRESS", "PENDING"] as const;
+const OPEN_STATUSES = ["SENT", "IN_PROGRESS", "PENDING", "NEXT_DAY"] as const;
 
 export type RelatedIssue = {
   id: string;

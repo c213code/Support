@@ -100,10 +100,11 @@ export function generateReportText(
       }
       const meta = STATUS_META[issue.status];
       const statusEmoji = meta.reportEmoji;
-      const noteText =
-        issue.note && issue.note.trim().length > 0
-          ? issue.note.trim()
-          : meta.defaultNote;
+      // Заметка могла остаться от предыдущего статуса; для перенесённого
+      // обращения в отчёте за вчера нужна именно формулировка на сегодня.
+      const noteText = issue.status === "NEXT_DAY"
+        ? meta.defaultNote
+        : issue.note?.trim() || meta.defaultNote;
       const ticketPart = issue.ticketLink ? ` ${issue.ticketLink}` : "";
       lines.push(`Статус: ${noteText}${ticketPart}${statusEmoji}`);
       lines.push("");

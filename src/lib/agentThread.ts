@@ -43,7 +43,7 @@ export type AgentTarget =
 
 // Статусы, при которых тикет ещё "живой": закрытые в кандидаты не берём,
 // иначе реплика по новому обращению уедет в решённое вчера.
-const OPEN_STATUSES = ["SENT", "IN_PROGRESS", "PENDING", "ESCALATED"] as const;
+const OPEN_STATUSES = ["SENT", "IN_PROGRESS", "PENDING", "NEXT_DAY", "ESCALATED"] as const;
 
 export async function resolveAgentTarget(params: {
   chatId: string;

@@ -52,12 +52,13 @@ type Run = {
   verdicts: Verdict[];
 };
 
-const APPLICABLE = new Set(["RESOLVED", "IN_PROGRESS", "PENDING"]);
+const APPLICABLE = new Set(["RESOLVED", "IN_PROGRESS", "PENDING", "NEXT_DAY"]);
 
 const PROPOSED_LABEL: Record<string, string> = {
   RESOLVED: "✅ Решено",
   IN_PROGRESS: "🔄 В работе",
   PENDING: "⚠️ Пендинг",
+  NEXT_DAY: "📅 На завтра",
   ESCALATED: "📤 Передано",
   UNCLEAR: "❔ Непонятно",
 };
@@ -87,6 +88,7 @@ const CHOICES: { value: IssueStatus; label: string }[] = [
   { value: "RESOLVED", label: "✅ Решено" },
   { value: "IN_PROGRESS", label: "🔄 В работе" },
   { value: "PENDING", label: "⚠️ Пендинг" },
+  { value: "NEXT_DAY", label: "📅 На завтра" },
 ];
 const ESCALATE = "ESCALATE";
 
@@ -140,6 +142,7 @@ function runSummary(run: Run): string {
     `решено ${count("RESOLVED")}`,
     `в работе ${count("IN_PROGRESS")}`,
     `ждём ${count("PENDING")}`,
+    `на завтра ${count("NEXT_DAY")}`,
     `непонятно ${count("UNCLEAR")}`,
     `применено ${applied}`,
   ].join(" · ");

@@ -123,6 +123,7 @@ const STATUS_REPLY_REPLACE_MS = 5 * 60 * 1000;
 const STATUS_REPLY_KINDS: string[] = [
   "IN_PROGRESS",
   "PENDING",
+  "NEXT_DAY",
   "ESCALATED",
   "SENT",
   "FOLLOW_UP",

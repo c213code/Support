@@ -43,8 +43,8 @@ const COLUMNS: Column[] = [
   },
   {
     key: "active",
-    title: "В работе / Пендинг",
-    statuses: ["IN_PROGRESS", "PENDING", "ESCALATED"],
+    title: "В работе / Пендинг / На завтра",
+    statuses: ["IN_PROGRESS", "PENDING", "NEXT_DAY", "ESCALATED"],
     dropStatus: "IN_PROGRESS",
     dot: "bg-sky-400",
   },
@@ -80,6 +80,7 @@ const STALL_HOURS = 3;
 const MOBILE_MOVES: Record<Column["key"], ReadonlyArray<{ status: IssueStatus; label: string }>> = {
   sent: [
     { status: "IN_PROGRESS", label: "В работу" },
+    { status: "NEXT_DAY", label: "На завтра" },
     { status: "RESOLVED", label: "Решено" },
   ],
   active: [{ status: "RESOLVED", label: "Решено" }],
@@ -536,7 +537,7 @@ export function KanbanBoard({
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                       {column.key === "active" ? (
                         <div className="flex flex-wrap gap-1">
-                          {(["IN_PROGRESS", "PENDING"] as const).map((s) => (
+                          {(["IN_PROGRESS", "PENDING", "NEXT_DAY"] as const).map((s) => (
                             <button
                               key={s}
                               onClick={() => onStatusChange(issue, s)}

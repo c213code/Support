@@ -756,6 +756,7 @@ export function Inbox() {
         (i) =>
           i.status === "IN_PROGRESS" ||
           i.status === "PENDING" ||
+          i.status === "NEXT_DAY" ||
           i.status === "ESCALATED"
       ).length,
       resolved: issues.filter((i) => i.status === "RESOLVED").length,

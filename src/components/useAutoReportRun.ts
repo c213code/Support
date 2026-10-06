@@ -13,6 +13,7 @@ export type RunCounts = {
   resolved: number;
   inProgress: number;
   pending: number;
+  nextDay: number;
   unclear: number;
   skipped: number;
   error: number;
@@ -37,7 +38,7 @@ const STEP_POLL_MS = 1500;
 const STEP_TIMEOUT_MS = 330_000;
 
 export function countVerdicts(verdicts: VerdictLite[]): { done: number; counts: RunCounts } {
-  const counts: RunCounts = { resolved: 0, inProgress: 0, pending: 0, unclear: 0, skipped: 0, error: 0 };
+  const counts: RunCounts = { resolved: 0, inProgress: 0, pending: 0, nextDay: 0, unclear: 0, skipped: 0, error: 0 };
   for (const v of verdicts) {
     if (v.state === "skipped") counts.skipped++;
     else if (v.state === "error") counts.error++;
@@ -45,6 +46,7 @@ export function countVerdicts(verdicts: VerdictLite[]): { done: number; counts: 
       if (v.proposed === "RESOLVED") counts.resolved++;
       else if (v.proposed === "IN_PROGRESS" || v.proposed === "ESCALATED") counts.inProgress++;
       else if (v.proposed === "PENDING") counts.pending++;
+      else if (v.proposed === "NEXT_DAY") counts.nextDay++;
       else counts.unclear++;
     }
   }

@@ -32,6 +32,7 @@ export function ReportLedger({
     (i) =>
       i.status === "IN_PROGRESS" ||
       i.status === "PENDING" ||
+      i.status === "NEXT_DAY" ||
       i.status === "ESCALATED"
   ).length;
 

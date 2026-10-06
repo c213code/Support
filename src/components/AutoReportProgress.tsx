@@ -11,6 +11,7 @@ const SEGMENTS: { key: keyof RunCounts; label: string; color: string }[] = [
   { key: "resolved", label: "решено", color: "bg-emerald-500" },
   { key: "inProgress", label: "в работе", color: "bg-sky-500" },
   { key: "pending", label: "ждём", color: "bg-amber-400" },
+  { key: "nextDay", label: "на завтра", color: "bg-indigo-400" },
   { key: "unclear", label: "непонятно", color: "bg-slate-400" },
   { key: "skipped", label: "пропущено", color: "bg-slate-300" },
   { key: "error", label: "ошибка", color: "bg-rose-500" },

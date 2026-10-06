@@ -1,6 +1,7 @@
 export const ISSUE_STATUSES = [
   "PENDING",
   "IN_PROGRESS",
+  "NEXT_DAY",
   "ESCALATED",
   "SENT",
   "RESOLVED",
@@ -56,6 +57,18 @@ export const STATUS_META: Record<IssueStatus, StatusMeta> = {
     active: "border-sky-500 bg-sky-50 text-sky-700 ring-1 ring-sky-200",
     idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
     bar: "border-l-sky-400",
+    reactionEmoji: "👀",
+  },
+  NEXT_DAY: {
+    label: "На завтра",
+    emoji: "📅",
+    reportEmoji: "⚠️",
+    // Репорт за вчера отправляют сегодня.
+    defaultNote: "Бүгін тағы да қарап көреміз",
+    badge: "bg-indigo-50 text-indigo-700",
+    active: "border-indigo-500 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
+    idle: "border-slate-200 text-slate-500 hover:bg-slate-50",
+    bar: "border-l-indigo-400",
     reactionEmoji: "👀",
   },
   ESCALATED: {

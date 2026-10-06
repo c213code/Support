@@ -28,7 +28,7 @@ import {
   BOT_REPLIES_PREFIX,
 } from "@/lib/telegramCallbacks";
 
-const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "ESCALATED"]);
+const ACTIVE_STATUSES = new Set(["IN_PROGRESS", "PENDING", "NEXT_DAY", "ESCALATED"]);
 // Разбор по одному — только то, что реально ждёт первого действия
 // сегодня. ESCALATED уже передан другой команде (следить за этим — не
 // ежедневная задача дежурного, а RESOLVED и так не в очереди.
@@ -98,7 +98,7 @@ export async function buildReviewSummary(
 
   const header = [
     `🌙 Репорт — ${reportDate}`,
-    `📨 Отправлено: ${sentCount} · 🔄 В работе/Пендинг/Передано: ${activeCount} · ✅ Решено: ${resolvedCount}`,
+    `📨 Отправлено: ${sentCount} · 🔄 В работе/Пендинг/На завтра/Передано: ${activeCount} · ✅ Решено: ${resolvedCount}`,
     ...(stalled > 0
       ? [`⏳ Висят в работе больше ${STALL_HOURS} ч: ${stalled} — может, уже сделано?`]
       : []),
@@ -258,6 +258,12 @@ function buildTicketCard(
     // в тексте, который уйдёт боссам.
     { text: "✅ Решено", callback_data: `${ISSUE_RESOLVE_PREFIX}${issue.id}` },
   ];
+  if (issue.status !== "NEXT_DAY") {
+    secondRow.push({
+      text: "📅 На завтра",
+      callback_data: `${ISSUE_STATUS_PREFIX}${issue.id}:NEXT_DAY`,
+    });
+  }
   // Отдельной строкой и выше "Пропустить": если подсказка подошла, это
   // самое быстрое действие на карточке — одно нажатие вместо набора
   // заметки руками.

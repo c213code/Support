@@ -25,6 +25,7 @@ const STATUS_TONE: Record<IssueStatus, string> = {
   SENT: "var(--hint)",
   IN_PROGRESS: "var(--accent)",
   PENDING: "var(--accent)",
+  NEXT_DAY: "#6254d9",
   ESCALATED: "#e8890c",
   RESOLVED: "#31a24c",
 };

@@ -24,6 +24,7 @@ export const RECONCILE_STATUSES = [
   "RESOLVED",
   "IN_PROGRESS",
   "PENDING",
+  "NEXT_DAY",
   "ESCALATED",
   "UNCLEAR",
 ] as const;

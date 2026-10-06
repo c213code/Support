@@ -13,7 +13,7 @@ type ChatRun = {
 
 function reply(run: ChatRun): string {
   const checked = run.verdicts.filter((v) => v.state !== "pending").length;
-  const matched = run.verdicts.filter((v) => v.state === "done" && ["RESOLVED", "IN_PROGRESS", "PENDING"].includes(v.proposed ?? "")).length;
+  const matched = run.verdicts.filter((v) => v.state === "done" && ["RESOLVED", "IN_PROGRESS", "PENDING", "NEXT_DAY"].includes(v.proposed ?? "")).length;
   const applied = run.verdicts.filter((v) => v.appliedAt).length;
   const errors = run.verdicts.filter((v) => v.state === "error").length;
   const questions = [...new Set(run.verdicts.map((v) => v.reason).filter((reason): reason is string => Boolean(reason?.includes("?"))))].slice(0, 2);

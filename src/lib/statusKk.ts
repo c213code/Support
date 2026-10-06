@@ -20,6 +20,11 @@ export const STATUS_KK: Record<
     emoji: "⏳",
     notice: "Өтінішіңіз күтуде — жаңалық болса, хабарлаймыз",
   },
+  NEXT_DAY: {
+    label: "Келесі күнге қалдырылды",
+    emoji: "📅",
+    notice: "Өтінішіңізді қайта қараймыз",
+  },
   ESCALATED: {
     label: "Басқа командада",
     emoji: "⚠️",
