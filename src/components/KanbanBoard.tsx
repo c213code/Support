@@ -107,6 +107,7 @@ export function KanbanBoard({
   onBotReplyError,
   size = "compact",
   highlightId,
+  boardDate,
 }: {
   issues: IssueDTO[];
   onStatusChange: (issue: IssueDTO, status: IssueStatus) => void;
@@ -131,6 +132,9 @@ export function KanbanBoard({
   // кольцом на пару секунд, иначе после закрытия поиска непонятно, куда
   // смотреть на доске из трёх колонок.
   highlightId?: string | null;
+  // День доски: тикет с другой датой — «На завтра» с прошлого дня, его
+  // помечаем, откуда он (см. carryOver в GET /api/issues).
+  boardDate?: string;
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overColumn, setOverColumn] = useState<Column["key"] | null>(null);
@@ -259,10 +263,20 @@ export function KanbanBoard({
                     }`}
                   >
                     <div className="mb-1 flex items-start justify-between gap-2">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${color.bg} ${color.text}`}
-                      >
-                        {issue.groupName} {issue.groupEmoji}
+                      <span className="flex flex-wrap items-center gap-1">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${color.bg} ${color.text}`}
+                        >
+                          {issue.groupName} {issue.groupEmoji}
+                        </span>
+                        {boardDate && issue.reportDate !== boardDate && (
+                          <span
+                            title="Перенесён «На завтра» — в репорте остаётся за своим днём"
+                            className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700"
+                          >
+                            📅 с {issue.reportDate.slice(8, 10)}.{issue.reportDate.slice(5, 7)}
+                          </span>
+                        )}
                       </span>
                       {/* Кнопки проявляются на hover: три иконки на каждой из
                           пары десятков карточек создавали визуальный шум,

@@ -91,6 +91,9 @@ export function Inbox() {
   const [issuesByDate, setIssuesByDate] = useState<Record<string, IssueDTO[]>>({});
   const messages = messagesByDate[date] ?? NO_MESSAGES;
   const issues = issuesByDate[date] ?? NO_ISSUES;
+  // Без тикетов «На завтра» с прошлых дней, которые доска подтягивает к
+  // выбранному (carryOver): в репорт за этот день они не входят.
+  const dayIssues = useMemo(() => issues.filter((i) => i.reportDate === date), [issues, date]);
   // Опрос каждые 15 с приносит новый массив, даже если ничего не менялось;
   // окну «Авто-репорт» перечитывать журнал нужно, только когда тикеты
   // действительно сменили статус или исчезли (объединили, удалили).
@@ -179,7 +182,7 @@ export function Inbox() {
 
   const loadIssues = useCallback(
     async (d: string) => {
-      const data = await getJson<{ issues?: IssueDTO[] }>(`/api/issues?date=${d}`);
+      const data = await getJson<{ issues?: IssueDTO[] }>(`/api/issues?date=${d}&carryOver=1`);
       if (data) setIssuesByDate((prev) => ({ ...prev, [d]: data.issues ?? [] }));
     },
     [getJson]
@@ -1401,11 +1404,12 @@ export function Inbox() {
               onBotReplyError={(message) => toast(message, "error")}
               size="large"
               highlightId={highlightId}
+              boardDate={date}
             />
           )}
           </div>
           <aside className="hidden w-[320px] shrink-0 xl:block">
-            <ReportLedger issues={issues} groups={groups} date={date} />
+            <ReportLedger issues={dayIssues} groups={groups} date={date} />
           </aside>
         </div>
       )}
