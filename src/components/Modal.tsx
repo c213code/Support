@@ -25,7 +25,9 @@ export function Modal({
   onClose: () => void;
   children: React.ReactNode;
   labelledBy?: string;
-  size?: "md" | "lg" | "xl";
+  // wide — форма тикета: превью заявки из формы (ссылки, фото) и шесть
+  // статусов в 512px не помещались, кнопки переносились в две строки.
+  size?: "md" | "lg" | "wide" | "xl";
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -102,7 +104,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={`j40-pop-in w-full ${size === "xl" ? "max-w-5xl" : size === "lg" ? "max-w-lg" : "max-w-md"}`}
+        className={`j40-pop-in w-full ${size === "xl" ? "max-w-5xl" : size === "wide" ? "max-w-3xl" : size === "lg" ? "max-w-lg" : "max-w-md"}`}
       >
         {children}
       </div>

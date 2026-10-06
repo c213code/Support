@@ -1503,7 +1503,7 @@ export function Inbox() {
           const editingIssue = issues.find((i) => i.id === editingIssueId);
           if (!editingIssue) return null;
           return (
-            <Modal onClose={() => setEditingIssueId(null)} size="lg">
+            <Modal onClose={() => setEditingIssueId(null)} size="wide">
               <IssueForm
                 groups={groups}
                 currentAgent={currentAgent ?? ""}
@@ -1520,7 +1520,7 @@ export function Inbox() {
         })()}
 
       {addingNewIssue && (
-        <Modal onClose={() => setAddingNewIssue(false)} size="lg">
+        <Modal onClose={() => setAddingNewIssue(false)} size="wide">
           <IssueForm
             groups={groups}
             currentAgent={currentAgent ?? ""}

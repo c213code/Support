@@ -527,7 +527,7 @@ export function IssueForm({
 
       <div className="space-y-1">
         <label className="text-xs font-medium text-slate-500">Статус</label>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div className="flex flex-wrap gap-2">
           {ISSUE_STATUSES.map((s) => {
             const meta = STATUS_META[s];
             const selected = status === s;
@@ -536,7 +536,7 @@ export function IssueForm({
                 key={s}
                 type="button"
                 onClick={() => pickStatus(s)}
-                className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition ${
+                className={`whitespace-nowrap rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
                   selected ? meta.active : meta.idle
                 }`}
               >
