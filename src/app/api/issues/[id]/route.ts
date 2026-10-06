@@ -101,7 +101,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   // редактирования шлёт статус ESCALATED при каждом сохранении, и без этой
   // проверки любая правка текста заново предлагала бы передачу. После ответа
   // — ИИ пишет текст несколько секунд, окно ждать этого не должно.
+  //
+  // handoff: false — агент снял «Написать в чат разработчиков» в карточке:
+  // передал им сам, или у куратора пять одинаковых обращений, и разработчик
+  // по ссылке на одно увидит остальные рядом. Статус «Передано» при этом
+  // ставится как обычно.
   const escalationChanged =
+    body.handoff !== false &&
     nextStatus === "ESCALATED" &&
     (existing?.status !== "ESCALATED" ||
       (data.escalatedTeam !== undefined && data.escalatedTeam !== existing?.escalatedTeam) ||

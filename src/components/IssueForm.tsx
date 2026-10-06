@@ -21,6 +21,10 @@ export type IssueFormValues = {
   ticketLink: string;
   escalatedTeam: string;
   escalatedAssignee: string;
+  // false — передали, но черновик в чат разработчиков не готовить (см.
+  // PATCH /api/issues/[id]): агент уже написал им сам, или там уже висит
+  // такое же обращение того же куратора и разработчик увидит его рядом.
+  handoff?: boolean;
 };
 
 export type IssueFormInitial = Partial<{
@@ -135,6 +139,10 @@ export function IssueForm({
   const [escalatedAssignee, setEscalatedAssignee] = useState(
     initial?.escalatedAssignee ?? ""
   );
+  const [handoff, setHandoff] = useState(true);
+  // Рубильник передачи на всю команду: выключен — черновиков нет вообще, и
+  // переключатель на карточке ничего бы не значил.
+  const [handoffEnabled, setHandoffEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rewriting, setRewriting] = useState(false);
@@ -245,6 +253,31 @@ export function IssueForm({
     }
   }
 
+  // Черновик разработчикам готовится только на само действие «Передать»:
+  // тикет впервые стал «Передано» или сменились команда / человек. Обычное
+  // сохранение уже переданного тикета ничего им не пишет — и переключатель
+  // тогда не нужен.
+  const escalationChanges =
+    Boolean(initial?.id) &&
+    status === "ESCALATED" &&
+    (initial?.status !== "ESCALATED" ||
+      escalatedTeam !== (initial?.escalatedTeam ?? "") ||
+      escalatedAssignee.trim() !== (initial?.escalatedAssignee ?? ""));
+
+  useEffect(() => {
+    if (!escalationChanges) return;
+    let cancelled = false;
+    fetch("/api/settings/handoff")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled) setHandoffEnabled(data?.enabled === true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [escalationChanges]);
+
   function pickStatus(next: IssueStatus) {
     setStatus(next);
     if (next === "ESCALATED" && !escalatedTeam) {
@@ -309,6 +342,7 @@ export function IssueForm({
         ticketLink: ticketLink.trim(),
         escalatedTeam,
         escalatedAssignee: escalatedAssignee.trim(),
+        ...(escalationChanges && handoffEnabled ? { handoff } : {}),
       });
     } catch {
       setError("Не удалось сохранить, попробуйте ещё раз");
@@ -560,6 +594,22 @@ export function IssueForm({
               inputClassName={inputClass}
             />
           </div>
+          {escalationChanges && handoffEnabled && (
+            <label className="flex items-start gap-2 text-xs text-slate-600 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={handoff}
+                onChange={(e) => setHandoff(e.target.checked)}
+                className="mt-0.5 h-3.5 w-3.5 accent-orange-600"
+              />
+              <span>
+                Написать в чат разработчиков
+                <span className="block text-slate-400">
+                  Снимите, если уже передали сами или там уже есть такое же обращение этого куратора
+                </span>
+              </span>
+            </label>
+          )}
         </div>
       )}
 
