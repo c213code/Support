@@ -11,21 +11,17 @@ import { mentionsUntTest } from "@/lib/untResetRequest";
 import { platformEnabled } from "@/lib/platform";
 import { unreadReplyCounts } from "@/lib/submissionChat";
 import { describeFields, findLabel } from "@/lib/submissionLabels";
-import { dayRangeUtc, shiftDateString } from "@/lib/date";
+import { shiftDateString } from "@/lib/date";
 
 // Насколько далеко назад доска ищет тикеты «На завтра» — как и перенос
 // вчерашних в авто-разборе (CARRY_OVER_DAYS в reconcileRun.ts).
 const NEXT_DAY_CARRY_OVER_DAYS = 7;
 
 function carriedNextDay(date: string) {
-  const { start, end } = dayRangeUtc(date);
   return prisma.issue.findMany({
     where: {
       reportDate: { gte: shiftDateString(date, -NEXT_DAY_CARRY_OVER_DAYS), lt: date },
-      OR: [
-        { status: "NEXT_DAY" },
-        { events: { some: { from: "NEXT_DAY", at: { gte: start, lt: end } } } },
-      ],
+      status: "NEXT_DAY",
     },
     orderBy: [{ reportDate: "asc" }, { position: "asc" }],
   });
@@ -45,9 +41,8 @@ export async function GET(request: NextRequest) {
   // «На завтра» значит «посмотрим сегодня», но тикет остаётся за своим днём:
   // в репорте за вчера он и должен звучать «Бүгін тағы да қарап көреміз».
   // Поэтому доска (и только она — carryOver просит Inbox, репорты нет)
-  // подтягивает такие тикеты прошлых дней к выбранному. Ушедшие из «На
-  // завтра» в этот же день остаются на доске до конца дня — иначе карточка,
-  // которую только что перетащили в «Решено», исчезала бы на глазах.
+  // подтягивает такие тикеты прошлых дней к выбранному — только пока у них
+  // статус «На завтра»: сменили статус — тикет уходит обратно в свой день.
   const carried =
     request.nextUrl.searchParams.get("carryOver") === "1" ? await carriedNextDay(date) : [];
   const issues = [...carried, ...dayIssues];
