@@ -3,6 +3,7 @@ import { maskSensitiveForAi } from "@/lib/textClean";
 import type { ThreadLine } from "@/lib/resolutionNote";
 import type { ResolvedSibling } from "@/lib/relatedIssue";
 import { buildReconcileMessages, modelFamily, reasoningParams, RECONCILE_RULES } from "@/lib/reconcilePrompt";
+import { RECONCILE_CHAT_RULES, hasInstructionEvidence } from "@/lib/reconcileChat";
 import { buildAiContext } from "@/lib/projectContext";
 
 // Вечерний разбор: чем закончился каждый открытый тикет дня — по переписке в
@@ -64,7 +65,8 @@ export function buildUserText(
   thread: ThreadLine[],
   siblings: ResolvedSibling[] = [],
   // Общие сообщения агентов в чате без стрелки (ResolutionContext.general).
-  general: { text: string }[] = []
+  general: { text: string }[] = [],
+  instructions: string[] = []
 ): string {
   description = maskSensitiveForAi(description);
   const replies = thread.length
@@ -89,6 +91,9 @@ export function buildUserText(
           )
           .join("\n")
     );
+  }
+  if (instructions.length) {
+    parts.push("Указания дежурного (JSON, по порядку):\n" + JSON.stringify(instructions.map(maskSensitiveForAi)));
   }
   return parts.join("\n\n");
 }
@@ -140,7 +145,7 @@ const MODEL_TIMEOUT_MS = 110_000;
 
 // Ключ Gemini лежит в GEMINI_REPORT_KEY, а не в GEMINI_API_KEY: с последним
 // graphify отправляет код проекта во внешний API (см. CLAUDE.md).
-async function askGemini(model: string, userText: string, glossary: string): Promise<ReconcileResult> {
+async function askGemini(model: string, userText: string, glossary: string, rules?: string): Promise<ReconcileResult> {
   const started = Date.now();
   const key = process.env.GEMINI_REPORT_KEY;
   if (!key) return { ok: false, error: "GEMINI_REPORT_KEY не задан", ms: 0 };
@@ -152,7 +157,7 @@ async function askGemini(model: string, userText: string, glossary: string): Pro
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: RECONCILE_RULES + glossary }] },
+        systemInstruction: { parts: [{ text: (rules ?? RECONCILE_RULES) + glossary }] },
         contents: [{ role: "user", parts: [{ text: userText }] }],
         generationConfig: {
           // Схема ответа — на стороне API: невалидного JSON не придёт.
@@ -204,12 +209,12 @@ async function askGemini(model: string, userText: string, glossary: string): Pro
   };
 }
 
-async function askGroq(userText: string, glossary: string): Promise<ReconcileResult> {
+async function askGroq(userText: string, glossary: string, rules?: string): Promise<ReconcileResult> {
   const started = Date.now();
   const data = (await callGroqChat(
     {
       model: GROQ_MODEL,
-      messages: buildReconcileMessages(GROQ_MODEL, userText, glossary),
+      messages: buildReconcileMessages(GROQ_MODEL, userText, glossary, undefined, rules),
       ...reasoningParams("groq", GROQ_MODEL),
       response_format: { type: "json_object" },
       // Модель reasoning-типа: маленький лимит съедают размышления, и ответ
@@ -241,7 +246,7 @@ async function askGroq(userText: string, glossary: string): Promise<ReconcileRes
 // OpenRouter — один ключ на модели разных компаний (DeepSeek, Qwen, GLM,
 // Kimi, MiMo…): их сравнивают на прошлых днях тем же скриптом, а в прод идёт
 // победитель без новой интеграции. API совместим с OpenAI.
-async function askOpenRouter(model: string, userText: string, glossary: string): Promise<ReconcileResult> {
+async function askOpenRouter(model: string, userText: string, glossary: string, rules?: string): Promise<ReconcileResult> {
   const started = Date.now();
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return { ok: false, error: "OPENROUTER_API_KEY не задан", ms: 0 };
@@ -252,7 +257,7 @@ async function askOpenRouter(model: string, userText: string, glossary: string):
     signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
     body: JSON.stringify({
       model,
-      messages: buildReconcileMessages(model, userText, glossary),
+      messages: buildReconcileMessages(model, userText, glossary, undefined, rules),
       ...reasoningParams("openrouter", model),
       response_format: { type: "json_object" },
       // Почти все свежие модели — reasoning-типа: лимит с запасом на
@@ -331,13 +336,23 @@ export async function reconcileIssue(
   description: string,
   thread: ThreadLine[],
   siblings: ResolvedSibling[] = [],
-  general: { text: string }[] = []
+  general: { text: string }[] = [],
+  instructions: string[] = []
 ): Promise<ReconcileResult> {
-  const userText = buildUserText(description, thread, siblings, general);
+  const userText = buildUserText(description, thread, siblings, general, instructions);
   // Словарь компании — только термины, встретившиеся в этом тексте (правило
   // из CLAUDE.md: весь словарь в каждый запрос не влезает в лимиты).
   const glossary = await buildAiContext(userText);
-  if (provider.kind === "gemini") return askGemini(provider.model, userText, glossary);
-  if (provider.kind === "openrouter") return askOpenRouter(provider.model, userText, glossary);
-  return askGroq(userText, glossary);
+  const rules = instructions.length ? RECONCILE_CHAT_RULES : undefined;
+  const result = await (provider.kind === "gemini"
+    ? askGemini(provider.model, userText, glossary, rules)
+    : provider.kind === "openrouter"
+      ? askOpenRouter(provider.model, userText, glossary, rules)
+      : askGroq(userText, glossary, rules));
+  if (instructions.length && result.ok && result.verdict.status !== "UNCLEAR" &&
+      !hasInstructionEvidence(result.verdict.evidence, instructions.map(maskSensitiveForAi))) {
+    result.verdict = { status: "UNCLEAR", note: "", evidence: "",
+      reason: "ИИ не привёл точную цитату из указаний — уточните результат работы" };
+  }
+  return result;
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AutoReportChat } from "@/components/AutoReportChat";
+import type { ReconcileChatOptions } from "@/lib/reconcileChat";
 import { Modal } from "@/components/Modal";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { AutoReportProgress } from "@/components/AutoReportProgress";
@@ -42,6 +44,8 @@ type MergeTarget = { id: string; description: string; reportDate: string; groupN
 type Run = {
   id: string;
   model: string;
+  instructions: string[];
+  scope: string;
   startedBy: string;
   createdAt: string;
   finishedAt: string | null;
@@ -158,7 +162,7 @@ export function AutoReportDialog({
   // Ход разбора держит доска (useAutoReportRun) — окно его только
   // показывает, поэтому закрытое окно разбор не останавливает.
   autoRun: AutoRunState | null;
-  onStart: () => Promise<string | null>;
+  onStart: (options?: ReconcileChatOptions) => Promise<string | null>;
   onResume: (runId: string) => void;
   // Остановить идущий разбор (см. useAutoReportRun.stop).
   onStop: () => void;
@@ -177,6 +181,7 @@ export function AutoReportDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Статус, выбранный человеком вместо предложенного моделью.
   const [choice, setChoice] = useState<Record<string, IssueStatus>>({});
+  const [starting, setStarting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Отметки, которые человек поставил или снял сам. Конец разбора заново
@@ -283,9 +288,25 @@ export function AutoReportDialog({
       : null;
   const progressRun = live && live.runId === activeRunId ? live : stalled;
 
+  async function startChat(options?: ReconcileChatOptions): Promise<string | null> {
+    setStarting(true);
+    try {
+      const failure = await onStart(options);
+      if (!failure) {
+        touched.current.clear();
+        setSelected(new Set());
+        setChoice({});
+        await loadRuns();
+      }
+      return failure;
+    } finally {
+      setStarting(false);
+    }
+  }
+
   async function start() {
     setError(null);
-    const failure = await onStart();
+    const failure = await startChat();
     if (failure) setError(failure);
   }
 
@@ -306,15 +327,18 @@ export function AutoReportDialog({
         setError(data?.error ?? "Не удалось применить");
         return;
       }
-      const skipped = (data?.outcomes ?? []).filter((o: { applied: boolean }) => !o.applied);
+      const skipped: { applied: boolean; reason?: string }[] = (data?.outcomes ?? []).filter((o: { applied: boolean }) => !o.applied);
       if (skipped.length > 0) {
-        setError(`Не применено: ${skipped.length} (статус уже меняли вручную или это не статус)`);
+        const reasons = [...new Set(skipped.map((o) => o.reason).filter(Boolean))].join("; ");
+        setError(`Не применено: ${skipped.length}${reasons ? ` (${reasons})` : ""}`);
       }
       touched.current.clear();
       setSelected(new Set());
       setChoice({});
       await loadRuns();
       onApplied();
+    } catch {
+      setError("Не удалось получить результат применения. Обновите журнал перед повтором.");
     } finally {
       setBusy(false);
     }
@@ -434,6 +458,8 @@ export function AutoReportDialog({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-3">
+          <AutoReportChat key={date} date={date} activeRun={activeRun} runs={runs ?? []}
+            disabled={running || busy || starting || runs === null} onSend={startChat} />
           {progressRun && (
             <AutoReportProgress run={progressRun} onResume={() => onResume(progressRun.runId)} />
           )}
@@ -568,7 +594,7 @@ export function AutoReportDialog({
                             Поставить:
                             <select
                               value={choice[v.id] ?? ""}
-                              disabled={busy}
+                              disabled={busy || starting}
                               onChange={(e) => choose(v, e.target.value)}
                               className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-800"
                             >
@@ -653,7 +679,7 @@ export function AutoReportDialog({
             <button
               type="button"
               onClick={start}
-              disabled={busy}
+              disabled={busy || starting}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               Разобрать день
@@ -662,7 +688,7 @@ export function AutoReportDialog({
           <button
             type="button"
             onClick={apply}
-            disabled={busy || selected.size === 0}
+            disabled={busy || starting || selected.size === 0}
             className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
           >
             Применить отмеченные ({selected.size})

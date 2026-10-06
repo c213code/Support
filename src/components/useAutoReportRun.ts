@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReconcileChatOptions } from "@/lib/reconcileChat";
 import { useCallback, useRef, useState } from "react";
 
 // Ход «Авто-репорта» живёт на доске, а не в окне: раньше цикл шагов сидел в
@@ -162,12 +163,12 @@ export function useAutoReportRun() {
 
   // Возвращает текст ошибки или null.
   const start = useCallback(
-    async (date: string): Promise<string | null> => {
+    async (date: string, options: ReconcileChatOptions = {}): Promise<string | null> => {
       if (driving.current) return "Разбор уже идёт";
       const res = await fetch("/api/reconcile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reportDate: date }),
+        body: JSON.stringify({ reportDate: date, ...options }),
       }).catch(() => null);
       const data = res ? await res.json().catch(() => null) : null;
       if (!res?.ok || !data?.runId) return data?.error ?? "Не удалось запустить разбор";

@@ -5,6 +5,7 @@ import { changeIssueStatus } from "@/lib/issueStatus";
 import { collectResolutionContext, resolverName } from "@/lib/resolutionNote";
 import { findResolvedSiblings, findSplitOriginal, type ResolvedSibling } from "@/lib/relatedIssue";
 import { buildUserText, reconcileIssue, type ReconcileProvider } from "@/lib/dayReconcile";
+import { MAX_CHAT_TURNS, type ReconcileChatOptions } from "@/lib/reconcileChat";
 import { maskSensitiveForAi } from "@/lib/textClean";
 
 // «Авто-репорт» по кнопке на доске: запуск, пошаговый разбор и применение.
@@ -88,6 +89,7 @@ async function activeRunFor(reportDate: string) {
   return prisma.reconcileRun.findFirst({
     where: {
       reportDate,
+      instructions: { isEmpty: true },
       finishedAt: null,
       OR: [
         { createdAt: { gte: new Date(now - 120_000) } },
@@ -99,12 +101,27 @@ async function activeRunFor(reportDate: string) {
   });
 }
 
-export async function startRun(reportDate: string, startedBy: string) {
-  const active = await activeRunFor(reportDate);
+export async function startRun(reportDate: string, startedBy: string, options: ReconcileChatOptions = {}) {
+  const instruction = options.instruction?.trim();
+  let instructions: string[] = [];
+  if (instruction) {
+    if (options.previousRunId) {
+      const previous = await prisma.reconcileRun.findFirst({
+        where: { id: options.previousRunId, reportDate, startedBy },
+        select: { instructions: true },
+      });
+      if (!previous) throw new Error("Диалог не найден. Начните новый диалог.");
+      if (previous.instructions.length >= MAX_CHAT_TURNS) throw new Error("В диалоге уже 8 сообщений. Начните новый и укажите тему целиком.");
+      instructions = previous.instructions;
+    }
+    instructions = [...instructions, maskSensitiveForAi(instruction)];
+  }
+  const scope = instruction && options.scope === "all_open" ? "all_open" : "day";
+  const active = instruction ? null : await activeRunFor(reportDate);
   if (active) return active;
   const today = await prisma.issue.findMany({
-    where: { reportDate, status: { not: "RESOLVED" } },
-    select: { id: true, status: true },
+    where: { reportDate: scope === "all_open" ? { lte: reportDate } : reportDate, status: { not: "RESOLVED" } },
+    select: { id: true, status: true, updatedAt: true },
     orderBy: { createdAt: "asc" },
   });
   // Плюс вчерашние (и старше, до недели) незакрытые тикеты, по которым в
@@ -113,7 +130,7 @@ export async function startRun(reportDate: string, startedBy: string) {
   // ни один разбор: вчерашний уже прошёл, а сегодняшний берёт только
   // сегодняшние тикеты.
   const { start, end } = dayRangeUtc(reportDate);
-  const earlier = await prisma.issue.findMany({
+  const earlier = instruction ? [] : await prisma.issue.findMany({
     where: {
       reportDate: { gte: shiftDateString(reportDate, -CARRY_OVER_DAYS), lt: reportDate },
       status: { not: "RESOLVED" },
@@ -122,7 +139,7 @@ export async function startRun(reportDate: string, startedBy: string) {
         { agentReplies: { some: { receivedAt: { gte: start, lt: end } } } },
       ],
     },
-    select: { id: true, status: true },
+    select: { id: true, status: true, updatedAt: true },
     orderBy: { createdAt: "asc" },
   });
   const issues = [...earlier, ...today];
@@ -130,10 +147,12 @@ export async function startRun(reportDate: string, startedBy: string) {
     data: {
       reportDate,
       startedBy,
+      instructions,
+      scope,
       model: providerLabel(reconcileProvider()),
       finishedAt: issues.length === 0 ? new Date() : null,
       verdicts: {
-        create: issues.map((issue) => ({ issueId: issue.id, statusBefore: issue.status })),
+        create: issues.map((issue) => ({ issueId: issue.id, statusBefore: issue.status, issueUpdatedAt: issue.updatedAt })),
       },
     },
   });
@@ -174,10 +193,10 @@ function resolverFor(
   return resolverName(context.context);
 }
 
-type PendingVerdict = { id: string; issueId: string; issue: { description: string } };
+type PendingVerdict = { id: string; issueId: string; issue: { description: string; groupName: string; reportDate: string } };
 
 // Суждение по одному тикету запуска — пишет результат в его строку журнала.
-async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider): Promise<void> {
+async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider, instructions: string[] = []): Promise<void> {
   // Всё, что нужно модели, — одновременно: проверка «не продолжение ли»
   // ходит в Groq до трёх раз подряд, и раньше модель разбора ждала её.
   //
@@ -189,8 +208,8 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   // не роняет.
   const [context, siblings, mergeTargetId] = await Promise.all([
     collectResolutionContext(verdict.issueId),
-    findResolvedSiblings(verdict.issueId),
-    findSplitOriginal(verdict.issueId).then(
+    instructions.length ? Promise.resolve([] as ResolvedSibling[]) : findResolvedSiblings(verdict.issueId),
+    instructions.length ? Promise.resolve(null) : findSplitOriginal(verdict.issueId).then(
       (original) => original?.id ?? null,
       () => null
     ),
@@ -201,7 +220,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   const general = context.ok ? context.context.general : [];
   // Судим только по точно привязанным репликам: найденные догадкой по окну
   // времени могут быть о соседнем тикете, а ошибка тут уходит в репорт.
-  if ((!context.ok || !context.context.exact) && siblings.length === 0 && general.length === 0) {
+  if (!instructions.length && (!context.ok || !context.context.exact) && siblings.length === 0 && general.length === 0) {
     // updateMany, а не update: тикет могли объединить посреди разбора, и его
     // строка журнала ушла каскадом — тогда писать некуда, и это не ошибка.
     await prisma.reconcileVerdict.updateMany({
@@ -217,8 +236,9 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   }
 
   // Что видела модель — в журнал: по нему ошибка разбора видна сразу.
-  const input = buildUserText(verdict.issue.description, thread, siblings, general);
-  let result = await reconcileIssue(provider, verdict.issue.description, thread, siblings, general);
+  const description = `${verdict.issue.description}\nГруппа: ${verdict.issue.groupName}\nДата тикета: ${verdict.issue.reportDate}`;
+  const input = buildUserText(description, thread, siblings, general, instructions);
+  let result = await reconcileIssue(provider, description, thread, siblings, general, instructions);
   // Сетевой сбой, «модель перегружена» (503), пустой ответ и минутный лимит
   // Groq проходят сами — один повтор (на прогонах по прошлым дням так падало
   // 2–14% запросов). Groq считает лимит поминутно (8000 токенов на ключ,
@@ -235,7 +255,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
   const exhausted = !result.ok && /^429|quota|RESOURCE_EXHAUSTED/i.test(result.error);
   if (!result.ok && !(exhausted && retry === provider)) {
     await new Promise((resolve) => setTimeout(resolve, retry.kind === "groq" ? 15_000 : 3000));
-    result = await reconcileIssue(retry, verdict.issue.description, thread, siblings, general);
+    result = await reconcileIssue(retry, description, thread, siblings, general, instructions);
     answeredBy = retry;
   }
   if (result.ok && answeredBy !== provider) {
@@ -250,7 +270,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
           note: result.verdict.note,
           evidence: result.verdict.evidence,
           reason: result.verdict.reason || null,
-          resolver: resolverFor(result.verdict, siblings, general, context),
+          resolver: instructions.length ? null : resolverFor(result.verdict, siblings, general, context),
           input,
           mergeTargetId,
         }
@@ -260,7 +280,7 @@ async function judgeVerdict(verdict: PendingVerdict, provider: ReconcileProvider
 
 // Разобрать следующие несколько тикетов запуска.
 export async function stepRun(runId: string): Promise<{ remaining: number }> {
-  const run = await prisma.reconcileRun.findUnique({ where: { id: runId }, select: { id: true } });
+  const run = await prisma.reconcileRun.findUnique({ where: { id: runId }, select: { id: true, instructions: true } });
   if (!run) return { remaining: 0 };
 
   const provider = reconcileProvider();
@@ -278,7 +298,7 @@ export async function stepRun(runId: string): Promise<{ remaining: number }> {
     where: { runId, state: "pending", OR: claimFree(now) },
     orderBy: { createdAt: "asc" },
     take: batch,
-    select: { id: true, issueId: true, issue: { select: { description: true } } },
+    select: { id: true, issueId: true, issue: { select: { description: true, groupName: true, reportDate: true } } },
   });
   // Берём тикеты за собой условной записью: если этот же запуск гоняет
   // вторая вкладка, её шаг возьмёт следующие, а не те же (раньше оба
@@ -295,7 +315,16 @@ export async function stepRun(runId: string): Promise<{ remaining: number }> {
 
   // Тикеты шага — одновременно: по очереди вечер в 40 тикетов ждал бы
   // минуты. Упёршийся в лимит ключ Groq сменяет следующий.
-  await Promise.all(pending.map((verdict) => judgeVerdict(verdict, provider)));
+  await Promise.all(pending.map(async (verdict) => {
+    try {
+      await judgeVerdict(verdict, provider, run.instructions);
+    } catch {
+      await prisma.reconcileVerdict.updateMany({
+        where: { id: verdict.id, state: "pending" },
+        data: { state: "error", error: "Не удалось проверить тикет. Запустите новый разбор." },
+      });
+    }
+  }));
 
   // Всё оставшееся разбирает чужой шаг — не крутим пустые шаги подряд,
   // ждём, пока он допишет.
@@ -339,6 +368,7 @@ export async function applyVerdicts(
       note: true,
       resolver: true,
       statusBefore: true,
+      issueUpdatedAt: true,
       appliedAt: true,
       issue: { select: { status: true } },
     },
@@ -387,6 +417,8 @@ export async function applyVerdicts(
       status,
       actor,
       source: "chat",
+      expectedUpdatedAt: verdict.issueUpdatedAt ?? undefined,
+      expectedStatus: verdict.statusBefore,
       note,
     });
     if (!result.ok) {
@@ -394,7 +426,7 @@ export async function applyVerdicts(
         where: { id: verdict.id },
         data: { appliedAt: null, appliedBy: null },
       });
-      outcomes.push({ verdictId: verdict.id, applied: false, reason: "тикет не найден" });
+      outcomes.push({ verdictId: verdict.id, applied: false, reason: result.reason === "conflict" ? "тикет изменился после разбора" : "тикет не найден" });
       continue;
     }
     outcomes.push({ verdictId: verdict.id, applied: true });

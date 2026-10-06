@@ -1456,7 +1456,7 @@ export function Inbox() {
           onEscalate={(issueId) => setEscalatingIssueId(issueId)}
           refreshToken={issuesFingerprint}
           autoRun={autoReport.run}
-          onStart={() => autoReport.start(date)}
+          onStart={(options) => autoReport.start(date, options)}
           onResume={(runId) => void autoReport.resume(runId, date)}
           onStop={autoReport.stop}
         />

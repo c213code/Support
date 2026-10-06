@@ -174,7 +174,7 @@ async function replacePreviousStatusReply(
 // (statusChangedAt) — иначе история была бы полна ровно настолько,
 // насколько внимательны все вызывающие.
 export type StatusChangeResult =
-  | { ok: false; reason: "not-found" }
+  | { ok: false; reason: "not-found" | "conflict" }
   | { ok: true; previous: IssueStatus; changed: boolean };
 
 export async function changeIssueStatus(params: {
@@ -185,6 +185,8 @@ export async function changeIssueStatus(params: {
   actor: string | null;
   source: StatusChangeSource;
   // Поля, которые в этих же местах меняются вместе со статусом.
+  expectedUpdatedAt?: Date;
+  expectedStatus?: IssueStatus;
   note?: string | null;
   escalatedTeam?: string | null;
   escalatedAssignee?: string | null;
@@ -199,37 +201,45 @@ export async function changeIssueStatus(params: {
 
   const changed = existing.status !== status;
 
-  await prisma.issue.update({
-    where: { id: issueId },
-    data: {
-      status,
-      ...(changed ? { statusChangedAt: new Date() } : {}),
-      ...(params.note !== undefined ? { note: params.note } : {}),
-      ...(params.escalatedTeam !== undefined
-        ? { escalatedTeam: params.escalatedTeam }
-        : {}),
-      ...(params.escalatedAssignee !== undefined
-        ? { escalatedAssignee: params.escalatedAssignee }
-        : {}),
-      // Авто-тикет числится за ботом ровно до первого действия живого
-      // агента — дальше он его.
-      ...(actor && existing.createdBy === AUTO_ISSUE_CREATOR
-        ? { createdBy: actor }
-        : {}),
-    },
-  });
+  const saved = await prisma.$transaction(async (tx) => {
+    const updated = await tx.issue.updateMany({
+      where: { id: issueId,
+        ...(params.expectedUpdatedAt ? { updatedAt: params.expectedUpdatedAt } : {}),
+        ...(params.expectedStatus ? { status: params.expectedStatus } : {}),
+      },
+      data: {
+        status,
+        ...(changed ? { statusChangedAt: new Date() } : {}),
+        ...(params.note !== undefined ? { note: params.note } : {}),
+        ...(params.escalatedTeam !== undefined
+          ? { escalatedTeam: params.escalatedTeam }
+          : {}),
+        ...(params.escalatedAssignee !== undefined
+          ? { escalatedAssignee: params.escalatedAssignee }
+          : {}),
+        // Авто-тикет числится за ботом ровно до первого действия живого
+        // агента — дальше он его.
+        ...(actor && existing.createdBy === AUTO_ISSUE_CREATOR
+          ? { createdBy: actor }
+          : {}),
+      },
+    });
 
+    if (updated.count === 0) return false;
+    if (changed) await tx.issueEvent.create({
+      data: {
+        issueId,
+        from: existing.status,
+        to: status,
+        actor: actor ?? AUTO_ISSUE_CREATOR,
+        source,
+      },
+    });
+
+    return true;
+  });
+  if (!saved) return { ok: false, reason: "conflict" };
   if (!changed) return { ok: true, previous: existing.status, changed: false };
-
-  await prisma.issueEvent.create({
-    data: {
-      issueId,
-      from: existing.status,
-      to: status,
-      actor: actor ?? AUTO_ISSUE_CREATOR,
-      source,
-    },
-  });
 
   await reactToStatusChange(
     existing.status,

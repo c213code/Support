@@ -146,10 +146,11 @@ export function buildReconcileMessages(
   model: string,
   userText: string,
   glossary = "",
-  today = new Date().toISOString().slice(0, 10)
+  today = new Date().toISOString().slice(0, 10),
+  taskRules?: string
 ): Array<{ role: "system" | "user"; content: string }> {
   const family = modelFamily(model);
-  const rules = (rulesOverride ?? RECONCILE_RULES) + glossary;
+  const rules = (taskRules ?? rulesOverride ?? RECONCILE_RULES) + glossary;
   const system =
     family === "mimo"
       ? `You are MiMo, an AI assistant developed by Xiaomi. Today's date: ${today}.\n\n${rules}`

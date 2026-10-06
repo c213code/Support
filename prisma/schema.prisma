@@ -217,6 +217,9 @@ model ReconcileRun {
   // Какая модель разбирала: при сравнении моделей видно, кто где ошибся.
   model      String
   startedBy  String
+  // Снимок диалога: уточнения не меняют контекст уже начатого разбора.
+  instructions String[] @default([])
+  scope        String   @default("day")
   createdAt  DateTime           @default(now())
   finishedAt DateTime?
   verdicts   ReconcileVerdict[]
@@ -234,6 +237,7 @@ model ReconcileVerdict {
   issueId      String
   issue        Issue        @relation(fields: [issueId], references: [id], onDelete: Cascade)
   statusBefore IssueStatus
+  issueUpdatedAt DateTime?
   // pending — ещё не разобран; done — модель ответила; skipped — в чате нет
   // точно привязанных реплик, судить не по чему; error — модель не ответила.
   state        String       @default("pending")

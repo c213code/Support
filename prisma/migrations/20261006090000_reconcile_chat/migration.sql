@@ -1,0 +1,3 @@
+ALTER TABLE "ReconcileRun" ADD COLUMN "instructions" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+ADD COLUMN "scope" TEXT NOT NULL DEFAULT 'day';
+ALTER TABLE "ReconcileVerdict" ADD COLUMN "issueUpdatedAt" TIMESTAMP(3);
