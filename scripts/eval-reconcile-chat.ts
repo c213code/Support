@@ -13,13 +13,19 @@ const cases: { name: string; description: string; instructions: string[]; expect
   { name: "Отрицание", description: "Мини-тест не открывается", instructions: ["мини тест ещё не решён"], expected: "UNCLEAR" },
   { name: "Вопрос", description: "Мини-тест не открывается", instructions: ["мини тест решён?"], expected: "UNCLEAR" },
   { name: "Уточнение-исключение", description: "Не открывается мини-тест по математике", instructions: ["Все мини-тесты исправлены", "Кроме математики"], expected: "UNCLEAR" },
+  { name: "Задание после теоретического урока", description: "Теориялық сабақ көрілген, бірақ тапсырма ашылмай тұр\nГруппа: Әдістеме & IT", instructions: ["мини тест решен, найди все связанные и сделай статус решено"], expected: "RESOLVED" },
+  { name: "Домашнее задание после урока", description: "Не загружается файл домашнего задания после урока\nГруппа: Әдістеме & IT", instructions: ["мини тест решен, найди все связанные и сделай статус решено"], expected: "UNCLEAR" },
+  { name: "Индивидуальная попытка после урока", description: "После теоретического урока ученику нужно открыть дополнительную попытку мини-теста", instructions: ["мини тест решен, найди все связанные и сделай статус решено"], expected: "UNCLEAR" },
 ];
 
 async function main() {
   let failures = 0;
   const provider = reconcileProvider();
+  const filter = process.argv.find((arg) => arg.startsWith("--case="))?.slice("--case=".length);
+  const selected = filter ? cases.filter((item) => item.name.includes(filter)) : cases;
+  if (selected.length === 0) throw new Error("No matching evaluation cases");
   console.log(`Provider: ${provider.kind}:${provider.model}`);
-  for (const item of cases) {
+  for (const item of selected) {
     const result = await reconcileIssue(provider, item.description, [], [], [], item.instructions);
     const actual = result.ok ? result.verdict.status : "ERROR";
     const passed = actual === item.expected;
@@ -27,11 +33,11 @@ async function main() {
     console.log(`${passed ? "PASS" : "FAIL"} ${item.name}: ${actual} (expected ${item.expected})`);
     if (!passed) console.log(result.ok ? result.verdict.reason : result.error);
     // Pace sequential calls to stay within the per-minute token quota.
-    if (provider.kind === "groq" && item !== cases[cases.length - 1]) {
+    if (provider.kind === "groq" && item !== selected[selected.length - 1]) {
       await new Promise((resolve) => setTimeout(resolve, 30_000));
     }
   }
-  console.log(`${cases.length - failures}/${cases.length} passed`);
+  console.log(`${selected.length - failures}/${selected.length} passed`);
   process.exitCode = failures ? 1 : 0;
 }
 
