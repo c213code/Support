@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import { fetchApiJson } from "@/lib/fetchApiJson";
+import { SUPPORT_UI_TOOLS } from "@/lib/supportUiTools";
 import {
   IconReport,
   IconInbox,
@@ -123,7 +124,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           );
         })}
 
-        {platformTool && (
+        {SUPPORT_UI_TOOLS.changeContact && platformTool && (
           <Link
             href="/platform/change-email"
             title="Смена почты или номера ученику"
@@ -151,7 +152,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         )}
 
-        {logsTool && (
+        {SUPPORT_UI_TOOLS.logs && logsTool && (
           <Link
             href="/logs"
             title="Логи (Elasticsearch)"
@@ -165,7 +166,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         )}
 
-        {PALETTE_ROUTES.has(pathname) && (
+        {SUPPORT_UI_TOOLS.sidebarSearch && PALETTE_ROUTES.has(pathname) && (
           <button
             onClick={() =>
               window.dispatchEvent(

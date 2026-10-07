@@ -22,6 +22,7 @@ import { useHotkeys } from "@/lib/useHotkeys";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import { useBotSettings } from "@/lib/useBotSettings";
 import { fetchApiJson } from "@/lib/fetchApiJson";
+import { SUPPORT_UI_TOOLS } from "@/lib/supportUiTools";
 import type { IssueStatus } from "@/lib/status";
 import {
   formatDateHuman,
@@ -1257,7 +1258,7 @@ export function Inbox() {
                   🤖 {checkingAiValidation ? "Проверяем…" : "Проверить авто-тикеты"}
                 </button>
               )}
-              {issues.some((i) => i.status === "SENT") && (
+              {SUPPORT_UI_TOOLS.cleanupDescriptions && issues.some((i) => i.status === "SENT") && (
                 <button
                   onClick={handleCleanDescriptions}
                   title="Убрать ссылки/приветствия/логины из описаний тикетов «Отправлено»"
@@ -1267,7 +1268,7 @@ export function Inbox() {
                   Почистить описания в «Отправлено»
                 </button>
               )}
-              {issues.some((i) => i.status === "PENDING") && (
+              {SUPPORT_UI_TOOLS.normalizePending && issues.some((i) => i.status === "PENDING") && (
                 <button
                   onClick={handleNormalizePending}
                   title="Тикеты без явного статуса перевести в «Отправлено»"

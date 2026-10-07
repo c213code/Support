@@ -10,6 +10,7 @@ import { LogsExplorer } from "@/components/LogsExplorer";
 import { SubmissionPhoto } from "@/components/SubmissionPhoto";
 import { groupColor } from "@/lib/groups";
 import { formatDateTimeAlmaty } from "@/lib/date";
+import { SUPPORT_UI_TOOLS } from "@/lib/supportUiTools";
 import { issueLinks } from "@/lib/report";
 import {
   IconTicket,
@@ -390,7 +391,7 @@ export function KanbanBoard({
                             📎 вложение
                           </span>
                         )}
-                        {studentEmail && (
+                        {SUPPORT_UI_TOOLS.logs && studentEmail && (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -411,7 +412,7 @@ export function KanbanBoard({
                     {/* Распознан запрос «смените почту A → B» — кнопка ведёт в
                         инструмент смены с уже подставленными почтами. Меняет
                         всё равно агент (там предпросмотр и подтверждение). */}
-                    {issue.emailChange && (
+                    {SUPPORT_UI_TOOLS.changeContact && issue.emailChange && (
                       <div className="mt-1">
                         <a
                           href={`/platform/change-email?old=${encodeURIComponent(
@@ -627,7 +628,7 @@ export function KanbanBoard({
         })}
       </div>
 
-      {logsFor && (
+      {SUPPORT_UI_TOOLS.logs && logsFor && (
         <Modal onClose={() => setLogsFor(null)} size="xl" labelledBy="logs-modal-title">
           <div className="max-h-[85vh] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
             <LogsExplorer
