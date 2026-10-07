@@ -488,6 +488,8 @@ model Issue {
   id                String      @id @default(cuid())
   // Дата репорта в формате YYYY-MM-DD (день, за который идёт отчёт)
   reportDate        String
+  // Время подачи обращения, автоматически отнесённого на завтра после 21:00 Алматы.
+  afterHoursSubmittedAt DateTime?
   groupName         String
   groupEmoji        String?
   position          Int         @default(0)

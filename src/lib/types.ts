@@ -18,6 +18,7 @@ export type BotReplyDTO = {
 export type IssueDTO = {
   id: string;
   reportDate: string;
+  afterHoursSubmittedAt?: string | null;
   groupName: string;
   groupEmoji: string | null;
   position: number;

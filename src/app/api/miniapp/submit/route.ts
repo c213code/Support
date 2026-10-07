@@ -109,6 +109,7 @@ function isUniqueViolation(err: unknown): boolean {
 // Обращение попадает только на сайт: в рабочую группу ничего не пишется,
 // поэтому реакций и ответов бота при смене статуса у таких тикетов нет.
 export async function POST(request: NextRequest) {
+  const submittedAt = new Date();
   if (!submissionFormEnabled()) return reply(503, T.disabled);
 
   if (Number(request.headers.get("content-length")) > MAX_REQUEST_BYTES) {
@@ -274,7 +275,7 @@ export async function POST(request: NextRequest) {
       photoFileIds,
       labelId: label.id,
       labelFields: values,
-    });
+    }, submittedAt);
     // Черновик пересылки своё отработал: оставить его — значит подставить
     // ту же переписку в следующее обращение.
     if (forwardDraft) {

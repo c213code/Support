@@ -2,6 +2,22 @@ const TIMEZONE = "Asia/Almaty";
 // Алматы — фиксированный UTC+5, без перехода на летнее время.
 const TIMEZONE_OFFSET_HOURS = 5;
 
+// A new request received at 21:00 or later belongs to tomorrow's board.
+// An explicitly selected historical/future date remains a manual override.
+export function issueIntakeTiming(submittedAt: Date, requestedDate?: string) {
+  const local = new Date(submittedAt.getTime() + TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000);
+  const day = local.toISOString().slice(0, 10);
+  const afterHours = local.getUTCHours() >= 21;
+  const nextDay = shiftDateString(day, 1);
+  const reportDate = requestedDate && requestedDate !== day
+    ? requestedDate
+    : afterHours ? nextDay : day;
+  return {
+    reportDate,
+    afterHoursSubmittedAt: afterHours && reportDate === nextDay ? submittedAt : null,
+  };
+}
+
 // Границы календарного дня (00:00–24:00 по Алматы) в UTC — для фильтрации
 // timestamp-полей вроде TelegramMessage.receivedAt по дате.
 export function dayRangeUtc(date: string): { start: Date; end: Date } {

@@ -11,7 +11,7 @@ import { mentionsUntTest } from "@/lib/untResetRequest";
 import { platformEnabled } from "@/lib/platform";
 import { unreadReplyCounts } from "@/lib/submissionChat";
 import { describeFields, findLabel } from "@/lib/submissionLabels";
-import { shiftDateString } from "@/lib/date";
+import { issueIntakeTiming, shiftDateString } from "@/lib/date";
 
 // Насколько далеко назад доска ищет тикеты «На завтра» — как и перенос
 // вчерашних в авто-разборе (CARRY_OVER_DAYS в reconcileRun.ts).
@@ -214,6 +214,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const submittedAt = new Date();
   const identity = await getCurrentIdentity();
   if (!identity) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -228,14 +229,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const source = typeof body.sourceMessageId === "string"
+    ? await prisma.telegramMessage.findUnique({
+        where: { id: body.sourceMessageId },
+        select: { receivedAt: true },
+      })
+    : null;
+  if (body.sourceMessageId && !source) {
+    return NextResponse.json({ error: "Исходное сообщение не найдено" }, { status: 400 });
+  }
+  const { reportDate, afterHoursSubmittedAt } = issueIntakeTiming(
+    source?.receivedAt ?? submittedAt,
+    source ? undefined : body.reportDate
+  );
   const last = await prisma.issue.findFirst({
-    where: { reportDate: body.reportDate, groupName: body.groupName },
+    where: { reportDate, groupName: body.groupName },
     orderBy: { position: "desc" },
   });
 
   const issue = await prisma.issue.create({
     data: {
-      reportDate: body.reportDate,
+      reportDate,
+      afterHoursSubmittedAt,
       groupName: body.groupName,
       groupEmoji: body.groupEmoji ?? null,
       position: (last?.position ?? 0) + 1,

@@ -9,6 +9,7 @@ import { Modal } from "@/components/Modal";
 import { LogsExplorer } from "@/components/LogsExplorer";
 import { SubmissionPhoto } from "@/components/SubmissionPhoto";
 import { groupColor } from "@/lib/groups";
+import { formatDateTimeAlmaty } from "@/lib/date";
 import { issueLinks } from "@/lib/report";
 import {
   IconTicket,
@@ -275,6 +276,14 @@ export function KanbanBoard({
                             className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700"
                           >
                             📅 с {issue.reportDate.slice(8, 10)}.{issue.reportDate.slice(5, 7)}
+                          </span>
+                        )}
+                        {issue.afterHoursSubmittedAt && (
+                          <span
+                            title={`Отправлено ${formatDateTimeAlmaty(new Date(issue.afterHoursSubmittedAt))} (Алматы). Автоматически добавлено на следующий день.`}
+                            className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+                          >
+                            🌙 Отправлено после 21:00
                           </span>
                         )}
                       </span>

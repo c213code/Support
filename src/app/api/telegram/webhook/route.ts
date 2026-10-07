@@ -521,7 +521,8 @@ export async function POST(request: NextRequest) {
         mergedOwn,
         [recent.text, textForTicket].filter(Boolean).join("\n"),
         recent.messageLink,
-        skipSeries
+        skipSeries,
+        new Date(message.date * 1000)
       );
       if (issue) {
         await prisma.telegramMessage.update({
@@ -647,7 +648,8 @@ export async function POST(request: NextRequest) {
       text,
       textForTicket,
       messageLink,
-      skipAutoCreate
+      skipAutoCreate,
+      new Date(message.date * 1000)
     );
     // issue === null — в сообщении не было запроса; оставляем его во
     // "Входящих" без тикета (см. buildDescription).

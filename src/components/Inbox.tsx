@@ -306,13 +306,17 @@ export function Inbox() {
   // на Telegram-сообщение прислали в личку/другой чат, куда бот не
   // подключён, и заводить тикет не от чего кроме самой ссылки.
   async function handleCreateNewIssue(values: IssueFormValues) {
-    await fetch("/api/issues", {
+    const res = await fetch("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...values, reportDate: date }),
     });
+    const data = await res.json();
+    if (!res.ok) { toast(data?.error ?? "Не удалось создать тикет"); return; }
     setAddingNewIssue(false);
-    await loadIssues(date);
+    const targetDate = data.issue.reportDate;
+    setDate(targetDate);
+    await loadIssues(targetDate);
   }
 
   async function handleCreateIssue(
@@ -322,9 +326,10 @@ export function Inbox() {
     const res = await fetch("/api/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...values, reportDate: date }),
+      body: JSON.stringify({ ...values, reportDate: date, sourceMessageId: message.id }),
     });
     const data = await res.json();
+    if (!res.ok) { toast(data?.error ?? "Не удалось создать тикет"); return; }
 
     await fetch(`/api/telegram/messages/${message.id}`, {
       method: "PATCH",
@@ -333,7 +338,9 @@ export function Inbox() {
     });
 
     setCreatingFromId(null);
-    await Promise.all([loadMessages(date), loadIssues(date)]);
+    const targetDate = data.issue.reportDate;
+    setDate(targetDate);
+    await Promise.all([loadMessages(targetDate), loadIssues(targetDate)]);
   }
 
   // Приклеить сообщение к уже существующему тикету вместо заведения

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { todayDateString } from "@/lib/date";
+import { issueIntakeTiming } from "@/lib/date";
 import { buildDescription } from "@/lib/ticketDescription";
 import { classifyAckAsk, classifySituation } from "@/lib/ai";
 import { missingSlotsFor } from "@/lib/situations";
@@ -31,14 +31,15 @@ export async function createAutoIssue(
   own: string,
   contextual: string,
   telegramLink: string,
-  skipAutoCreate = false
+  skipAutoCreate = false,
+  submittedAt = new Date()
 ) {
   const cleaned = await buildDescription(own, contextual, skipAutoCreate);
   if (cleaned === null) return null;
-  return insertSentIssue(groupName, groupEmoji, cleaned, telegramLink);
+  return insertSentIssue(groupName, groupEmoji, cleaned, telegramLink, undefined, submittedAt);
 }
 
-// Сама запись тикета "Отправлено" в конец группы за сегодня. Отдельно от
+// Запись тикета "Отправлено" в назначенный день (после 21:00 — завтра). Отдельно от
 // createAutoIssue ради формы мини-аппа (POST /api/miniapp/submit): там
 // описание нужно получить ДО загрузки фото — иначе обращение, отклонённое как
 // мусор, оставило бы фото в служебном канале, а повторный buildDescription
@@ -52,9 +53,10 @@ export async function insertSentIssue(
   // Поля формы мини-аппа — пишутся тем же запросом, что и тикет: тикет без
   // заявки (без контакта ученика и фото) не должен появиться на доске даже
   // на мгновение, а откатывать его вручную после сбоя — ненадёжно.
-  submission?: SubmissionFields
+  submission?: SubmissionFields,
+  submittedAt = new Date()
 ) {
-  const reportDate = todayDateString();
+  const { reportDate, afterHoursSubmittedAt } = issueIntakeTiming(submittedAt);
   const last = await prisma.issue.findFirst({
     where: { reportDate, groupName },
     orderBy: { position: "desc" },
@@ -62,6 +64,7 @@ export async function insertSentIssue(
   return prisma.issue.create({
     data: {
       reportDate,
+      afterHoursSubmittedAt,
       groupName,
       groupEmoji,
       position: (last?.position ?? 0) + 1,
