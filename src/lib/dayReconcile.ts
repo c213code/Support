@@ -266,7 +266,8 @@ async function askOpenRouter(model: string, userText: string, glossary: string, 
       // исписал весь лимит размышлениями и вернул пустой ответ. MiMo — 4000:
       // на прогоне по истории ~5% тикетов уходили у неё за 4000 токенов
       // размышлений, съедали пятую часть всех токенов, думали 70–240 с и
-      // были верны в трети случаев. Такой тикет лучше честно отдать человеку.
+      // были верны в трети случаев. При исчерпании лимита пробуем запасную
+      // модель через общий обработчик ошибок в reconcileRun.
       max_tokens: modelFamily(model) === "mimo" ? 4000 : 8000,
       // DeepSeek на OpenRouter раздают ~26 провайдеров, от официального до
       // fp4-сборок, и цена одного и того же запроса отличалась в десять раз.
@@ -296,35 +297,23 @@ async function askOpenRouter(model: string, userText: string, glossary: string, 
         costUsd: data.usage.cost,
       }
     : null;
-  // Пустой ответ с finish_reason=length — модель исписала лимит
-  // размышлениями и к выводу не пришла. Это не сбой, а трудный тикет:
-  // «Непонятно» отдаёт его человеку сразу, без второй такой же долгой
-  // попытки у запасной модели.
-  if (!text && data?.choices?.[0]?.finish_reason === "length") {
+  // Лимит генерации — технический сбой, а не суждение о тикете.
+  // Возвращаем ошибку, чтобы reconcileRun попробовал запасную модель.
+  // Даже формально валидный JSON при length может быть незаконченным ответом.
+  if (data?.choices?.[0]?.finish_reason === "length") {
     return {
-      ok: true,
-      verdict: {
-        status: "UNCLEAR",
-        note: "",
-        evidence: "",
-        reason: "модель не пришла к выводу за отведённые размышления — посмотрите переписку",
-      },
-      usage,
+      ok: false,
+      error: "Модель исчерпала лимит ответа; статус обращения не определён",
       ms,
     };
   }
+  if (!text.trim()) return { ok: false, error: "Модель вернула пустой ответ; статус обращения не определён", ms };
   const verdict = parseVerdict(text);
   if (!verdict) return { ok: false, error: `не JSON по схеме: ${text.slice(0, 120)}`, ms };
   return {
     ok: true,
     verdict,
-    usage: data?.usage
-      ? {
-          inputTokens: data.usage.prompt_tokens ?? 0,
-          outputTokens: data.usage.completion_tokens ?? 0,
-          costUsd: data.usage.cost,
-        }
-      : null,
+    usage,
     ms,
   };
 }
