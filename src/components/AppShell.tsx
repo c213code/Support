@@ -146,7 +146,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </nav>
-        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">{children}</main>
+        <main key={pathname} id="main-content" tabIndex={-1} className="j40-page-in min-w-0 flex-1">{children}</main>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 export type ToggleSpec = {
   key: string;
@@ -24,6 +24,7 @@ export type ToggleSpec = {
 // и забыл", которым не место на одном уровне с ежедневными действиями.
 export function BotSettingsMenu({ toggles }: { toggles: ToggleSpec[] }) {
   const [open, setOpen] = useState(false);
+  const menuId = useId();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,7 +33,10 @@ export function BotSettingsMenu({ toggles }: { toggles: ToggleSpec[] }) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
     function onEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        ref.current?.querySelector("button")?.focus();
+      }
     }
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onEsc);
@@ -50,6 +54,7 @@ export function BotSettingsMenu({ toggles }: { toggles: ToggleSpec[] }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        aria-controls={menuId}
         aria-haspopup="true"
         title="Настройки бота и ИИ"
         className="flex items-center gap-1.5 rounded-full border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-50"
@@ -62,46 +67,44 @@ export function BotSettingsMenu({ toggles }: { toggles: ToggleSpec[] }) {
         )}
       </button>
 
-      {open && (
-        <div className="absolute right-0 z-30 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
-          {toggles.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="switch"
-              aria-checked={t.enabled ?? false}
-              onClick={t.onToggle}
-              disabled={t.enabled === null}
-              className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-slate-50 disabled:opacity-50"
+      <div id={menuId} data-open={open} inert={!open} className="j40-menu absolute right-0 z-30 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+        {toggles.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="switch"
+            aria-checked={t.enabled ?? false}
+            onClick={t.onToggle}
+            disabled={t.enabled === null}
+            className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            <span
+              className={`relative mt-0.5 h-4 w-7 shrink-0 rounded-full transition ${
+                t.enabled ? t.color : "bg-slate-300"
+              }`}
             >
               <span
-                className={`relative mt-0.5 h-4 w-7 shrink-0 rounded-full transition ${
-                  t.enabled ? t.color : "bg-slate-300"
+                className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform duration-200 ${
+                  t.enabled ? "translate-x-3" : "translate-x-0"
                 }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition ${
-                    t.enabled ? "left-3.5" : "left-0.5"
-                  }`}
-                />
+              />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xs font-medium text-slate-700">
+                {t.label}
               </span>
-              <span className="min-w-0">
-                <span className="block text-xs font-medium text-slate-700">
-                  {t.label}
-                </span>
-                <span className="block text-[11px] leading-snug text-slate-400">
-                  {t.hint}
-                </span>
-                {t.note && (
-                  <span className="mt-0.5 block text-[11px] font-medium leading-snug text-amber-600">
-                    {t.note}
-                  </span>
-                )}
+              <span className="block text-[11px] leading-snug text-slate-400">
+                {t.hint}
               </span>
-            </button>
-          ))}
-        </div>
-      )}
+              {t.note && (
+                <span className="mt-0.5 block text-[11px] font-medium leading-snug text-amber-600">
+                  {t.note}
+                </span>
+              )}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

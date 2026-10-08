@@ -1150,7 +1150,7 @@ export function Inbox() {
       </div>
 
       {tab === "board" && (
-        <div className="flex gap-5">
+        <div className="j40-fade-in flex gap-5">
           <div className="min-w-0 flex-1">
           <div className="mb-4 flex flex-wrap gap-2.5">
             {[
@@ -1539,7 +1539,7 @@ export function Inbox() {
       )}
 
       {tab === "messages" && (
-        <>
+        <div className="j40-fade-in">
       {devChatPending > 0 && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <span>
@@ -1810,7 +1810,7 @@ export function Inbox() {
           ))}
         </div>
       )}
-        </>
+        </div>
       )}
     </div>
   );

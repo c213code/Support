@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { IconCheck } from "@/components/Icons";
 
 type ToastTone = "success" | "info" | "error";
@@ -26,16 +26,39 @@ const TONE_STYLE: Record<ToastTone, string> = {
 
 const TOAST_MS = 3200;
 
+function ToastMessage({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
+  const [leaving, setLeaving] = useState(false);
+  useEffect(() => {
+    let exitTimer: ReturnType<typeof setTimeout> | undefined;
+    const timer = setTimeout(() => {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        onDismiss(toast.id);
+        return;
+      }
+      setLeaving(true);
+      exitTimer = setTimeout(() => onDismiss(toast.id), 180);
+    }, TOAST_MS);
+    return () => { clearTimeout(timer); clearTimeout(exitTimer); };
+  }, [toast.id, onDismiss]);
+
+  return (
+    <div className={`${leaving ? "j40-toast-exit" : "j40-slide-up"} pointer-events-auto flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium shadow-lg shadow-slate-900/5 ${TONE_STYLE[toast.tone]}`}>
+      {toast.tone === "success" && <IconCheck className="j40-check-in h-4 w-4 shrink-0 text-emerald-600" />}
+      {toast.text}
+    </div>
+  );
+}
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const show = useCallback((text: string, tone: ToastTone = "success") => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, text, tone }]);
-    setTimeout(
-      () => setToasts((prev) => prev.filter((t) => t.id !== id)),
-      TOAST_MS
-    );
+  }, []);
+
+  const dismiss = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
   // show стабилен (useCallback без зависимостей), но провайдер оборачивает
@@ -51,15 +74,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         aria-live="polite"
       >
         {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`j40-slide-up pointer-events-auto flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium shadow-lg shadow-slate-900/5 ${TONE_STYLE[t.tone]}`}
-          >
-            {t.tone === "success" && (
-              <IconCheck className="h-4 w-4 shrink-0 text-emerald-600" />
-            )}
-            {t.text}
-          </div>
+          <ToastMessage key={t.id} toast={t} onDismiss={dismiss} />
         ))}
       </div>
     </ToastContext.Provider>

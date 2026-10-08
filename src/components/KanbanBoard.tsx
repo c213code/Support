@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAnimatedList } from "@/lib/useAnimatedList";
 import type { IssueDTO } from "@/lib/types";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { Avatar } from "@/components/Avatar";
@@ -144,6 +145,7 @@ export function KanbanBoard({
   // экрана прокрутки. Показываем по одной, переключаясь табами — доска
   // остаётся доской, а не списком.
   const [mobileColumn, setMobileColumn] = useState<Column["key"]>("active");
+  const boardRef = useAnimatedList(issues, mobileColumn);
   // Логи ученика — прямо с карточки, модалкой поверх доски (не уходя со
   // страницы). Вместе с почтой несём описание тикета: оно же и есть "опиши
   // ситуацию" для ИИ-разбора, и перепечатывать его руками незачем.
@@ -188,6 +190,7 @@ export function KanbanBoard({
       </div>
 
       <div
+        ref={boardRef}
         className={`grid grid-cols-1 sm:grid-cols-3 ${large ? "gap-4" : "gap-3"}`}
       >
         {COLUMNS.map((column) => {
@@ -246,6 +249,7 @@ export function KanbanBoard({
                 return (
                   <div
                     key={issue.id}
+                    data-motion-key={issue.id}
                     draggable
                     onDragStart={() => setDraggingId(issue.id)}
                     onDragEnd={() => {
