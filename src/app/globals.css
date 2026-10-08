@@ -1,20 +1,15 @@
 @import "tailwindcss";
 
-/*
- * Тема повторяет бренд JUZ40 (juz40-edu.kz): фирменный ярко-синий #2a60f7
- * как основной (он же доминирует на лендинге), шрифт Inter. Раньше тут была
- * бирюза #285b6e — это фактически было не в бренде, отсюда «чужой/серый» вид.
- * Приложение всегда светлое — без auto dark mode.
- */
+/* Светлое рабочее пространство в стиле учебной платформы JUZ40. */
 @theme {
-  --color-background: #f4f7fe;
+  --color-background: #f5f6f8;
   --color-foreground: #1f293e;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 
   /* Основной бренд — синий JUZ40 (кнопки, активная навигация); 600 = #2a60f7 */
-  --color-brand-50: #f0f3ff;
-  --color-brand-100: #e3e9ff;
+  --color-brand-50: #eef7ff;
+  --color-brand-100: #e3f1ff;
   --color-brand-200: #c4d2ff;
   --color-brand-300: #9db4ff;
   --color-brand-400: #6b8bff;
@@ -105,7 +100,7 @@ body {
 }
 @keyframes j40-pulse-ring {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, #2898bd 45%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, #2a60f7 24%, transparent);
   }
   70% {
     box-shadow: 0 0 0 8px transparent;
@@ -127,6 +122,92 @@ body {
 /* Ненавязчивый «пинг» на только что изменившемся элементе */
 .j40-ping {
   animation: j40-pulse-ring 1s ease-out;
+}
+
+/* Layout and interactions are scoped to the staff workspace. */
+.support-header {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  padding: 14px 28px;
+  background: white;
+  border-bottom: 1px solid #edf0f5;
+}
+.support-wordmark {
+  color: #2b6071;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -1.5px;
+}
+.support-wordmark span {
+  display: block;
+  margin-top: 6px;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 4px;
+}
+.support-workspace { display: flex; align-items: flex-start; gap: 4px; padding: 20px 20px 20px 16px; }
+.support-sidebar {
+  position: sticky;
+  top: 20px;
+  flex-shrink: 0;
+  width: 224px;
+  padding: 12px;
+  border-radius: 22px;
+  background: white;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+.support-nav-caption { padding: 12px 12px 16px; color: #8994aa; font-size: 11px; }
+.support-nav-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  color: #566078;
+  font-size: 14px;
+  text-align: left;
+  transition: background-color 160ms ease, color 160ms ease, transform 120ms ease;
+}
+.support-nav-link svg { color: #8a96af; }
+.support-nav-link:hover { background: #f5f8fc; color: #2a60f7; }
+.support-nav-link[aria-current="page"] { background: #e4f2ff; color: #1675ef; font-weight: 600; }
+.support-nav-link[aria-current="page"] svg { color: #1675ef; }
+.support-nav-link:active { transform: scale(.98); }
+.support-nav-count { margin-left: auto; border-radius: 8px; padding: 2px 6px; background: #edf3fc; color: #2a60f7; font-size: 11px; font-variant-numeric: tabular-nums; }
+.support-sidebar-footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #f0f2f6; }
+.support-inbox-link { position: relative; padding: 10px; border-radius: 12px; color: #566078; transition: background-color 160ms; }
+.support-inbox-link:hover { background: #e4f2ff; }
+.support-notification-dot { position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: #efc957; border: 1px solid white; }
+.support-skip-link { position: fixed; top: -100px; left: 16px; z-index: 100; padding: 12px; background: white; color: #2a60f7; }
+.support-skip-link:focus { top: 12px; }
+.support-surface { background: white; border: 1px solid #edf0f5; border-radius: 22px; padding: 24px; }
+.support-ticket { transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease; }
+.support-ticket:hover { box-shadow: 0 5px 18px #26395b08; }
+.support-shell button:not(:disabled) { cursor: pointer; }
+.support-shell button { transition-duration: 160ms; }
+.support-shell input, .support-shell textarea, .support-shell select { transition: border-color 160ms, box-shadow 160ms; }
+.support-progress { transition: width 360ms cubic-bezier(.2,.8,.2,1); }
+@media (max-width: 1100px) {
+  .support-sidebar { width: 68px; padding: 8px; border-radius: 18px; }
+  .support-nav-caption, .support-nav-label { display: none; }
+  .support-nav-link { justify-content: center; padding: 12px 8px; }
+  .support-nav-count { position: absolute; top: 0; right: 0; font-size: 9px; padding: 0 3px; }
+  .support-workspace { padding: 16px 8px; gap: 0; }
+}
+@media (max-width: 600px) {
+  .support-header { min-height: 64px; padding: 12px 16px; }
+  .support-wordmark { font-size: 25px; }
+  .support-sidebar { width: 52px; padding: 4px; top: 8px; }
+  .support-workspace { padding: 12px 4px; }
+  .support-surface { padding: 16px; border-radius: 18px; }
 }
 
 /*

@@ -904,7 +904,7 @@ export function Inbox() {
 
   return (
     <div
-      className={`mx-auto px-4 py-6 sm:px-6 ${tab === "board" ? "max-w-[1500px]" : "max-w-3xl"}`}
+      className={`mx-auto px-3 py-2 sm:px-6 ${tab === "board" ? "max-w-[1500px]" : "max-w-3xl"}`}
     >
       {confirmElement}
       {sessionExpired && (
@@ -1143,7 +1143,7 @@ export function Inbox() {
         <button
           onClick={() => setDate(todayDateString())}
           disabled={isToday}
-          className="rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50 disabled:pointer-events-none disabled:opacity-0"
+          className="rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50 disabled:pointer-events-none disabled:opacity-40"
         >
           Сегодня
         </button>
@@ -1160,7 +1160,7 @@ export function Inbox() {
             ].map((p) => (
               <div
                 key={p.l}
-                className={`min-w-[96px] rounded-xl border border-slate-200 border-t-[3px] ${p.edge} bg-white px-4 py-2.5`}
+                className={`min-w-[96px] rounded-2xl border border-slate-200 border-t-[3px] ${p.edge} bg-white px-4 py-2.5`}
               >
                 <div className="text-2xl font-extrabold leading-none tabular-nums text-slate-800">
                   {p.n}
@@ -1221,7 +1221,6 @@ export function Inbox() {
                 {autoRunning && dayRun && (
                   <span className="flex items-center gap-1 rounded-full bg-brand-50 px-1.5 py-0.5 tabular-nums text-brand-700">
                     <span className="relative flex h-1.5 w-1.5">
-                      <span className="absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75 motion-safe:animate-ping" />
                       <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-600" />
                     </span>
                     {dayRun.done}/{dayRun.total}
@@ -1416,7 +1415,7 @@ export function Inbox() {
             />
           )}
           </div>
-          <aside className="hidden w-[320px] shrink-0 xl:block">
+          <aside className="hidden w-[280px] shrink-0 min-[1440px]:block">
             <ReportLedger issues={dayIssues} groups={groups} date={date} />
           </aside>
         </div>

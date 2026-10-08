@@ -213,12 +213,12 @@ export function KanbanBoard({
                 e.preventDefault();
                 handleDrop(column);
               }}
-              className={`flex-col rounded-xl border transition ${
+              className={`flex-col rounded-[20px] border transition ${
                 mobileColumn === column.key ? "flex" : "hidden sm:flex"
               } ${large ? "gap-3 p-3 sm:min-h-[60vh]" : "gap-2 p-2 sm:min-h-[140px]"} ${
                 isOver
                   ? "border-brand-400 bg-brand-50/60 ring-2 ring-brand-200"
-                  : "border-slate-200 bg-slate-50/60"
+                  : "border-slate-100 bg-white/70"
               }`}
             >
               <div className="flex items-center justify-between px-1">
@@ -252,7 +252,7 @@ export function KanbanBoard({
                       setDraggingId(null);
                       setOverColumn(null);
                     }}
-                    className={`group/card cursor-grab rounded-lg border-l-4 border-y border-r border-slate-200 bg-white shadow-sm transition hover:-translate-y-px hover:shadow-md active:cursor-grabbing ${
+                    className={`support-ticket group/card cursor-grab rounded-2xl border-l-4 border-y border-r border-slate-200 bg-white shadow-sm transition hover:-translate-y-px hover:shadow-md active:cursor-grabbing ${
                       large ? "p-3.5 text-sm" : "p-2.5 text-sm"
                     } ${STATUS_META[issue.status].bar} ${
                       draggingId === issue.id

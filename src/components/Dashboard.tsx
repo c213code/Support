@@ -259,7 +259,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   );
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+    <div className="mx-auto max-w-6xl px-3 py-2 sm:px-6">
       {confirmElement}
       <CommandPalette
         issues={issues}
@@ -302,7 +302,25 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
           );
         })()}
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-6 grid gap-4 lg:grid-cols-[1fr_280px]">
+        <div className="support-surface flex flex-col justify-center">
+          <p className="mb-2 text-xs font-medium text-slate-400">JUZ40 · Поддержка</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-800">Обращения за день</h1>
+          <p className="mt-2 text-sm leading-relaxed text-slate-500">Все вопросы, решения и репорт — в одном месте.</p>
+        </div>
+        <div className="rounded-[22px] bg-[#108d96] p-6 text-white">
+          <p className="text-sm font-medium text-white/85">Прогресс дня</p>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-3xl font-semibold tabular-nums">{loading ? "—" : resolvedCount}</span>
+            <span className="text-sm text-white/80">{loading ? "Загрузка…" : `из ${totalCount} решено`}</span>
+          </div>
+          <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/20" role="progressbar" aria-label="Решённые обращения" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
+            <div className="support-progress h-full rounded-full bg-white" style={{ width: `${loading ? 0 : progressPercent}%` }} />
+          </div>
+        </div>
+      </div>
+
+      <div className="support-surface mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setDate(shiftDateString(date, -1))}
@@ -333,29 +351,10 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
         </div>
 
         <div className="flex items-center gap-3">
-          {!loading && totalCount > 0 && (
-            // Прогресс дня строкой из цифр читался как справка; полоса
-            // отвечает на главный вопрос "мы близко к концу?" одним взглядом,
-            // не требуя считать в уме.
-            <div
-              className="flex items-center gap-2"
-              title={`${resolvedCount} из ${totalCount} тикетов решено`}
-            >
-              <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-200">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-              <span className="text-xs font-medium tabular-nums text-slate-500">
-                {resolvedCount}/{totalCount}
-              </span>
-            </div>
-          )}
           <button
             onClick={() => setDate(todayDateString())}
             disabled={isToday}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 transition hover:bg-brand-50 disabled:pointer-events-none disabled:opacity-0"
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 transition hover:bg-brand-50 disabled:pointer-events-none disabled:opacity-40"
           >
             Сегодня
           </button>
@@ -381,7 +380,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
           {grouped.map((group) => {
             const color = groupColor(group.name);
             return (
-              <section key={group.name}>
+              <section key={group.name} className="support-surface">
                 <h2 className="mb-2 flex items-center gap-2">
                   <span
                     className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${color.bg} ${color.text}`}
@@ -416,9 +415,9 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                           style={{
                             animationDelay: `${Math.min(index, 6) * 25}ms`,
                           }}
-                          className={`j40-slide-up group/row rounded-xl border-l-4 border-y border-r border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md ${STATUS_META[issue.status].bar}`}
+                          className={`j40-slide-up support-ticket group/row rounded-2xl border-l-4 border-y border-r border-slate-200 bg-white p-4 transition hover:border-slate-300 ${STATUS_META[issue.status].bar}`}
                         >
-                          <div className="flex items-start justify-between gap-3">
+                          <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
                             <div className="flex-1">
                               <p className="text-sm text-slate-900">
                                 {index + 1}. {issue.description}
@@ -535,7 +534,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                                 одинаково: проявляются на наведении, чтобы
                                 колонка «Изменить/Удалить» не тянула на себя
                                 внимание в каждой строке. */}
-                            <div className="flex shrink-0 flex-col items-end gap-1.5 transition-opacity sm:opacity-0 sm:group-hover/row:opacity-100 sm:focus-within:opacity-100">
+                            <div className="flex shrink-0 flex-wrap items-center gap-3 sm:flex-col sm:items-end sm:gap-1.5 transition-opacity sm:opacity-0 sm:group-hover/row:opacity-100 sm:focus-within:opacity-100">
                               <div className="flex gap-0.5">
                                 <button
                                   onClick={() =>
@@ -626,7 +625,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
             {/* Шапка липкая внутри секции: репорт за насыщенный день не
                 помещается на экран, и кнопка "Скопировать" уезжала вверх
                 ровно тогда, когда до неё дочитывали. */}
-            <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-2.5 backdrop-blur">
+            <div className="sticky top-0 z-[1] flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-4 py-2.5 backdrop-blur">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 Готовый репорт
                 {!!reportText && (

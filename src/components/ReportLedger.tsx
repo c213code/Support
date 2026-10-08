@@ -8,11 +8,7 @@ import { formatDateHuman } from "@/lib/date";
 import { useToast } from "@/components/Toast";
 import { IconCopy, IconCheck } from "@/components/Icons";
 
-// Тёмная панель-«репорт» справа от доски (как на макете). Ничего не считает
-// сама — переиспользует generateReportText/groupIssues, тот же текст, что
-// копируется на Дашборде. Тикеты «Отправлено» в репорт не идут (см.
-// generateReportText), поэтому и тут показываем только то, что реально
-// произошло.
+// Репорт использует те же данные и формат, что и Дашборд.
 export function ReportLedger({
   issues,
   groups,
@@ -49,9 +45,9 @@ export function ReportLedger({
   }
 
   return (
-    <div className="sticky top-6 flex max-h-[calc(100vh-3rem)] flex-col rounded-2xl bg-[#0b1f45] p-5 text-slate-200">
+    <div className="sticky top-6 flex max-h-[calc(100vh-3rem)] flex-col rounded-[22px] border border-slate-100 bg-white p-5 text-slate-700">
       <div className="flex items-baseline justify-between">
-        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-300">
+        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-600">
           Репорт боссам
         </span>
         <span className="text-xs tabular-nums text-slate-400">
@@ -69,13 +65,13 @@ export function ReportLedger({
           <div className="space-y-4">
             {grouped.map((group) => (
               <div key={group.name}>
-                <p className="font-semibold text-brand-300">
+                <p className="font-semibold text-brand-600">
                   {group.name}
                   {group.emoji ?? ""}
                 </p>
                 <ul className="mt-1 space-y-1">
                   {group.items.map((issue) => (
-                    <li key={issue.id} className="text-slate-200">
+                    <li key={issue.id} className="text-slate-700">
                       • {issue.description}{" "}
                       <span className="text-slate-500">
                         — {STATUS_META[issue.status].label.toLowerCase()}
@@ -90,24 +86,24 @@ export function ReportLedger({
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
-        <div className="rounded-xl border border-white/10 px-3 py-2">
-          <div className="text-xl font-extrabold tabular-nums text-emerald-400">
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <div className="text-xl font-extrabold tabular-nums text-emerald-600">
             {resolved}
           </div>
           <div className="mt-0.5 text-[10.5px] font-medium text-slate-400">
             решено
           </div>
         </div>
-        <div className="rounded-xl border border-white/10 px-3 py-2">
-          <div className="text-xl font-extrabold tabular-nums text-amber-400">
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <div className="text-xl font-extrabold tabular-nums text-amber-600">
             {active}
           </div>
           <div className="mt-0.5 text-[10.5px] font-medium text-slate-400">
             в работе
           </div>
         </div>
-        <div className="rounded-xl border border-white/10 px-3 py-2">
-          <div className="text-xl font-extrabold tabular-nums text-brand-300">
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <div className="text-xl font-extrabold tabular-nums text-brand-600">
             {issues.length}
           </div>
           <div className="mt-0.5 text-[10.5px] font-medium text-slate-400">
@@ -118,7 +114,7 @@ export function ReportLedger({
 
       <button
         onClick={handleCopy}
-        className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-600/30 transition hover:bg-brand-500"
+        className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-500"
       >
         {copied ? (
           <>

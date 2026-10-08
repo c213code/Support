@@ -21,10 +21,7 @@ import {
 // «Поиск» имеет смысл (ей нужны тикеты дня).
 const PALETTE_ROUTES = new Set(["/", "/inbox"]);
 
-// Тёмная бренд-панель слева — «спина» приложения (раньше была светлая шапка
-// сверху, AppHeader). Держит ту же навигацию, счётчик «Входящих», текущего
-// агента и выход, просто вертикально. Оборачивает контент любой страницы:
-// <AppShell><Страница/></AppShell>.
+// Общая навигация рабочего пространства.
 const NAV = [
   { href: "/", label: "Сегодня", Icon: IconReport },
   { href: "/inbox", label: "Входящие", Icon: IconInbox },
@@ -80,128 +77,77 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
-  const linkClass = (active: boolean) =>
-    `relative flex h-11 w-11 items-center justify-center rounded-xl transition ${
-      active
-        ? "bg-white/12 text-white"
-        : "text-slate-400 hover:bg-white/8 hover:text-slate-100"
-    }`;
+  const navigation = [
+    ...NAV,
+    ...(SUPPORT_UI_TOOLS.changeContact && platformTool
+      ? [{ href: "/platform/change-email", label: "Контакты ученика", Icon: IconMail }]
+      : []),
+    ...(platformTool
+      ? [{ href: "/platform/reset-unt", label: "Обнуление ДТ", Icon: IconRefresh }]
+      : []),
+    ...(SUPPORT_UI_TOOLS.logs && logsTool
+      ? [{ href: "/logs", label: "Логи", Icon: IconDatabase }]
+      : []),
+  ];
 
   return (
-    <div className="flex min-h-screen">
-      <nav
-        aria-label="Разделы"
-        className="sticky top-0 z-20 flex h-screen w-[64px] shrink-0 flex-col items-center gap-1 bg-[#0b1f45] py-3.5"
-      >
-        <Link
-          href="/"
-          className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-[11px] font-extrabold tracking-tight text-white shadow-lg shadow-brand-600/40"
-          title="JUZ40 Support"
-        >
-          J40
+    <div className="support-shell min-h-screen">
+      <a href="#main-content" className="support-skip-link">Перейти к содержимому</a>
+      <header className="support-header">
+        <Link href="/" aria-label="JUZ40 Support — главная" className="support-wordmark">
+          JUZ40
+          <span>SUPPORT</span>
         </Link>
+        <span className="hidden text-sm text-slate-400 sm:block">Рабочее пространство поддержки</span>
+        <div className="ml-auto flex min-w-0 items-center gap-3">
+          <Link href="/inbox" className="support-inbox-link" aria-label={`Входящие${inboxCount ? `: ${inboxCount}` : ""}`} title="Входящие">
+            <IconInbox className="h-5 w-5" />
+            {!!inboxCount && <span className="support-notification-dot" />}
+          </Link>
+          {currentAgent && (
+            <>
+              <span className="hidden max-w-40 truncate text-sm font-medium text-slate-600 sm:block">{currentAgent}</span>
+              <span title={currentAgent} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-600 text-sm font-semibold text-white">
+                {currentAgent.slice(0, 1).toUpperCase()}
+              </span>
+            </>
+          )}
+        </div>
+      </header>
 
-        {NAV.map(({ href, label, Icon }) => {
-          const active = pathname === href;
-          return (
-            <Link
-              key={href}
-              href={href}
-              title={label}
-              aria-label={label}
-              className={linkClass(active)}
-            >
-              {active && (
-                <span className="absolute -left-3.5 top-2.5 bottom-2.5 w-[3px] rounded-r bg-brand-500" />
-              )}
-              <Icon className="h-[19px] w-[19px]" />
+      <div className="support-workspace">
+        <nav aria-label="Разделы" className="support-sidebar">
+          <p className="support-nav-caption">Рабочее пространство</p>
+          {navigation.map(({ href, label, Icon }) => (
+            <Link key={href} href={href} title={label} aria-label={label}
+              aria-current={pathname === href ? "page" : undefined}
+              className="support-nav-link">
+              <Icon className="h-5 w-5 shrink-0" />
+              <span className="support-nav-label">{label}</span>
               {href === "/inbox" && !!inboxCount && (
-                <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full border-2 border-[#0b1f45] bg-amber-400 px-1 text-[10px] font-bold text-amber-950">
-                  {inboxCount}
-                </span>
+                <span className="support-nav-count">{inboxCount > 99 ? "99+" : inboxCount}</span>
               )}
             </Link>
-          );
-        })}
+          ))}
 
-        {SUPPORT_UI_TOOLS.changeContact && platformTool && (
-          <Link
-            href="/platform/change-email"
-            title="Смена почты или номера ученику"
-            aria-label="Смена почты или номера ученику"
-            className={linkClass(pathname === "/platform/change-email")}
-          >
-            {pathname === "/platform/change-email" && (
-              <span className="absolute -left-3.5 top-2.5 bottom-2.5 w-[3px] rounded-r bg-brand-500" />
-            )}
-            <IconMail className="h-[19px] w-[19px]" />
-          </Link>
-        )}
-
-        {platformTool && (
-          <Link
-            href="/platform/reset-unt"
-            title="Обнуление результата ДТ"
-            aria-label="Обнуление результата ДТ"
-            className={linkClass(pathname === "/platform/reset-unt")}
-          >
-            {pathname === "/platform/reset-unt" && (
-              <span className="absolute -left-3.5 top-2.5 bottom-2.5 w-[3px] rounded-r bg-brand-500" />
-            )}
-            <IconRefresh className="h-[19px] w-[19px]" />
-          </Link>
-        )}
-
-        {SUPPORT_UI_TOOLS.logs && logsTool && (
-          <Link
-            href="/logs"
-            title="Логи (Elasticsearch)"
-            aria-label="Логи"
-            className={linkClass(pathname === "/logs")}
-          >
-            {pathname === "/logs" && (
-              <span className="absolute -left-3.5 top-2.5 bottom-2.5 w-[3px] rounded-r bg-brand-500" />
-            )}
-            <IconDatabase className="h-[19px] w-[19px]" />
-          </Link>
-        )}
-
-        {SUPPORT_UI_TOOLS.sidebarSearch && PALETTE_ROUTES.has(pathname) && (
-          <button
-            onClick={() =>
-              window.dispatchEvent(
-                new KeyboardEvent("keydown", { key: "k", metaKey: true })
-              )
-            }
-            title="Поиск по тикетам и командам (⌘K)"
-            aria-label="Поиск по тикетам и командам"
-            className="mt-1 flex h-11 w-11 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/8 hover:text-slate-100"
-          >
-            <IconSearch className="h-[19px] w-[19px]" />
-          </button>
-        )}
-
-        <div className="flex-1" />
-
-        {currentAgent && (
-          <span
-            title={currentAgent}
-            className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-sm font-semibold text-slate-100"
-          >
-            {currentAgent.slice(0, 1).toUpperCase()}
-          </span>
-        )}
-        <button
-          onClick={handleLogout}
-          title="Выйти"
-          aria-label="Выйти"
-          className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/8 hover:text-slate-100"
-        >
-          <IconLogout className="h-[18px] w-[18px]" />
-        </button>
-      </nav>
-
-      <main className="min-w-0 flex-1">{children}</main>
+          {SUPPORT_UI_TOOLS.sidebarSearch && PALETTE_ROUTES.has(pathname) && (
+            <button
+              onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+              title="Поиск по тикетам и командам (⌘K)" aria-label="Поиск по тикетам и командам"
+              className="support-nav-link">
+              <IconSearch className="h-5 w-5 shrink-0" />
+              <span className="support-nav-label">Поиск</span>
+            </button>
+          )}
+          <div className="support-sidebar-footer">
+            <button onClick={handleLogout} title="Выйти" aria-label="Выйти" className="support-nav-link">
+              <IconLogout className="h-5 w-5 shrink-0" />
+              <span className="support-nav-label">Выйти</span>
+            </button>
+          </div>
+        </nav>
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1">{children}</main>
+      </div>
     </div>
   );
 }
