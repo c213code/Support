@@ -543,14 +543,19 @@ export type UntResultMatch = {
 // /report принимает student= и сам фильтрует по email/телефону на стороне
 // платформы (это тот же параметр, что использует админ-панель) — здесь его
 // не переизобретаем, только читаем результат.
+//
+// combinationId — тот же фильтр «Комбинация», что в админ-панели
+// (combinationIds=): нужен, когда ищем не по почте, а по фамилии — без него
+// однофамильцы со всего теста.
 export async function findUntResults(
   untId: string,
   product: string,
-  student: string
+  student: string,
+  combinationId?: string
 ): Promise<UntResultMatch[]> {
-  const res = await authed(
-    `/v1/unts/${untId}/report?product=${encodeURIComponent(product)}&student=${encodeURIComponent(student)}`
-  );
+  const params = new URLSearchParams({ product, student });
+  if (combinationId) params.set("combinationIds", combinationId);
+  const res = await authed(`/v1/unts/${untId}/report?${params}`);
   if (!res.ok) {
     throw new PlatformError(`Поиск результата не удался (HTTP ${res.status})`, "upstream_error");
   }
@@ -567,6 +572,83 @@ export async function findUntResults(
       score: typeof r.score === "number" ? r.score : 0,
     }))
     .filter((r) => r.resultId);
+}
+
+// Запасной путь, когда по почте/телефону в отчёте пусто: результат ДТ мог
+// лечь на другой аккаунт того же ученика (старая почта, второй аккаунт), и
+// агент ищет его в отчёте руками — фильтр «Комбинация» + фамилия в поиске.
+// Отсюда — то, что для этого нужно знать об ученике: имя, фамилия и id его
+// комбинации. У ученика в профиле хранятся только два предмета
+// (subjectCombination.first/second), а отчёт фильтрует по id комбинации из
+// справочника /v2/subjects/combinations — сопоставляем по паре предметов
+// без учёта порядка.
+export type UntStudentFallback = {
+  firstname: string | null;
+  lastname: string | null;
+  combinationId: string | null;
+  combinationName: string | null;
+};
+
+type SubjectCombination = {
+  id: string;
+  name: string;
+  firstId: string;
+  secondId: string;
+};
+
+async function listSubjectCombinations(): Promise<SubjectCombination[]> {
+  const res = await authed("/v2/subjects/combinations");
+  if (!res.ok) {
+    throw new PlatformError(
+      `Не удалось получить комбинации предметов (HTTP ${res.status})`,
+      "upstream_error"
+    );
+  }
+  const data = (await res.json().catch(() => null)) as unknown;
+  if (!Array.isArray(data)) {
+    throw new PlatformError("Платформа вернула неожиданный формат комбинаций", "upstream_error");
+  }
+  return (data as Record<string, unknown>[])
+    .map((c) => ({
+      id: String(c.id ?? ""),
+      name: String(c.name ?? ""),
+      firstId: String((c.first as { id?: unknown } | null)?.id ?? ""),
+      secondId: String((c.second as { id?: unknown } | null)?.id ?? ""),
+    }))
+    .filter((c) => c.id);
+}
+
+// null — ученика с таким контактом на платформе нет.
+export async function findStudentUntFallback(
+  contact: string
+): Promise<UntStudentFallback | null> {
+  const found = await findStudentByContact(contact);
+  if (!found) return null;
+  const raw = await getStudentRaw(found.id);
+  const sc = raw.subjectCombination as
+    | { id?: string; first?: { id?: string }; second?: { id?: string } }
+    | null;
+
+  let combination: SubjectCombination | null = null;
+  const pair = [sc?.first?.id, sc?.second?.id].filter((id): id is string => Boolean(id));
+  if (sc?.id || pair.length === 2) {
+    const all = await listSubjectCombinations();
+    combination =
+      all.find((c) => c.id === sc?.id) ??
+      all.find(
+        (c) =>
+          pair.length === 2 &&
+          new Set([c.firstId, c.secondId, ...pair]).size === 2
+      ) ??
+      null;
+  }
+
+  return {
+    firstname: raw.firstname?.trim() || null,
+    lastname: raw.lastname?.trim() || null,
+    combinationId: combination?.id ?? null,
+    combinationName: combination?.name ?? null,
+  };
 }
 
 export type UntResultStatus = {

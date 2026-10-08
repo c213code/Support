@@ -24,6 +24,19 @@ type ResultRow = {
   studentEmail: string | null;
 };
 
+// Зеркало UntSearchFallback из /api/platform/unts/search: как искали, когда
+// по почте/телефону в отчёте пусто.
+type SearchFallback =
+  | { status: "student_not_found" }
+  | { status: "no_name" }
+  | {
+      status: "searched";
+      by: "lastname" | "firstname";
+      query: string;
+      studentName: string;
+      combinationName: string | null;
+    };
+
 function isOpenNow(test: UntTest): boolean {
   if (!test.openTime || !test.endTime) return false;
   const now = Date.now();
@@ -67,6 +80,9 @@ export function ResetUntResultTool() {
   const [student, setStudent] = useState("");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<ResultRow[] | null>(null);
+  const [fallback, setFallback] = useState<SearchFallback | null>(null);
+  // С чем искали — строки, найденные по фамилии, сверяем с этой почтой.
+  const [searchedFor, setSearchedFor] = useState("");
 
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
@@ -160,6 +176,7 @@ export function ResetUntResultTool() {
     if (!selectedTest || !product.trim() || !student.trim() || searching) return;
     setSearching(true);
     setResults(null);
+    setFallback(null);
     setDoneIds(new Set());
     try {
       const params = new URLSearchParams({
@@ -174,6 +191,8 @@ export function ResetUntResultTool() {
         return;
       }
       setResults(data.results ?? []);
+      setFallback(data.fallback ?? null);
+      setSearchedFor(student.trim());
     } catch (err) {
       toast(`Сеть недоступна: ${String(err)}`, "error");
     } finally {
@@ -300,7 +319,7 @@ export function ResetUntResultTool() {
             </div>
             <div className="min-w-0 flex-1">
               <label className="mb-1 block text-xs text-slate-600">
-                Почта или телефон ученика
+                Почта, телефон или фамилия ученика
               </label>
               <input
                 value={student}
@@ -321,7 +340,8 @@ export function ResetUntResultTool() {
 
           {results && (
             <div className="mt-4 space-y-2">
-              {results.length === 0 && (
+              {fallback && <FallbackNote fallback={fallback} found={results.length > 0} />}
+              {results.length === 0 && !fallback && (
                 <p className="text-sm text-slate-400">
                   У этого ученика нет результата по выбранным тесту и продукту.
                 </p>
@@ -344,6 +364,14 @@ export function ResetUntResultTool() {
                         </p>
                         <p className="font-mono text-xs text-slate-500">
                           {row.studentEmail ?? "—"} · балл {row.score}
+                          {fallback?.status === "searched" &&
+                            searchedFor.includes("@") &&
+                            row.studentEmail &&
+                            row.studentEmail.toLowerCase() !== searchedFor.toLowerCase() && (
+                              <span className="ml-1.5 rounded bg-amber-50 px-1 py-0.5 font-sans text-[11px] font-medium text-amber-700">
+                                другая почта
+                              </span>
+                            )}
                         </p>
                         {row.finishTime && (
                           <p className="text-xs text-slate-500">
@@ -400,6 +428,46 @@ export function ResetUntResultTool() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Объяснение запасного поиска: строки ниже найдены не по почте, а по
+// фамилии/имени в комбинации ученика — это может быть второй аккаунт того же
+// ученика или однофамилец, и обнулять можно только после сверки.
+function FallbackNote({ fallback, found }: { fallback: SearchFallback; found: boolean }) {
+  if (fallback.status === "student_not_found") {
+    return (
+      <p className="text-sm text-slate-500">
+        По почте результата нет, и ученика с таким контактом на платформе не нашли. Впишите
+        фамилию ученика в поле вместо почты.
+      </p>
+    );
+  }
+  if (fallback.status === "no_name") {
+    return (
+      <p className="text-sm text-slate-500">
+        По почте результата нет, а в профиле ученика не заполнены имя и фамилия — искать по ним
+        нечем.
+      </p>
+    );
+  }
+  const by = fallback.by === "lastname" ? "фамилии" : "имени";
+  const where = fallback.combinationName
+    ? `в комбинации ${fallback.combinationName}`
+    : "по всему тесту (комбинацию ученика определить не удалось)";
+  if (!found) {
+    return (
+      <p className="text-sm text-slate-500">
+        Результата нет ни по почте, ни по {by} «{fallback.query}» {where}.
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      По почте результата нет — нашли по {by} «{fallback.query}» {where}. Ученик:{" "}
+      <span className="font-medium">{fallback.studentName}</span>. Это может быть другой аккаунт
+      ученика или однофамилец — сверьте имя и почту перед обнулением.
     </div>
   );
 }
