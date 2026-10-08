@@ -1,3 +1,4 @@
+import { SupportPageHeader } from "@/components/SupportPageHeader";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { prisma } from "@/lib/prisma";
@@ -29,20 +30,17 @@ export default async function HistoryPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6">
-        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-lg font-semibold text-slate-900">
-            История репортов
-          </h1>
+      <div className="support-page max-w-5xl">
+        <SupportPageHeader title="История репортов" description="Обращения и результаты работы за предыдущие дни.">
           {rows.length > 0 && (
-            <p className="text-xs text-slate-400">
-              {rows.length} дн. · {totalIssues} тикет(ов) всего
-            </p>
+            <div className="rounded-2xl bg-brand-50 px-4 py-3 text-sm font-medium text-brand-700">
+              {rows.length} дн. · {totalIssues} тикет(ов)
+            </div>
           )}
-        </div>
+        </SupportPageHeader>
 
         {rows.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-400">
+          <p className="support-empty text-sm">
             Пока нет ни одного репорта.
           </p>
         ) : (
@@ -56,7 +54,7 @@ export default async function HistoryPage() {
                   <Link
                     href={`/?date=${row.reportDate}`}
                     style={{ animationDelay: `${Math.min(index, 8) * 25}ms` }}
-                    className="j40-slide-up flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm transition hover:-translate-y-px hover:border-brand-300 hover:shadow-md"
+                    className="support-panel support-ticket j40-slide-up flex items-center gap-4 px-5 py-5 text-sm transition hover:border-brand-300"
                   >
                     <span className="flex-1 font-medium text-slate-900">
                       {formatDateHuman(row.reportDate)}

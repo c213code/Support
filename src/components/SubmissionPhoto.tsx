@@ -114,7 +114,7 @@ export function SubmissionPhoto({ issueId, count = 1 }: { issueId: string; count
             <div
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
-              className="mx-auto w-fit max-w-full rounded-xl bg-white p-2 shadow-xl"
+              className="support-dialog-surface mx-auto w-fit max-w-full p-2"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

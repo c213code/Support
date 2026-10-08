@@ -948,8 +948,8 @@ export function Inbox() {
         />
       )}
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-slate-900">Входящие</h1>
+      <div className="support-surface mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-800">Входящие</h1>
         {/* flex-wrap: на телефоне кнопки не помещаются в строку, и
             переключатель «Сообщения / Доска» уезжал за край экрана. */}
         <div className="flex flex-wrap items-center gap-3">
@@ -1110,7 +1110,7 @@ export function Inbox() {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="support-surface mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setDate(shiftDateString(date, -1))}
@@ -1430,7 +1430,7 @@ export function Inbox() {
               onClose={() => setMergingIssueId(null)}
               labelledBy="merge-title"
             >
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+              <div className="support-dialog-surface p-5 sm:p-6">
                 <p
                   id="merge-title"
                   className="mb-1 text-sm font-semibold text-slate-900"
@@ -1659,13 +1659,13 @@ export function Inbox() {
           ))}
         </div>
       ) : messages.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+        <p className="support-empty text-sm">
           {isToday
             ? "За сегодня пока нет сообщений. Как только бот подключится к группам — они появятся здесь."
             : "За этот день сообщений нет."}
         </p>
       ) : filteredMessages.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+        <p className="support-empty text-sm">
           По этому фильтру сообщений нет.
         </p>
       ) : (
@@ -1673,7 +1673,7 @@ export function Inbox() {
           {filteredMessages.map((message) => (
             <div
               key={message.id}
-              className={`rounded-xl border bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow-md ${
+              className={`support-ticket rounded-[20px] border bg-white p-4 transition hover:border-brand-200 ${
                 message.viewed
                   ? "border-slate-200"
                   : "border-accent-400/40 bg-accent-500/5"

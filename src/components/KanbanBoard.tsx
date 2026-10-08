@@ -634,7 +634,7 @@ export function KanbanBoard({
 
       {SUPPORT_UI_TOOLS.logs && logsFor && (
         <Modal onClose={() => setLogsFor(null)} size="xl" labelledBy="logs-modal-title">
-          <div className="max-h-[85vh] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
+          <div className="support-dialog-surface max-h-[85vh] overflow-y-auto">
             <LogsExplorer
               initialEmail={logsFor.email}
               initialSituation={logsFor.situation}

@@ -354,7 +354,7 @@ export function IssueForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+      className="space-y-4 support-panel p-5 sm:p-6"
     >
       <div className="flex items-center justify-between gap-3">
         {showGroupPicker && !fixedGroupName ? (

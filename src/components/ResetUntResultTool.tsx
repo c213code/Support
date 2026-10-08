@@ -1,5 +1,7 @@
 "use client";
 
+import { SupportPageHeader } from "@/components/SupportPageHeader";
+
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { formatDateTimeAlmaty } from "@/lib/date";
@@ -208,18 +210,12 @@ export function ResetUntResultTool() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <h1 className="mb-1 text-lg font-semibold text-slate-900">
-        Обнуление результата ДТ
-      </h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Только для завершённых попыток — снимает хвост, из-за которого
-        телефон/почта считаются занятыми валидацией, а не отменяет решение.
-      </p>
+    <div className="support-page max-w-3xl">
+      <SupportPageHeader title="Обнуление результата ДТ" description="Найдите тест и выберите завершённую попытку ученика." />
 
       {/* Шаг 1: тест */}
       {!selectedTest && (
-        <div>
+        <div className="support-surface">
           <input
             autoFocus
             value={testQuery}
@@ -261,7 +257,7 @@ export function ResetUntResultTool() {
 
       {/* Шаг 2: продукт + ученик */}
       {selectedTest && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="support-panel p-5 sm:p-6">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-slate-900">{selectedTest.name}</p>

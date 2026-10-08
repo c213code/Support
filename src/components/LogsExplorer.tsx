@@ -461,14 +461,14 @@ export function LogsExplorer({
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-      <div className="mb-5 flex items-start justify-between gap-3">
+    <div className="support-page max-w-6xl">
+      <div className="support-surface mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 id="logs-modal-title" className="text-lg font-semibold text-slate-900">
+          <h1 id="logs-modal-title" className="text-2xl font-semibold tracking-tight text-slate-800">
             Логи
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Прямой доступ к Elasticsearch — то же самое, что раньше искали в Kibana.
+            Поиск событий по ученику, периоду или тексту запроса.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -492,7 +492,7 @@ export function LogsExplorer({
 
       {/* Режим + строка поиска + период — один блок, чтобы искать можно было
           в одно действие: выбрал режим, ввёл значение, нажал Enter. */}
-      <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <div className="support-surface">
         <div className="mb-3 flex gap-1 rounded-lg bg-slate-100 p-1 text-sm">
           {(
             [
@@ -699,7 +699,7 @@ export function LogsExplorer({
       )}
 
       {!serviceDown && result && (
-        <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="mt-4 support-panel overflow-hidden">
           {result.hits.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-4 py-14 text-center">
               <IconDatabase className="h-8 w-8 text-slate-300" />
@@ -843,7 +843,7 @@ export function LogsExplorer({
                                   <p className="mb-1 text-[11px] font-semibold text-slate-500">
                                     Что отправили (requestBody)
                                   </p>
-                                  <pre className="max-h-64 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-100">
+                                  <pre className="max-h-64 overflow-auto support-code p-3 font-mono text-xs">
                                     {requestBody}
                                   </pre>
                                 </div>
@@ -853,7 +853,7 @@ export function LogsExplorer({
                                   <p className="mb-1 text-[11px] font-semibold text-slate-500">
                                     Что ответили (responseBody)
                                   </p>
-                                  <pre className="max-h-64 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-100">
+                                  <pre className="max-h-64 overflow-auto support-code p-3 font-mono text-xs">
                                     {responseBody}
                                   </pre>
                                 </div>
@@ -871,7 +871,7 @@ export function LogsExplorer({
                                   : "Показать полный документ (со служебными полями)"}
                               </button>
                               {showRawFor === key && (
-                                <pre className="max-h-80 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-100">
+                                <pre className="max-h-80 overflow-auto support-code p-3 font-mono text-xs">
                                   {JSON.stringify(hit.raw, null, 2)}
                                 </pre>
                               )}

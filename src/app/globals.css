@@ -242,6 +242,40 @@ body {
   .support-nav-link svg { transition: color 160ms, translate 160ms; }
 }
 
+/* Shared components for every staff page, including sign-in and dialogs. */
+.support-page { margin-inline: auto; padding: 8px 12px; }
+.support-panel, .support-dialog-surface {
+  border: 1px solid #e9edf4;
+  border-radius: 22px;
+  background: white;
+}
+.support-dialog-surface { box-shadow: 0 20px 64px #1f293e14; }
+.support-dialog :where(h1, h2) { font-size: 20px; line-height: 1.4; letter-spacing: -.02em; }
+:is(.support-shell, .support-login) :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not([type="range"]), textarea, select) {
+  border-radius: 12px;
+  border-color: #dce3ee;
+  background-color: white;
+  color: #1f293e;
+  transition: border-color 160ms, box-shadow 160ms;
+}
+:is(.support-shell, .support-login) :where(input, textarea, select):focus-visible {
+  border-color: #6b8bff;
+  outline: 2px solid #c4d2ff;
+  outline-offset: 2px;
+}
+:is(.support-shell, .support-login) :where(input, textarea, select):disabled { background-color: #f5f6f8; color: #8a96af; }
+:is(.support-shell, .support-login) :where(button.rounded-lg, button.rounded-md) { border-radius: 10px; }
+.support-dialog button:not([role="switch"]):not([role="tab"]) { min-height: 32px; }
+.support-login button { transition: background-color 160ms, color 160ms, scale 160ms; }
+.support-login button:not(:disabled):active { scale: .98; }
+.support-empty { border: 1px dashed #dce3ee; border-radius: 20px; background: white; padding: 32px 20px; text-align: center; color: #7c89a0; }
+.support-code { border: 1px solid #e9edf4; background: #f5f7fb; color: #334155; border-radius: 12px; }
+@media (min-width: 640px) { .support-page { padding-inline: 24px; } }
+@media (max-width: 600px) {
+  .support-dialog-surface, .support-panel { border-radius: 18px; }
+  .support-dialog :where(h1, h2) { font-size: 18px; }
+}
+
 /*
  * Уважение к системной настройке «меньше движения»: интерфейс рабочий, и
  * для тех, кому анимации мешают, они должны исчезать полностью, а не
@@ -261,5 +295,5 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .support-shell button:active, .support-nav-link:active { scale: none; transform: none; }
+  .support-shell button:active, .support-login button:active, .support-nav-link:active { scale: none; transform: none; }
 }

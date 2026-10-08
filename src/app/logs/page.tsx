@@ -1,3 +1,4 @@
+import { SupportUnavailable } from "@/components/SupportPageHeader";
 import { AppShell } from "@/components/AppShell";
 import { LogsExplorer } from "@/components/LogsExplorer";
 import { logsServiceEnabled } from "@/lib/logsClient";
@@ -13,18 +14,7 @@ export default function LogsPage() {
       {enabled ? (
         <LogsExplorer />
       ) : (
-        <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
-          <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-600">
-            <h1 className="mb-2 text-lg font-semibold text-slate-900">Логи</h1>
-            <p className="text-sm">
-              Инструмент не настроен на сервере. Задай переменные окружения{" "}
-              <code className="rounded bg-slate-100 px-1">LOGS_SERVICE_URL</code>{" "}
-              и{" "}
-              <code className="rounded bg-slate-100 px-1">LOGS_SERVICE_TOKEN</code>{" "}
-              (адрес и токен сервиса juz40-vpn-logs) и передеплой.
-            </p>
-          </div>
-        </div>
+        <SupportUnavailable title="Логи" />
       )}
     </AppShell>
   );

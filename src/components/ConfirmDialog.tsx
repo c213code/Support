@@ -43,7 +43,7 @@ export function ConfirmDialog({
 
   return (
     <Modal onClose={onClose} labelledBy="confirm-title">
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+      <div className="support-dialog-surface p-5 sm:p-6">
         <h2
           id="confirm-title"
           className="text-sm font-semibold text-slate-900"

@@ -96,7 +96,7 @@ export function EscalateDialog({
     <Modal onClose={onCancel} labelledBy="escalate-title">
       <form
         onSubmit={handleSubmit}
-        className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
+        className="space-y-4 support-dialog-surface p-5 sm:p-6"
       >
         <div>
           <h2

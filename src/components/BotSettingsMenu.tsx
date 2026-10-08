@@ -67,7 +67,7 @@ export function BotSettingsMenu({ toggles }: { toggles: ToggleSpec[] }) {
         )}
       </button>
 
-      <div id={menuId} data-open={open} inert={!open} className="j40-menu absolute right-0 z-30 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+      <div id={menuId} data-open={open} inert={!open} className="j40-menu absolute right-0 z-30 mt-1 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
         {toggles.map((t) => (
           <button
             key={t.key}

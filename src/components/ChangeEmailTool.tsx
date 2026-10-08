@@ -1,5 +1,7 @@
 "use client";
 
+import { SupportPageHeader } from "@/components/SupportPageHeader";
+
 import { useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { formatKzPhone, normalizeKzPhone } from "@/lib/phone";
@@ -164,13 +166,8 @@ export function ChangeEmailTool() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <h1 className="mb-1 text-lg font-semibold text-slate-900">
-        Смена почты или номера ученику
-      </h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Основная платформа JUZ40. Почта — это и логин ученика, меняются вместе.
-      </p>
+    <div className="support-page max-w-3xl">
+      <SupportPageHeader title="Смена почты или номера ученику" description="Найдите ученика и обновите его контактные данные." />
 
       {/* Успех */}
       {done && (
@@ -193,7 +190,7 @@ export function ChangeEmailTool() {
 
       {/* Поиск + выбор */}
       {!done && !selected && (
-        <div>
+        <div className="support-surface">
           <input
             autoFocus
             value={query}
@@ -229,7 +226,7 @@ export function ChangeEmailTool() {
 
       {/* Выбран ученик: ввод новой почты + подтверждение */}
       {!done && selected && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="support-panel p-5 sm:p-6">
           <div className="mb-4">
             <p className="text-sm font-medium text-slate-900">
               {fullName(selected)}

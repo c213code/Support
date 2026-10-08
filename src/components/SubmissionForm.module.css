@@ -1,47 +1,27 @@
-/* Форма обращения в мини-аппе Telegram. Выглядит как экран настроек самого
-   Telegram, а не как сайт: цвета интерфейса — из темы Telegram (он задаёт
-   --tg-theme-* внутри мини-аппа и меняет их при смене темы сам), шрифт —
-   системный, как у приложения. Свои цвета — только у плиток групп (цвета
-   доски). Запасные значения — для обычного браузера и для старых клиентов
-   Telegram, которые часть переменных (section_*, accent, destructive) не
-   задают. */
+/* Общий светлый стиль JUZ40 для формы и списка обращений. */
 
 .root {
-  --bg: var(--tg-theme-secondary-bg-color, #efeff4);
-  --section: var(--tg-theme-section-bg-color, #ffffff);
-  --text: var(--tg-theme-text-color, #000000);
-  --hint: var(--tg-theme-hint-color, #8e8e93);
-  --section-header: var(--tg-theme-section-header-text-color, #6d6d72);
-  --separator: var(--tg-theme-section-separator-color, rgba(60, 60, 67, 0.18));
-  --accent: var(--tg-theme-accent-text-color, #2481cc);
-  --button: var(--tg-theme-button-color, #2481cc);
-  --button-text: var(--tg-theme-button-text-color, #ffffff);
-  --destructive: var(--tg-theme-destructive-text-color, #e53935);
+  --bg: #f5f6f8;
+  --section: #ffffff;
+  --text: #1f293e;
+  --hint: #7c89a0;
+  --section-header: #566078;
+  --separator: #e9edf4;
+  --accent: #2a60f7;
+  --button: #2a60f7;
+  --button-text: #ffffff;
+  --destructive: #dc3545;
+  color-scheme: light;
 
   min-height: 100dvh;
   padding: 20px 16px calc(28px + env(safe-area-inset-bottom));
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Helvetica Neue",
-    "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
   /* Без этого WebView ждёт ~300 мс после тапа — не двойной ли это тап для
      увеличения, — и кнопки ощущаются заторможенными. */
   touch-action: manipulation;
-}
-
-@media (prefers-color-scheme: dark) {
-  .root {
-    --bg: var(--tg-theme-secondary-bg-color, #000000);
-    --section: var(--tg-theme-section-bg-color, #1c1c1e);
-    --text: var(--tg-theme-text-color, #ffffff);
-    --hint: var(--tg-theme-hint-color, #8e8e93);
-    --section-header: var(--tg-theme-section-header-text-color, #8d8e93);
-    --separator: var(--tg-theme-section-separator-color, rgba(84, 84, 88, 0.6));
-    --accent: var(--tg-theme-accent-text-color, #3e88f7);
-    --button: var(--tg-theme-button-color, #3e88f7);
-    --destructive: var(--tg-theme-destructive-text-color, #ff453a);
-  }
 }
 
 /* --- заголовок --- */
@@ -61,7 +41,7 @@
   color: var(--hint);
 }
 
-/* --- секции в духе «сгруппированного списка» Telegram --- */
+/* --- белые секции формы --- */
 
 .section {
   margin-top: 26px;
@@ -78,7 +58,7 @@
 
 .list {
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 18px;
   background: var(--section);
 }
 
@@ -288,7 +268,7 @@
 .notice {
   margin-top: 18px;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: 18px;
   background: var(--section);
   font-size: 14px;
   line-height: 19px;
@@ -297,7 +277,7 @@
 .error {
   margin-top: 22px;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: 18px;
   background: var(--section);
   background: color-mix(in srgb, var(--destructive) 12%, var(--section));
   color: var(--destructive);
@@ -314,7 +294,7 @@
   margin-top: 26px;
   padding: 14px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 18px;
   background: var(--button);
   color: var(--button-text);
   font: inherit;
@@ -429,23 +409,21 @@
   cursor: pointer;
 }
 
-/* --- вкладки мини-аппа: «Жаңа өтініш» / «Менің өтініштерім» ---
-   Сегментированный переключатель в духе iOS/Telegram: подложка цвета
-   секции, выбранный сегмент — кнопкой темы. */
+/* --- вкладки: светлая панель и голубой выбранный раздел --- */
 
 .tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2px;
   padding: 3px;
-  border-radius: 12px;
+  border-radius: 18px;
   background: var(--section);
 }
 
 .tab {
   padding: 9px 6px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 12px;
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -457,8 +435,8 @@
 }
 
 .tab[aria-selected="true"] {
-  background: var(--button);
-  color: var(--button-text);
+  background: #e4f2ff;
+  color: #1675ef;
   font-weight: 600;
 }
 
@@ -849,7 +827,7 @@
   border: 1px solid var(--line);
   background: var(--card);
   color: var(--text);
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 10px 16px;
   font: inherit;
   font-size: 15px;
@@ -993,7 +971,7 @@
   gap: 8px;
   margin-top: 14px;
   padding: 8px 12px;
-  border-radius: 12px;
+  border-radius: 18px;
   background: var(--section-bg, rgba(127, 127, 127, 0.12));
   color: var(--hint);
   font-size: 13px;
@@ -1004,3 +982,17 @@
 .forwardPhotos {
   margin-top: 8px;
 }
+
+.brandHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -20px -16px 24px; padding: 20px; background: white; border-bottom: 1px solid var(--separator); }
+.brand { color: #2b6071; font-size: 26px; line-height: 1; font-weight: 800; letter-spacing: -1px; }
+.brand span { display: block; margin-top: 6px; font-size: 8px; font-weight: 600; letter-spacing: 3px; }
+.brandCaption { color: var(--hint); font-size: 13px; }
+.content { width: 100%; max-width: 640px; margin-inline: auto; }
+.tabs { gap: 4px; padding: 6px; margin-bottom: 22px; border: 1px solid var(--separator); }
+.tab { padding: 12px 6px; }
+.list { border: 1px solid var(--separator); }
+.list:focus-within { border-color: #9db4ff; }
+.input:focus-visible { outline: 2px solid #9db4ff; outline-offset: -2px; }
+.root [role="tabpanel"]:not([hidden]) { animation: formReveal 180ms ease-out; }
+@keyframes formReveal { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .root [role="tabpanel"] { animation: none; } }

@@ -110,7 +110,7 @@ export function GlossaryPanel({
     // Escape во время правки отменяет правку, а не закрывает окно: модалка
     // ловит Escape раньше поля ввода, и набранное пропадало бы вместе с окном.
     <Modal onClose={() => (editingId ? setEditingId(null) : onClose())} labelledBy="glossary-title">
-      <div className="max-h-[80vh] w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+      <div className="max-h-[80vh] w-full overflow-y-auto support-dialog-surface p-5 sm:p-6">
         <div className="mb-1 flex items-start justify-between gap-3">
           <h2 id="glossary-title" className="text-sm font-semibold text-slate-900">
             🧠 Что ИИ знает о проекте

@@ -127,7 +127,7 @@ export function JiraBugDialog({
     <Modal onClose={onCancel} labelledBy="jira-bug-title" size="lg">
       <form
         onSubmit={handleCreate}
-        className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
+        className="space-y-3 support-dialog-surface p-5 sm:p-6"
       >
         <h2 id="jira-bug-title" className="text-sm font-semibold text-slate-900">
           🐞 Баг в Jira

@@ -31,10 +31,9 @@ export function MiniApp({ initialTab }: { initialTab: MiniAppTab }) {
     app.ready();
     app.expand();
     if (app.isVersionAtLeast("6.1")) {
-      // Шапка и фон вокруг страницы — того же цвета, что страница: без
-      // полосы другого цвета над формой.
-      app.setHeaderColor("secondary_bg_color");
-      app.setBackgroundColor("secondary_bg_color");
+      // Цвета Telegram-оболочки согласованы с общей светлой темой JUZ40.
+      app.setHeaderColor("#ffffff");
+      app.setBackgroundColor("#f5f6f8");
     }
     // Иначе свайп вниз при прокрутке длинной формы закрывает мини-апп.
     if (app.isVersionAtLeast("7.7")) app.disableVerticalSwipes();
@@ -66,36 +65,42 @@ export function MiniApp({ initialTab }: { initialTab: MiniAppTab }) {
         onError={() => setEnv("script-failed")}
       />
 
-      <div className={styles.tabs} role="tablist" aria-label="Бөлімдер">
-        <button
-          type="button"
-          role="tab"
-          id="tab-new"
-          aria-controls="panel-new"
-          aria-selected={tab === "new"}
-          className={styles.tab}
-          onClick={() => switchTab("new")}
-        >
-          Жаңа өтініш
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="tab-mine"
-          aria-controls="panel-mine"
-          aria-selected={tab === "mine"}
-          className={styles.tab}
-          onClick={() => switchTab("mine")}
-        >
-          Менің өтініштерім
-        </button>
-      </div>
+      <header className={styles.brandHeader}>
+        <div className={styles.brand}>JUZ40<span>SUPPORT</span></div>
+        <span className={styles.brandCaption}>Қолдау қызметі</span>
+      </header>
+      <div className={styles.content}>
+        <div className={styles.tabs} role="tablist" aria-label="Бөлімдер">
+          <button
+            type="button"
+            role="tab"
+            id="tab-new"
+            aria-controls="panel-new"
+            aria-selected={tab === "new"}
+            className={styles.tab}
+            onClick={() => switchTab("new")}
+          >
+            Жаңа өтініш
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-mine"
+            aria-controls="panel-mine"
+            aria-selected={tab === "mine"}
+            className={styles.tab}
+            onClick={() => switchTab("mine")}
+          >
+            Менің өтініштерім
+          </button>
+        </div>
 
-      <div role="tabpanel" id="panel-new" aria-labelledby="tab-new" hidden={tab !== "new"}>
-        <SubmissionForm env={env} active={tab === "new"} onShowMine={() => switchTab("mine")} />
-      </div>
-      <div role="tabpanel" id="panel-mine" aria-labelledby="tab-mine" hidden={tab !== "mine"}>
-        <MySubmissions env={env} active={tab === "mine"} onNew={() => switchTab("new")} />
+        <div role="tabpanel" id="panel-new" aria-labelledby="tab-new" hidden={tab !== "new"}>
+          <SubmissionForm env={env} active={tab === "new"} onShowMine={() => switchTab("mine")} />
+        </div>
+        <div role="tabpanel" id="panel-mine" aria-labelledby="tab-mine" hidden={tab !== "mine"}>
+          <MySubmissions env={env} active={tab === "mine"} onNew={() => switchTab("new")} />
+        </div>
       </div>
     </main>
   );

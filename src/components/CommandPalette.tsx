@@ -153,7 +153,7 @@ export function CommandPalette({
 
   return (
     <Modal onClose={close} size="lg" labelledBy="palette-input">
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+      <div className="support-dialog-surface overflow-hidden">
         <div className="flex items-center gap-2 border-b border-slate-200 px-3.5">
           <span className="text-slate-300">⌘</span>
           <input

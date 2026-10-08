@@ -373,7 +373,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
       ) : (
         <div className="space-y-6">
           {grouped.length === 0 && (
-            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+            <p className="support-empty text-sm">
               За этот день пока нет тикетов — добавь первый ниже.
             </p>
           )}
@@ -621,7 +621,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
             )}
           </section>
 
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <section className="support-panel overflow-hidden">
             {/* Шапка липкая внутри секции: репорт за насыщенный день не
                 помещается на экран, и кнопка "Скопировать" уезжала вверх
                 ровно тогда, когда до неё дочитывали. */}

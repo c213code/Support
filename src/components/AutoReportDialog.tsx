@@ -449,7 +449,7 @@ export function AutoReportDialog({
 
   return (
     <Modal onClose={onClose} size="xl" labelledBy="auto-report-title">
-      <div className="flex max-h-[85vh] flex-col rounded-2xl bg-white shadow-xl">
+      <div className="support-dialog-surface flex max-h-[85vh] flex-col">
         <div className="border-b border-slate-100 px-5 py-4">
           <h2 id="auto-report-title" className="text-base font-semibold text-slate-900">
             🤖 Авто-репорт

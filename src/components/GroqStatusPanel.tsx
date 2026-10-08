@@ -54,7 +54,7 @@ export function GroqStatusPanel({
 
   return (
     <Modal onClose={onClose} labelledBy="groq-status-title">
-      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+      <div className="w-full max-w-md support-dialog-surface p-5 sm:p-6">
         <div className="mb-1 flex items-start justify-between gap-3">
           <h2 id="groq-status-title" className="text-sm font-semibold text-slate-900">
             ⚡ Статус Groq

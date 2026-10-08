@@ -104,7 +104,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={`j40-pop-in w-full ${size === "xl" ? "max-w-5xl" : size === "wide" ? "max-w-3xl" : size === "lg" ? "max-w-lg" : "max-w-md"}`}
+        className={`support-dialog j40-pop-in w-full ${size === "xl" ? "max-w-5xl" : size === "wide" ? "max-w-3xl" : size === "lg" ? "max-w-lg" : "max-w-md"}`}
       >
         {children}
       </div>
