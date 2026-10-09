@@ -25,6 +25,7 @@ const PALETTE_ROUTES = new Set(["/", "/inbox"]);
 const NAV = [
   { href: "/", label: "Сегодня", Icon: IconReport },
   { href: "/inbox", label: "Входящие", Icon: IconInbox },
+  { href: "/feature-agent", label: "Локальный агент", Icon: IconDatabase },
   { href: "/history", label: "История", Icon: IconHistory },
 ] as const;
 

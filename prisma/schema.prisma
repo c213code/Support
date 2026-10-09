@@ -540,12 +540,50 @@ model Issue {
   submissions    IssueSubmission[]
   // Что вечерний разбор думал об этом тикете (см. ReconcileRun).
   reconcileVerdicts ReconcileVerdict[]
+  featureAgentDraft FeatureAgentDraft?
 
   @@index([reportDate])
   // Библиотека решений (src/lib/solutionLibrary.ts) на каждой карточке
   // разбора ищет закрытые тикеты за последний месяц — без этого индекса
   // это скан всей таблицы, и он растёт вместе с историей.
   @@index([status, reportDate])
+}
+
+// Черновик локального агента по конкретной версии тикета. Агент запускается
+// на ноутбуке; сайт только показывает результат дежурному и ничего не шлёт.
+model FeatureAgentDraft {
+  id              String   @id @default(cuid())
+  issueId         String   @unique
+  issue           Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  issueUpdatedAt  DateTime
+  status          String
+  feature         String?
+  summary         String
+  draft           String
+  evidence        String[] @default([])
+  missingData     String[] @default([])
+  ruleIds         String[] @default([])
+  sourcePaths     String[] @default([])
+  queries         Json
+  error           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+// Сайт задаёт enabled; ноутбук сообщает своё состояние, сохраняя настройку.
+model LocalFeatureAgentControl {
+  id             String    @id @default("local")
+  enabled        Boolean   @default(false)
+  lastSeenAt     DateTime?
+  currentIssueId String?
+  model          String?
+  reasoning      String?
+  runsDate       String?
+  runsCount      Int       @default(0)
+  dailyLimit     Int       @default(20)
+  updatedAt      DateTime  @updatedAt
 }
 
 // Обращение, поданное куратором через форму мини-аппа (/miniapp). Отдельной
