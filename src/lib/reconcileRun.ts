@@ -5,7 +5,7 @@ import { changeIssueStatus } from "@/lib/issueStatus";
 import { collectResolutionContext, resolverName } from "@/lib/resolutionNote";
 import { findResolvedSiblings, findSplitOriginal, type ResolvedSibling } from "@/lib/relatedIssue";
 import { buildUserText, reconcileIssue, type ReconcileProvider } from "@/lib/dayReconcile";
-import { MAX_CHAT_TURNS, type ReconcileChatOptions } from "@/lib/reconcileChat";
+import { isReconcileScope, MAX_CHAT_TURNS, type ReconcileChatOptions, type ReconcileScope } from "@/lib/reconcileChat";
 import { maskSensitiveForAi } from "@/lib/textClean";
 
 // «Авто-репорт» по кнопке на доске: запуск, пошаговый разбор и применение.
@@ -104,23 +104,31 @@ async function activeRunFor(reportDate: string) {
 export async function startRun(reportDate: string, startedBy: string, options: ReconcileChatOptions = {}) {
   const instruction = options.instruction?.trim();
   let instructions: string[] = [];
+  let previousScope: ReconcileScope | undefined;
   if (instruction) {
     if (options.previousRunId) {
       const previous = await prisma.reconcileRun.findFirst({
         where: { id: options.previousRunId, reportDate, startedBy },
-        select: { instructions: true },
+        select: { instructions: true, scope: true },
       });
       if (!previous) throw new Error("Диалог не найден. Начните новый диалог.");
       if (previous.instructions.length >= MAX_CHAT_TURNS) throw new Error("В диалоге уже 8 сообщений. Начните новый и укажите тему целиком.");
       instructions = previous.instructions;
+      previousScope = isReconcileScope(previous.scope) ? previous.scope : "day";
     }
     instructions = [...instructions, maskSensitiveForAi(instruction)];
   }
-  const scope = instruction && options.scope === "all_open" ? "all_open" : "day";
+  const scope = instruction ? previousScope ?? options.scope ?? "day" : "day";
   const active = instruction ? null : await activeRunFor(reportDate);
   if (active) return active;
+  const days = scope === "last_3" ? 3 : scope === "last_7" ? 7 : scope === "last_14" ? 14 : null;
   const today = await prisma.issue.findMany({
-    where: { reportDate: scope === "all_open" ? { lte: reportDate } : reportDate, status: { not: "RESOLVED" } },
+    where: {
+      reportDate: scope === "all_open" ? { lte: reportDate } : days ? {
+        gte: shiftDateString(reportDate, 1 - days), lte: reportDate,
+      } : reportDate,
+      status: { not: "RESOLVED" },
+    },
     select: { id: true, status: true, updatedAt: true },
     orderBy: { createdAt: "asc" },
   });

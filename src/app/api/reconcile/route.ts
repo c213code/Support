@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getCurrentIdentity } from "@/lib/auth";
-import { MAX_CHAT_MESSAGE, type ReconcileChatOptions } from "@/lib/reconcileChat";
+import { isReconcileScope, MAX_CHAT_MESSAGE, type ReconcileChatOptions } from "@/lib/reconcileChat";
 import { runsForDay, startRun } from "@/lib/reconcileRun";
 
 // Журнал «Авто-репорта» за день: запуски и решения по тикетам.
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       (typeof body.instruction !== "string" || !body.instruction.trim() || body.instruction.length > MAX_CHAT_MESSAGE)) {
     return NextResponse.json({ error: `Напишите сообщение от 1 до ${MAX_CHAT_MESSAGE} символов` }, { status: 400 });
   }
-  if (body?.scope !== undefined && body.scope !== "day" && body.scope !== "all_open") {
+  if (body?.scope !== undefined && !isReconcileScope(body.scope)) {
     return NextResponse.json({ error: "Неизвестная область поиска" }, { status: 400 });
   }
   if (body?.previousRunId !== undefined && (typeof body.previousRunId !== "string" || body.previousRunId.length > 100)) {

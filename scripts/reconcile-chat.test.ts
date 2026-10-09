@@ -33,6 +33,47 @@ test("chat scans all open tickets in scope without a keyword prefilter and snaps
   assert.equal((await startRun("2026-10-06", "Agent", { instruction: "мини тест решен", scope: "all_open" })).id, "run");
 });
 
+for (const [scope, firstDate] of [
+  ["last_3", "2026-10-04"],
+  ["last_7", "2026-09-30"],
+  ["last_14", "2026-09-23"],
+] as const) {
+  test(`${scope} includes the selected date and excludes older tickets`, async (t) => {
+    stub(t, prisma.issue, "findMany", async ({ where }: { where: unknown }) => {
+      assert.deepEqual(where, {
+        reportDate: { gte: firstDate, lte: "2026-10-06" },
+        status: { not: "RESOLVED" },
+      });
+      return [];
+    });
+    stub(t, prisma.reconcileRun, "create", async ({ data }: { data: RunData }) => {
+      assert.equal(data.scope, scope);
+      return { id: "run" };
+    });
+    await startRun("2026-10-06", "Agent", { instruction: "Мини-тест исправлен", scope });
+  });
+}
+
+test("follow-up keeps the original search period", async (t) => {
+  stub(t, prisma.reconcileRun, "findFirst", async () => ({
+    instructions: ["Мини-тест исправлен"], scope: "last_7",
+  }));
+  stub(t, prisma.issue, "findMany", async ({ where }: { where: unknown }) => {
+    assert.deepEqual(where, {
+      reportDate: { gte: "2026-09-30", lte: "2026-10-06" },
+      status: { not: "RESOLVED" },
+    });
+    return [];
+  });
+  stub(t, prisma.reconcileRun, "create", async ({ data }: { data: RunData }) => {
+    assert.equal(data.scope, "last_7");
+    return { id: "run" };
+  });
+  await startRun("2026-10-06", "Agent", {
+    instruction: "Кроме математики", scope: "day", previousRunId: "previous",
+  });
+});
+
 test("follow-up uses server history, keeps exceptions and restricts history to the same actor and date", async (t) => {
   stub(t, prisma.reconcileRun, "findFirst", async ({ where }: { where: { reportDate: string } }) => {
     assert.deepEqual(where, { id: "previous", reportDate: "2026-10-06", startedBy: "Agent" });

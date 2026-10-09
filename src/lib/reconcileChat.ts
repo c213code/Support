@@ -1,9 +1,26 @@
 // Общий контракт UI/API и правила адресного разбора. Поиск не отсекает
 // тикеты по ключевым словам: модель проверяет каждый тикет выбранной области.
+export const RECONCILE_SCOPES = ["day", "last_3", "last_7", "last_14", "all_open"] as const;
+export type ReconcileScope = (typeof RECONCILE_SCOPES)[number];
+
+export function isReconcileScope(value: unknown): value is ReconcileScope {
+  return RECONCILE_SCOPES.some((scope) => scope === value);
+}
+
+export function reconcileScopeLabel(scope: string, date: string): string {
+  switch (scope) {
+    case "last_3": return `открытые за 3 дня по ${date}`;
+    case "last_7": return `открытые за 7 дней по ${date}`;
+    case "last_14": return `открытые за 14 дней по ${date}`;
+    case "all_open": return `все открытые до ${date} включительно`;
+    default: return `открытые за ${date}`;
+  }
+}
+
 export type ReconcileChatOptions = {
   instruction?: string;
   previousRunId?: string;
-  scope?: "day" | "all_open";
+  scope?: ReconcileScope;
 };
 
 export const MAX_CHAT_MESSAGE = 2000;
