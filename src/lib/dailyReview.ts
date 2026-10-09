@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { dayRangeUtc, isWeekendDate } from "@/lib/date";
+import { dayRangeUtc, isWeekendDate, todayDateString } from "@/lib/date";
 import { STATUS_META, type IssueStatus } from "@/lib/status";
 import { agentTelegramEntries } from "@/lib/agentTelegram";
 import { AGENTS, SHARED_AGENT } from "@/lib/agents";
@@ -38,8 +38,8 @@ const TELEGRAM_MESSAGE_LIMIT = 4096;
 const TRUNCATION_NOTE = "…\n\n(обрезано, полный текст — на сайте)";
 
 export type DailyReviewResult =
-  | { sent: true; recipientId: number }
-  | { sent: false; reason: "no tickets" | "no recipient" };
+  | { sent: true; recipientIds: number[] }
+  | { sent: false; reason: "no tickets" | "no recipient" | "missing agents" | "delivery failed"; recipientIds?: number[] };
 
 // Общая логика для двух cron-эндпоинтов: вечерней сводки за сегодня
 // (`/api/cron/evening-report`, ~22:00) и утреннего напоминания по
@@ -65,7 +65,8 @@ export type DailyReviewResult =
 const STALL_HOURS = 3;
 
 export async function buildReviewSummary(
-  reportDate: string
+  reportDate: string,
+  askToSend = false
 ): Promise<{ text: string; keyboard: InlineKeyboard } | null> {
   const [issues, presets] = await Promise.all([
     prisma.issue.findMany({
@@ -98,6 +99,7 @@ export async function buildReviewSummary(
 
   const header = [
     `🌙 Репорт — ${reportDate}`,
+    ...(askToSend ? [`Осы репортты топқа жіберейін бе? Жіберілмесе, бот ${reportDate === todayDateString() ? "ертең" : "бүгін"} 11:00-де өзі жібереді.`] : []),
     `📨 Отправлено: ${sentCount} · 🔄 В работе/Пендинг/На завтра/Передано: ${activeCount} · ✅ Решено: ${resolvedCount}`,
     ...(stalled > 0
       ? [`⏳ Висят в работе больше ${STALL_HOURS} ч: ${stalled} — может, уже сделано?`]
@@ -147,19 +149,36 @@ export async function buildReviewSummary(
 export async function sendDailyReviewMessage(
   reportDate: string
 ): Promise<DailyReviewResult> {
-  const summary = await buildReviewSummary(reportDate);
+  const weekday = !isWeekendDate(todayDateString());
+  const summary = await buildReviewSummary(reportDate, weekday);
   if (!summary) {
     return { sent: false, reason: "no tickets" };
   }
 
-  const recipientId = await pickRecipient(reportDate);
-  if (!recipientId) {
-    return { sent: false, reason: "no recipient" };
+  let recipientIds: number[];
+  if (weekday) {
+    const byName = new Map(agentTelegramEntries());
+    const erosh = byName.get("Ерош");
+    const alpa = byName.get("Алпа");
+    if (!erosh || !alpa || erosh === alpa) {
+      return { sent: false, reason: "missing agents" };
+    }
+    recipientIds = [erosh, alpa];
+  } else {
+    const recipientId = await pickRecipient(reportDate);
+    if (!recipientId) return { sent: false, reason: "no recipient" };
+    recipientIds = [recipientId];
   }
 
-  await sendTelegramMessage(recipientId, summary.text, summary.keyboard);
-
-  return { sent: true, recipientId };
+  const delivered: number[] = [];
+  for (const recipientId of recipientIds) {
+    const sent = await sendTelegramMessage(recipientId, summary.text, summary.keyboard);
+    if (sent) delivered.push(recipientId);
+  }
+  if (delivered.length !== recipientIds.length) {
+    return { sent: false, reason: "delivery failed", recipientIds: delivered };
+  }
+  return { sent: true, recipientIds: delivered };
 }
 
 type TicketCard = { text: string; keyboard: InlineKeyboard };

@@ -9,6 +9,10 @@
       "schedule": "0 4 * * *"
     },
     {
+      "path": "/api/cron/report-auto-send",
+      "schedule": "0 6 * * *"
+    },
+    {
       "path": "/api/cron/rebuild-glossary",
       "schedule": "30 19 * * *"
     }
