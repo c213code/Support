@@ -46,9 +46,14 @@ export function shiftDateString(date: string, days: number): string {
 
 // Суббота или воскресенье — по самой дате (YYYY-MM-DD), без часового пояса:
 // дата уже календарная, по Алматы.
-export function isWeekendDate(date: string): boolean {
+// День недели даты YYYY-MM-DD: 0 — воскресенье, 6 — суббота.
+export function dayOfWeek(date: string): number {
   const [y, m, d] = date.split("-").map(Number);
-  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+export function isWeekendDate(date: string): boolean {
+  const day = dayOfWeek(date);
   return day === 0 || day === 6;
 }
 
