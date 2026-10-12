@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { generateReportText } from "@/lib/report";
+import { buildReport } from "@/lib/reportExtras";
 import { formatTimeAlmaty } from "@/lib/date";
 
 export type SendReportResult =
@@ -58,11 +58,9 @@ export async function sendReportToGroup(reportDate: string): Promise<SendReportR
     return { ok: false, reason: "already-sent", sentAt: already.sentAt };
   }
 
-  const [issues, presets] = await Promise.all([
-    prisma.issue.findMany({ where: { reportDate } }),
-    prisma.groupPreset.findMany(),
-  ]);
-  const text = generateReportText(issues, presets);
+  // HTML — ради ссылок «#4JQ9PW» на тикеты на доске; простой текст
+  // возвращаем вызывающему (его показывают в личке как «вот что ушло»).
+  const { text, html } = await buildReport(reportDate);
   if (!text) {
     return { ok: false, reason: "empty" };
   }
@@ -74,9 +72,9 @@ export async function sendReportToGroup(reportDate: string): Promise<SendReportR
     : undefined;
   // Результат отправки проверяем: раньше его не смотрели, и отклонённый
   // Telegram репорт (длиннее 4096 символов) записывался как отправленный.
-  const parts = splitReport(text);
+  const parts = splitReport(html);
   for (const [index, part] of parts.entries()) {
-    const sent = await sendTelegramMessage(targetChatId, part, undefined, targetThreadId);
+    const sent = await sendTelegramMessage(targetChatId, part, undefined, targetThreadId, "HTML");
     if (!sent) {
       if (index > 0) {
         // Начало уже в группе — журнал пишем, чтобы повторное нажатие не

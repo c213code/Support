@@ -17,6 +17,7 @@ import { Avatar } from "@/components/Avatar";
 import { useCurrentAgent } from "@/lib/useCurrentAgent";
 import { groupColor } from "@/lib/groups";
 import { ISSUE_STATUSES, STATUS_META, type IssueStatus } from "@/lib/status";
+import { copyReport } from "@/lib/copyReport";
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -42,6 +43,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
   const [issues, setIssues] = useState<IssueDTO[]>([]);
   const [groups, setGroups] = useState<GroupPresetDTO[]>([]);
   const [reportText, setReportText] = useState("");
+  const [reportHtml, setReportHtml] = useState("");
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [addingToGroup, setAddingToGroup] = useState<string | null>(null);
@@ -70,6 +72,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
     const reportData = await reportRes.json();
     setIssues(issuesData.issues ?? []);
     setReportText(reportData.text ?? "");
+    setReportHtml(reportData.html ?? "");
     setLoading(false);
   }, []);
 
@@ -200,7 +203,7 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
 
   async function handleCopy() {
     if (!reportText) return;
-    await navigator.clipboard.writeText(reportText);
+    await copyReport(reportText, reportHtml || null);
     setCopied(true);
     toast("Репорт скопирован");
     setTimeout(() => setCopied(false), 2000);

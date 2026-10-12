@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { GroupPresetDTO, IssueDTO } from "@/lib/types";
-import { generateReportText, groupIssues } from "@/lib/report";
+import { groupIssues } from "@/lib/report";
+import { copyReport } from "@/lib/copyReport";
 import { STATUS_META } from "@/lib/status";
 import { formatDateHuman } from "@/lib/date";
 import { useToast } from "@/components/Toast";
@@ -32,13 +33,18 @@ export function ReportLedger({
       i.status === "ESCALATED"
   ).length;
 
+  // Текст берём с сервера, а не собираем здесь: только сервер знает адрес
+  // сайта (ссылки «#4JQ9PW» на тикеты), вход и был ли авто-репорт — и так
+  // скопированное совпадает с тем, что уходит боссам ботом.
   async function handleCopy() {
-    const text = generateReportText(issues, groups);
+    const res = await fetch(`/api/report?date=${encodeURIComponent(date)}`).catch(() => null);
+    const data = res?.ok ? await res.json() : null;
+    const text: string = data?.text ?? "";
     if (!text.trim()) {
-      toast("Пока нечего копировать", "info");
+      toast(res?.ok ? "Пока нечего копировать" : "Не получилось загрузить репорт", "info");
       return;
     }
-    await navigator.clipboard.writeText(text);
+    await copyReport(text, data?.html ?? null);
     setCopied(true);
     toast("Репорт скопирован");
     setTimeout(() => setCopied(false), 2000);
