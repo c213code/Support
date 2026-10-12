@@ -434,6 +434,13 @@ export function KanbanBoard({
                         результата с уже подставленной почтой/телефоном
                         ученика, тест агент выбирает сам (см.
                         src/lib/untResetRequest.ts). */}
+                    {issue.parentAccess && <div className="mt-1">
+                      <a href={`/platform/parent-access?issue=${encodeURIComponent(issue.id)}`}
+                        onClick={(event) => event.stopPropagation()}
+                        className="inline-flex items-center gap-1 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 transition hover:bg-brand-100">
+                        Доступ родителя →
+                      </a>
+                    </div>}
                     {issue.untReset && (
                       <div className="mt-1">
                         <a

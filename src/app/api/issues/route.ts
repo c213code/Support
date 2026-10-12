@@ -8,6 +8,7 @@ import { cleanTicketDescription } from "@/lib/textClean";
 import { extractTicketHints } from "@/lib/ticketHints";
 import { detectEmailChangeRequest } from "@/lib/emailChangeRequest";
 import { mentionsUntTest } from "@/lib/untResetRequest";
+import { isParentAccessRequest } from "@/lib/parentAccess";
 import { platformEnabled } from "@/lib/platform";
 import { unreadReplyCounts } from "@/lib/submissionChat";
 import { describeFields, findLabel } from "@/lib/submissionLabels";
@@ -171,6 +172,8 @@ export async function GET(request: NextRequest) {
         // указано ссылкой) — extractTicketHints складывает почты/телефоны в
         // Set, поэтому дубликаты безвредны.
         hints: extractTicketHints(rawTexts),
+        parentAccess: platformOn && (submission?.labelId === "parent-login" ||
+          isParentAccessRequest([issue.description, ...rawTexts].filter(Boolean).join("\n"))),
         emailChange: platformOn
           ? (labelEmailChange ?? detectEmailChangeRequest(rawTexts.filter(Boolean).join("\n")))
           : null,

@@ -425,6 +425,10 @@ export function Dashboard({ initialDate }: { initialDate: string }) {
                               <p className="text-sm text-slate-900">
                                 {index + 1}. {issue.description}
                               </p>
+                              {issue.parentAccess && <a href={`/platform/parent-access?issue=${encodeURIComponent(issue.id)}`}
+                                className="mt-2 inline-flex rounded-lg bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-100">
+                                Доступ родителя →
+                              </a>}
                               {issueLinks(issue).map((link) => (
                                 <span
                                   key={link}

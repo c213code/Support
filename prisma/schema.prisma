@@ -762,3 +762,17 @@ model UntResultReset {
   @@index([at])
   @@index([resultId])
 }
+
+// Metadata only. Credentials never enter the Support database.
+model ParentAccessReset {
+  id         String   @id
+  actor      String
+  parentId   String
+  studentIds String[] @default([])
+  status     String   @default("STARTED")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([parentId, createdAt])
+  @@index([createdAt])
+}

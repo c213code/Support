@@ -86,6 +86,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     ...(platformTool
       ? [{ href: "/platform/reset-unt", label: "Обнуление ДТ", Icon: IconRefresh }]
       : []),
+    ...(platformTool
+      ? [{ href: "/platform/parent-access", label: "Доступ родителя", Icon: IconMail }]
+      : []),
     ...(SUPPORT_UI_TOOLS.logs && logsTool
       ? [{ href: "/logs", label: "Логи", Icon: IconDatabase }]
       : []),

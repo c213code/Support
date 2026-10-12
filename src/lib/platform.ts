@@ -13,6 +13,9 @@
 // сверен байт-в-байт с тем, что шлёт сама админ-панель, включая parentFirst/
 // Lastname = null: инструмент делает ровно то же, что человек в UI.
 
+import { ParentAccessError, parentContactMatches, parentSearchQueries, UUID_PATTERN,
+  type ParentAccount, type ParentCredentials, type ParentLookup } from "./parentAccess";
+
 const DEVICE_HEADER = { "X-Device-Name": "WEB" } as const;
 const TIMEOUT_MS = 10000;
 // Обновляем токен заранее, чтобы не отправить запрос с истекающим на лету JWT.
@@ -81,6 +84,7 @@ async function platformFetch(
 // --- токен сервис-аккаунта: логин + кэш ---
 
 let cached: { token: string; expMs: number } | null = null;
+let authenticating: Promise<string> | null = null;
 
 function jwtExpiryMs(token: string): number {
   try {
@@ -124,7 +128,8 @@ async function token(): Promise<string> {
   if (cached && Date.now() < cached.expMs - TOKEN_REFRESH_SKEW_MS) {
     return cached.token;
   }
-  return login();
+  if (!authenticating) authenticating = login().finally(() => { authenticating = null; });
+  return authenticating;
 }
 
 // Запрос с токеном; на 401 (токен отозвали/сменился секрет) один раз
@@ -136,7 +141,7 @@ async function authed(
   let res = await platformFetch(path, { ...init, auth: await token() });
   if (res.status === 401) {
     cached = null;
-    res = await platformFetch(path, { ...init, auth: await login() });
+    res = await platformFetch(path, { ...init, auth: await token() });
   }
   return res;
 }
@@ -688,4 +693,135 @@ export async function deleteUntResult(resultId: string): Promise<void> {
     console.warn(`[platform] DELETE /unts/results/${resultId} HTTP ${res.status}: ${detail}`);
     throw new PlatformError(`Удаление не прошло (HTTP ${res.status})`, "upstream_error");
   }
+}
+
+// Parent access: read-only lookup first; credentials are requested only by an explicit action.
+function userList(body: unknown): Record<string, unknown>[] {
+  const wrapper = body as { content?: unknown; data?: unknown } | null;
+  const list = Array.isArray(body) ? body : Array.isArray(wrapper?.content) ? wrapper.content
+    : Array.isArray(wrapper?.data) ? wrapper.data : null;
+  if (!list || list.some((user) => !user || typeof user !== "object")) {
+    throw new PlatformError("Неожиданный формат ответа поиска аккаунтов", "upstream_error");
+  }
+  return list;
+}
+
+function stringField(user: Record<string, unknown>, key: string): string {
+  return typeof user[key] === "string" ? user[key].trim() : "";
+}
+
+function platformUserSummary(user: Record<string, unknown>) {
+  const id = stringField(user, "id");
+  if (!UUID_PATTERN.test(id) || !Array.isArray(user.roles) || !user.roles.every((role) => typeof role === "string")) {
+    throw new PlatformError("Ответ платформы без ID или роли аккаунта", "upstream_error");
+  }
+  return { id, roles: user.roles as string[], login: stringField(user, "username"),
+    googleMail: stringField(user, "googleMail") || null,
+    phoneNumber: stringField(user, "phoneNumber") || null,
+    name: [stringField(user, "firstname"), stringField(user, "lastname")].filter(Boolean).join(" ") || "Без имени" };
+}
+
+async function readUserForRole(id: string, role: "PARENT" | "STUDENT") {
+  if (!UUID_PATTERN.test(id)) throw new ParentAccessError("Некорректный ID аккаунта", 400);
+  // V1 has roles and children/parent contacts without V2's expensive course/stream expansion.
+  const res = await authed(`/v1/users/${id}`, { cache: "no-store" });
+  if (res.status === 404) throw new ParentAccessError("Аккаунт не найден", 404);
+  if (!res.ok) throw new PlatformError(`Не удалось прочитать аккаунт (HTTP ${res.status})`, "upstream_error");
+  const raw = await res.json().catch(() => null) as Record<string, unknown> | null;
+  if (!raw || typeof raw !== "object") throw new PlatformError("Нечитаемый ответ аккаунта", "upstream_error");
+  const user = platformUserSummary(raw);
+  if (user.id !== id || !user.roles.includes(role)) {
+    throw new ParentAccessError(`Не подтверждён аккаунт с ролью ${role}. Обновите поиск.`);
+  }
+  return { raw, user };
+}
+
+export async function getParentAccount(id: string): Promise<ParentAccount> {
+  const { raw, user } = await readUserForRole(id, "PARENT");
+  if (!user.login || !Array.isArray(raw.children)) {
+    throw new PlatformError("Платформа не вернула логин или связи родителя с учениками", "upstream_error");
+  }
+  const students = raw.children.map((child: unknown) => {
+    if (!child || typeof child !== "object") throw new PlatformError("Некорректная связь с учеником", "upstream_error");
+    const row = child as Record<string, unknown>;
+    const id = stringField(row, "id");
+    if (!UUID_PATTERN.test(id)) throw new PlatformError("Связь с учеником без ID", "upstream_error");
+    return { id, name: [stringField(row, "firstname"), stringField(row, "lastname")].filter(Boolean).join(" ") || "Без имени",
+      login: stringField(row, "username"), phoneNumber: stringField(row, "phoneNumber") || null };
+  });
+  return { id: user.id, name: user.name, login: user.login, phoneNumber: user.phoneNumber, students };
+}
+
+async function searchParentUsers(query: string, roles = "PARENT,STUDENT") {
+  const res = await authed(`/v1/users?page=0&size=20&roles=${roles}&search=${encodeURIComponent(query)}`, { cache: "no-store" });
+  if (!res.ok) throw new PlatformError(`Поиск аккаунтов не удался (HTTP ${res.status})`, "upstream_error");
+  const body = await res.json().catch(() => null);
+  return { users: userList(body), truncated: typeof body?.totalElements === "number" && body.totalElements > 20 };
+}
+
+export async function findParentAccounts(query: string): Promise<ParentLookup> {
+  const notes: string[] = [];
+  const candidates = new Map<string, Record<string, unknown>>();
+  for (const variant of parentSearchQueries(query)) {
+    const result = await searchParentUsers(variant);
+    if (result.truncated) notes.push("Показана первая страница совпадений. Уточните номер или почту.");
+    for (const raw of result.users) {
+      const user = platformUserSummary(raw);
+      if (parentContactMatches(query, user)) candidates.set(user.id, raw);
+    }
+  }
+  const parents = new Map<string, ParentLookup["parents"][number]>();
+  const profiles = new Map<string, ParentAccount>();
+  async function profile(id: string) {
+    if (!profiles.has(id)) profiles.set(id, await getParentAccount(id));
+    return profiles.get(id)!;
+  }
+  for (const raw of candidates.values()) {
+    const user = platformUserSummary(raw);
+    if (user.roles.includes("PARENT")) {
+      const account = await profile(user.id);
+      parents.set(account.id, { ...account, matchedStudentIds: parents.get(account.id)?.matchedStudentIds ?? [] });
+    } else if (user.roles.includes("STUDENT")) {
+      let contacts = [stringField(raw, "parentEmail"), stringField(raw, "parentPhoneNumber")].filter(Boolean);
+      if (!contacts.length) {
+        const student = await readUserForRole(user.id, "STUDENT");
+        contacts = [stringField(student.raw, "parentEmail"), stringField(student.raw, "parentPhoneNumber")].filter(Boolean);
+      }
+      contacts = [...new Set(contacts)];
+      let linked = false;
+      for (const contact of contacts) {
+        for (const variant of parentSearchQueries(contact)) {
+          const result = await searchParentUsers(variant, "PARENT");
+          if (result.truncated) notes.push("Слишком много совпадений по контакту родителя. Уточните контакт.");
+          for (const candidate of result.users) {
+            const summary = platformUserSummary(candidate);
+            if (!summary.roles.includes("PARENT") || !parentContactMatches(contact, summary)) continue;
+            const account = await profile(summary.id);
+            if (!account.students.some((child) => child.id === user.id)) continue;
+            const matches = parents.get(account.id)?.matchedStudentIds ?? [];
+            parents.set(account.id, { ...account, matchedStudentIds: [...new Set([...matches, user.id])] });
+            linked = true;
+          }
+        }
+      }
+      if (!linked) notes.push("У найденного ученика не удалось подтвердить связанный аккаунт родителя. Нужен номер/почта родителя или проверка связи.");
+    }
+  }
+  if (!parents.size && !notes.length) notes.push("Родитель не найден. Проверьте контакт или введите номер/почту ученика.");
+  return { query, parents: [...parents.values()], notes: [...new Set(notes)] };
+}
+
+export async function requestParentCredentials(account: ParentAccount): Promise<ParentCredentials> {
+  const res = await authed(`/v2/users/${account.id}/reset-password`, {
+    method: "POST", headers: { "Content-Type": "application/json", "Accept-Language": "kk" }, body: "{}",
+  });
+  if (!res.ok) throw new PlatformError(`Не удалось получить пароль родителя (HTTP ${res.status}). Проверьте результат на платформе перед повтором.`, "upstream_error");
+  const body = await res.json().catch(() => null);
+  if (!body || typeof body.login !== "string" || body.login !== account.login ||
+    typeof body.password !== "string" || !body.password || body.password.length > 200 ||
+    (body.phoneNumber !== null && typeof body.phoneNumber !== "string")) {
+    throw new PlatformError("Платформа вернула неожиданный ответ после операции. Проверьте результат на платформе перед повтором.", "upstream_error");
+  }
+  return { login: body.login, password: body.password, phoneNumber: body.phoneNumber,
+    message: typeof body.message === "string" ? body.message.slice(0, 500) : "Операция выполнена на платформе" };
 }
