@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { prisma } from "../src/lib/prisma";
 import { getFileDownloadUrl } from "../src/lib/telegram";
-import { loadFeaturePacks, matchFeaturePacks, validateAgentAnswer, type FeaturePack } from "../src/lib/featureAgentKnowledge";
+import { loadFeaturePacks, matchFeaturePacks, sourceExcerpt, validateAgentAnswer, type FeaturePack } from "../src/lib/featureAgentKnowledge";
 import { maskSensitiveForAi, redactSecrets } from "../src/lib/textClean";
 import { todayDateString } from "../src/lib/date";
 import { LOCAL_FEATURE_AGENT_ID } from "../src/lib/featureAgentState";
@@ -80,7 +80,7 @@ function safeSourcePath(path: string): boolean {
 }
 
 async function prepareWorkspace(folder: string, packs: FeaturePack[], issue: NonNullable<Case>) {
-  const codeFiles = new Set<string>();
+  const codeFiles = new Map<string, Array<{ line: number; end_line: number }> | null>();
   for (const pack of packs) {
     const destination = join(folder, "knowledge", pack.feature);
     await mkdir(destination, { recursive: true });
@@ -90,20 +90,33 @@ async function prepareWorkspace(folder: string, packs: FeaturePack[], issue: Non
     }
     for (const rule of pack.rules) {
       for (const source of rule.sources) {
-        if (source.path && source.source === "backend" && safeSourcePath(source.path)) codeFiles.add(source.path);
+        if (!source.path || source.source !== "backend" || !safeSourcePath(source.path)) continue;
+        const previous = codeFiles.get(source.path);
+        if (previous === null) continue;
+        if (source.line !== undefined && source.end_line !== undefined) {
+          codeFiles.set(source.path, [...(previous ?? []), { line: source.line, end_line: source.end_line }]);
+        } else codeFiles.set(source.path, null);
       }
     }
   }
   let copiedCodeFiles = 0;
-  for (const relative of codeFiles) {
+  for (const [relative, ranges] of codeFiles) {
     const source = resolve(CODE_ROOT, relative);
     if (!source.startsWith(`${resolve(CODE_ROOT)}${sep}`)) continue;
     try {
       const info = await stat(source);
-      if (!info.isFile() || info.size > 300_000) continue;
+      if (!info.isFile()) continue;
+      if (info.size > (ranges ? 2_000_000 : 300_000)) {
+        if (ranges) throw new Error(`Слишком большой источник: ${relative}`);
+        continue;
+      }
       const destination = join(folder, "backend", relative);
       await mkdir(dirname(destination), { recursive: true });
-      await copyFile(source, destination);
+      if (ranges) {
+        const excerpt = sourceExcerpt(await readFile(source, "utf8"), ranges);
+        if (Buffer.byteLength(excerpt) > 300_000) throw new Error(`Слишком большой фрагмент: ${relative}`);
+        await writeFile(destination, excerpt, { mode: 0o600 });
+      } else await copyFile(source, destination);
       copiedCodeFiles++;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

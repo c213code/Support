@@ -1,0 +1,134 @@
+{
+  "prepared_on": "2026-10-12",
+  "branch": "master",
+  "commit": "445fd9c59df3305af8cdb475b987a136a4b13123",
+  "production_verified": false,
+  "database_schema_verified": false,
+  "document": {
+    "name": "Daily-Streak-business-logic-kk.pdf",
+    "pages": 6,
+    "sha256": "0eb484c082f41476f1c977e5f63b18076d15833f4bc2ad3ae89071a78b7c49ee"
+  },
+  "files": [
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/scheduler/StreakDaySettlementScheduler.java",
+      "sha256": "ea4815821439cb301f036f6089d1d7aaab0391b13a005af47b3f94bb374c5682",
+      "bytes": 3331
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/streak/CuratorStudentStreakAppService.java",
+      "sha256": "1c561e5679e792fafb885cd05baa7f9e55ce118d84439290e8b115109849e2a6",
+      "bytes": 5928
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/streak/LiveStreakReader.java",
+      "sha256": "4cb60dad15a56453cf1036d9541acbcf09eb5fc39beabda98902715a215ef03a",
+      "bytes": 2532
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakDayClosingService.java",
+      "sha256": "ab1f4953b1ae838728f9e7d2bcde6db39935d7acf0b7301e7137607d1b8dc226",
+      "bytes": 9274
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakDaySettlementService.java",
+      "sha256": "cce43cca300d3d9e785b9cd5359bee4f5ce4a50774bc323f1ee769b5f0bbf36b",
+      "bytes": 8398
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakLadderSourceAdapter.java",
+      "sha256": "d36773419c034b97e483aa3565ee153aa07d9efbd7241be0b0f7693cd190d198",
+      "bytes": 10908
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakWaiveBreakAppService.java",
+      "sha256": "57c67993c9a46a066222d287bc4e57d72064f932898490412e5bc860da9dc152",
+      "bytes": 10680
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakWorkCompletedListener.java",
+      "sha256": "2842c323b959b9a6071c5c485d4c8e733aed2246531a0d9fa79f678c49c3f575",
+      "bytes": 1932
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/streak/StudentStreakAppService.java",
+      "sha256": "d339110238b5286cb4f6847a906da4d8319b7019e3ba106329d7e259da5c130c",
+      "bytes": 16069
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/course/enums/LessonType.java",
+      "sha256": "6448c9f0ed205cfdf8d1a277aa5f1ec708e4a7f768cb1f411a7de1c87167f505",
+      "bytes": 3292
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+      "sha256": "5349088f89aad5aff202057beb37b7fa487a87f5eb25c3f8c0f063f146f928bf",
+      "bytes": 380581
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/progress/repository/ProgressRepository.java",
+      "sha256": "3f20187863163cf2d8b34344d02534fb55cb81803f6ca553ff896c97f679462e",
+      "bytes": 143621
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoal.java",
+      "sha256": "9c5fbfd07241a9c985c84168313a00154dc3178e9392adcc50d71c6550b2be4d",
+      "bytes": 9209
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoalCalculator.java",
+      "sha256": "3671e332c2ac3218a0e939bbc86a21c954b212d2a091213e49b777d33ddfd41f",
+      "bytes": 14127
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/OpenLessonsQuota.java",
+      "sha256": "2e12865fce9849f86d35616bbd82a0c77a03d3279d3849918b311c98ac627bb1",
+      "bytes": 3752
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakBreakResolver.java",
+      "sha256": "3834929416608b0ffb62cc8f4e72bf03d37ba6d7dcb7688360a5c728def1cd93",
+      "bytes": 4165
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakClock.java",
+      "sha256": "3c3e01154fea2b69c13547133c3102694273b139bb6541392d17e3ac1428d0bb",
+      "bytes": 3974
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakContinuityResolver.java",
+      "sha256": "c025a44f8cc0cdefdbee864d33c33ca87e2133bfd9c6cc89e2d4e25cba02e9ca",
+      "bytes": 3830
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakStateResolver.java",
+      "sha256": "c8c83d8051c8d074a9a9d5509528386e32dc62f742aeeef281a30c06e84a222f",
+      "bytes": 2031
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakZeroReasonResolver.java",
+      "sha256": "e773fbf9ed47501edffc03baeaf9a9d6342e936d8eb2c584181d0cd98279aeb6",
+      "bytes": 1839
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/presentation/controller/curator/CuratorStreakController.java",
+      "sha256": "771d4872757cfe10b23eaf2eeef1af84d8ce97bb5397d2beb02de6a5ca2b15eb",
+      "bytes": 3298
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/presentation/dto/streak/curator/WaiveBreakRequestDto.java",
+      "sha256": "7c45166320ea669bc344959de6f6abbcd0aab435feea7cdc7325ad10ab48f273",
+      "bytes": 954
+    },
+    {
+      "path": "src/main/resources/db/changelog/2026/09/14/001-DV-7492-create-daily-streak.sql",
+      "sha256": "9146e0df317b9fe47d0becc4fbc855f421452b26f66465ca4db3e73062a8c2fa",
+      "bytes": 5203
+    },
+    {
+      "path": "src/main/resources/db/changelog/2026/09/16/001-DV-7500-snapshot-daily-goal-on-close.sql",
+      "sha256": "e9ed7239400687cbf97323b7b02d22dda069541790eaf61a83247e4661fbd524",
+      "bytes": 2637
+    }
+  ]
+}

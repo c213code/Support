@@ -7,7 +7,7 @@ export type FeatureRule = {
   rule: string;
   search_terms: string[];
   query_ids: string[];
-  sources: Array<{ source: string; path?: string; line?: number }>;
+  sources: Array<{ source: string; path?: string; line?: number; end_line?: number }>;
 };
 
 export type FeaturePack = {
@@ -81,6 +81,26 @@ export function matchFeaturePacks(text: string, packs: FeaturePack[]): FeaturePa
     return routing.any.some((term) => hasTerm(tokens, term)) ||
       routing.all.some((group) => group.every((term) => hasTerm(tokens, term)));
   });
+}
+
+export function sourceExcerpt(content: string, ranges: Array<{ line: number; end_line: number }>): string {
+  const lines = content.split("\n");
+  const sorted = [...ranges].sort((a, b) => a.line - b.line);
+  const merged: Array<{ line: number; end_line: number }> = [];
+  for (const range of sorted) {
+    if (!Number.isInteger(range.line) || !Number.isInteger(range.end_line) || range.line < 1 ||
+      range.end_line < range.line || range.end_line > lines.length || range.end_line - range.line >= 1000) {
+      throw new Error("Некорректный диапазон исходников в пакете знаний");
+    }
+    const previous = merged.at(-1);
+    if (previous && range.line <= previous.end_line + 1) previous.end_line = Math.max(previous.end_line, range.end_line);
+    else merged.push({ ...range });
+  }
+  if (merged.reduce((count, range) => count + range.end_line - range.line + 1, 0) > 5000) {
+    throw new Error("Слишком большой фрагмент исходников");
+  }
+  return merged.map((range) => `// EXCERPT: original source lines ${range.line}-${range.end_line}; not a complete file.\n` +
+    lines.slice(range.line - 1, range.end_line).join("\n")).join("\n\n") + "\n";
 }
 
 export function sqlSections(sql: string): Map<string, string> {

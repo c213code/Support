@@ -1,0 +1,697 @@
+{
+  "schema_version": 1,
+  "feature": "daily-streak-v1",
+  "language": "ru",
+  "prepared_on": "2026-10-12",
+  "scope": "Подсказки Support по Daily Streak / «Менің Жұлдызым»: нормы, ҰБТ, воскресенье, состояния и восстановление. Локальная реализация, production/схема не подтверждены; конфликт PDF и DV-8305 обязателен к проверке.",
+  "routing": {
+    "enabled": true,
+    "any": [
+      "daily streak",
+      "daily-streak",
+      "дейли стрик",
+      "дейлистр*",
+      "стрик*",
+      "streak",
+      "streaks",
+      "менің жұлдызым",
+      "менин жулдызым",
+      "моя звезда"
+    ],
+    "all": [
+      [
+        "жұлдыз*",
+        "мақсат*"
+      ],
+      [
+        "жұлдыз*",
+        "санауыш*"
+      ],
+      [
+        "жұлдыз*",
+        "өсп*"
+      ],
+      [
+        "жұлдыз*",
+        "қалпына"
+      ],
+      [
+        "жулдыз*",
+        "саны"
+      ],
+      [
+        "звезд*",
+        "счетчик*"
+      ],
+      [
+        "звезд*",
+        "сброс*"
+      ],
+      [
+        "күндік мақсат*",
+        "орындал*"
+      ]
+    ]
+  },
+  "source_context": {
+    "pdf": "Daily-Streak-business-logic-kk.pdf",
+    "pdf_pages": 6,
+    "pdf_claimed_sources": "preprod backend и Figma Daily Streak v6",
+    "local_backend_branch": "master",
+    "local_backend_commit": "445fd9c59df3305af8cdb475b987a136a4b13123",
+    "production_verified": false,
+    "database_schema_verified": false,
+    "schema_note": "DataGrip bridge unavailable при подготовке; SQL сверены только с локальными миграциями/репозиториями."
+  },
+  "rules": [
+    {
+      "id": "DST-001",
+      "title": "Счётчик дней и граница суток",
+      "search_terms": [
+        "стрик обнулился",
+        "түнде нөл болды",
+        "timezone",
+        "шетел"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Daily Streak / «Менің Жұлдызым» считает календарные дни подряд с выполненной нормой, а не число уроков. Все ученики используют Asia/Almaty, в том числе за границей. Времена выполнения в БД UTC. Не сравнивать finish_time с датой без преобразования часового пояса. Закрытие обоих способов даёт только один день. Открытие экрана read-only и само счётчик не повышает. При пропуске завершившегося дня текущий стрик обнуляется; до конца сегодня есть время, вчерашний закрытый день сохраняет цепочку. Заморозки нет. Сырой current_streak в БД может отличаться от живого ответа: LiveStreakReader сверяет непрерывность и waiver. Данные конкретного ученика неизвестны без диагностики.",
+      "required_case_data": [
+        "ID или почта ученика",
+        "Дата проблемы и время по Алматы",
+        "Скрин и currentStreak из GET /v1/student/streak"
+      ],
+      "examples": [],
+      "query_ids": [
+        "Q01",
+        "Q02",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 1
+        },
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 4
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakClock.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakDayClosingService.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/LiveStreakReader.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakContinuityResolver.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-002",
+      "title": "Приоритет: все сегодняшние дедлайны",
+      "search_terms": [
+        "бүгінгі дедлайн",
+        "все дедлайны",
+        "цель растёт"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Если есть доступные уроки с дедлайном сегодня, уровень TODAY_DEADLINE требует все такие уроки, без потолка. Завершённые сегодня дедлайны остаются в знаменателе, чтобы цель не переходила к новой норме после последнего выполнения. Другая выполненная просроченная работа не заменяет сегодняшние дедлайны. Дочерний урок, чей родитель завершён сегодня, не добавляется в сегодняшнюю норму; со следующего дня может учитываться. Уровень относится к ветке уроков: завершённый подходящий ҰБТ параллельно всё равно может закрыть день.",
+      "required_case_data": [
+        "Уровень dailyGoal.level",
+        "IDs уроков и их дедлайны",
+        "Результаты Q05 за нужный день"
+      ],
+      "examples": [
+        "Сегодня 3 дедлайна, выполнены 2 из них и 5 других уроков: ветка сегодняшних дедлайнов ещё 2/3."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q03",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 2
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoalCalculator.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoal.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-003",
+      "title": "30% и две отдельные части нормы",
+      "search_terms": [
+        "30 процентов",
+        "30%",
+        "остальные",
+        "просроченные",
+        "мақсат жабылмады"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Когда сегодняшних дедлайнов нет, обычный день использует OPEN_LESSONS. N — доступные открытые уроки плюс выполненные сегодня, без дочерних уроков, чей родитель завершён сегодня. R=max(1,ceil(0.3*N)) при N>0. D — просроченные; U=max(0,N-D). overdueRequired=min(D,max(ceil(R/2),R-U)), assignedRequired=R-overdueRequired. В ТЕКУЩЕМ локальном коде Variant A обе части независимы: assignedCompleted=max(0,completed-overdueCompleted), progress=min(overdueCompleted,overdueRequired)+min(assignedCompleted,assignedRequired). Избыток просроченных не закрывает часть «Остальные». Комментарий OpenLessonsQuota о spill-over устарел относительно DailyGoal.progress: ориентироваться на исполнение, а не этот комментарий. В PDF описаны 30% и минимум половина долга без полной формулы. Для конкретного кейса сначала получить dailyGoal с сырыми счётчиками и подтвердить версию сервера.",
+      "required_case_data": [
+        "dailyGoal.level, required, completed, overdueRequired, overdueCompleted, assignedRequired, assignedCompleted",
+        "Ответ API и версия релиза"
+      ],
+      "examples": [
+        "N=10,D=6: R=3, просроченных нужно 2, остальных 1. Три выполненных просроченных и 0 остальных дают progress=2/3, а не закрытую цель.",
+        "Если все 15 открытых уроков просрочены: R=5, overdueRequired=5, assignedRequired=0.",
+        "Если долга нет, overdueRequired=0: вся норма состоит из остальных."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q03",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 2
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/OpenLessonsQuota.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoal.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoalCalculator.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-004",
+      "title": "ҰБТ закрывает день параллельно урокам",
+      "search_terms": [
+        "сынақ ұбт",
+        "пробный ент",
+        "уроки не выполнены а стрик вырос"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "ҰБТ — параллельная ветка, не старший уровень, отменяющий уроки. День закрывается, если выполнена норма уроков ИЛИ хотя бы один подходящий ҰБТ имеет FINISHED. STARTED/открытый без результата не завершает день. Если доступны только ҰБТ и нет уроков, уровень UNT; одного завершённого ҰБТ достаточно и при нескольких в списке. Выполнение обеих веток всё равно даёт один день. В хранилище day_closed_by и goal_level могут использовать ENT, тогда как Java/API — UNT (конвертеры). Ученик может видеть незаполненную норму уроков при DONE из-за ҰБТ. Q03 показывает факт записи дня; список доступных и завершённых ҰБТ нужно брать из ответа API, Q05 про уроки его не заменяет.",
+      "required_case_data": [
+        "GET /v1/student/streak: unts[].status, resultId",
+        "Время завершения и день по Алматы",
+        "Q03"
+      ],
+      "examples": [
+        "Уроки 0/4, но подходящий ҰБТ завершён сегодня: день может быть DONE."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q03"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 2
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoalCalculator.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoal.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakLadderSourceAdapter.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-005",
+      "title": "Тематический тест или REST при отсутствии работы",
+      "search_terms": [
+        "тақырыптық тест",
+        "тематический тест",
+        "делать нечего",
+        "демалыс"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Если нет сегодняшних дедлайнов и открытых уроков, но есть ҰБТ, целью становится UNT. Если нет и ҰБТ: в обычный день доступный тематический тест даёт TEST с нормой 1; если у ученика нет доступных предметов тематического теста — REST. В воскресенье тематический тест не назначается. REST означает отсутствие работы по лестнице и ҰБТ; цель считается выполненной без действия ученика. Начисление в журнале выполняют completion/settlement, экран сам не пишет в БД. Нельзя объявить REST только потому, что уроков нет: проверить ҰБТ и доступность тематического теста.",
+      "required_case_data": [
+        "dailyGoal.level и unts",
+        "Доступность тематического теста",
+        "День недели"
+      ],
+      "examples": [],
+      "query_ids": [
+        "Q01",
+        "Q02",
+        "Q03"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 2
+        },
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 3
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoalCalculator.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakLadderSourceAdapter.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StudentStreakAppService.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakDaySettlementService.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-006",
+      "title": "Воскресенье: версия нормы и условия отдыха",
+      "search_terms": [
+        "жексенбі",
+        "воскресенье",
+        "барлық қарыз",
+        "4 урока"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Сначала и в воскресенье действует приоритет всех сегодняшних дедлайнов. Если их нет, ТЕКУЩИЙ локальный код DV-8305 требует только просроченные уроки: R=min(D,max(4,ceil(0.3*D))), overdueRequired=R, assignedRequired=0. Назначенные будущие уроки в этой воскресной норме не требуются. При отсутствии долга и сегодняшних дедлайнов, но открытом ҰБТ — UNT, не отдых. Если нет ни этих уроков, ни ҰБТ — REST без тематического теста. КОНФЛИКТ ИСТОЧНИКОВ: PDF стр.3 требует ВСЕ просроченные уроки; короткое объявление не описывает новую формулу. Не выдавать любую версию за подтверждённую production: при вопросе о воскресной норме явно отметить расхождение и запросить dailyGoal, версию сервера или подтверждение релиза DV-8305. Если данных недостаточно — need_details; при подтверждённом несоответствии релиза — escalate.",
+      "required_case_data": [
+        "Дата воскресенья",
+        "dailyGoal целиком",
+        "Версия production / наличие DV-8305"
+      ],
+      "examples": [
+        "D=2 → нужно 2; D=10 → 4; D=20 → 6 по локальному коду.",
+        "Нет долга, но открыт ҰБТ: автоматический отдых не гарантирован."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q03",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 3
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/OpenLessonsQuota.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoalCalculator.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoal.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakDaySettlementService.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-007",
+      "title": "Какие уроки и статусы учитываются",
+      "search_terms": [
+        "на проверке",
+        "тексерісте",
+        "failed",
+        "success",
+        "урок не засчитался"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Не любой урок из каталога входит в норму. Открытый пул проверяет членство, оплаты/доступ, публикацию и удаление, начало темы, персональные назначения, незавершённый курс, родителя; исключает COMMUNITY и GENERAL_ENGLISH_STAFF. Урок без дедлайна не входит в открытый пул и счётчики куратора. Тип TEXT исключён из открытой нормы, LECTURE с дедлайном включён наряду с QUIZ,TASK,ORAL,IELTS,QAZTEST,TOEFL_ITP,INTERACTIVE,QUIZ_GAME,PRACTICAL. В completedLessonsOn учитываются is_total_result=true, deleted IS FALSE, SUCCESS или IN_REVIEW и непустой finish_time в дне Алматы. FAILED не выполнен. Сдача на проверку уже может засчитаться; не нужно ждать куратора. Q05 — только evidence завершений, не полная реконструкция пула доступных уроков. Для вопроса «почему урок не виден» нужны ID, даты, ответ API и проверка доступа; не прикладывать Commerce-запросы без коммерческого контекста.",
+      "required_case_data": [
+        "lessonId,groupId,courseId",
+        "status,finish_time,is_total_result",
+        "Доступность и время открытия темы"
+      ],
+      "examples": [
+        "Урок на IN_REVIEW может засчитаться в стрик и оставаться в строке «Тексерісте» у куратора."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 2
+        },
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 5
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 408,
+          "end_line": 713
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/progress/repository/ProgressRepository.java",
+          "line": 94,
+          "end_line": 151
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/enums/LessonType.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakLadderSourceAdapter.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-008",
+      "title": "Закрытый день, возврат работы и замороженная цель",
+      "search_terms": [
+        "вернули работу",
+        "галочка",
+        "цель изменилась",
+        "закрытый день"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Закрытый день не открывается заново от возврата работы и не начисляется повторно. Возвращённый урок может стать работой текущего дня. На CLOSED хранится снимок набора и знаменателя цели; цель не пересчитывается произвольно после новых назначений. Галочки уроков обновляются по живым завершениям; для TODAY_DEADLINE обновляется числитель, для других уровней остаётся снимок. ҰБТ перечитывается даже для закрытого дня. Старый CLOSED без goal_* снимка означает выполненный день; отсутствие снимка не доказывает баг. Снимок goal_items может содержать названия уроков; запрашивать только нужные данные, Q03 не выгружает JSON целиком.",
+      "required_case_data": [
+        "Дата закрытия",
+        "Q03 и IDs уроков",
+        "Когда работу вернули/новый дедлайн появился"
+      ],
+      "examples": [],
+      "query_ids": [
+        "Q01",
+        "Q03",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 4
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StudentStreakAppService.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakDayClosingService.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-009",
+      "title": "Экран, ноль и несовпадение с колонкой БД",
+      "search_terms": [
+        "ноль",
+        "новый ученик",
+        "comeback",
+        "danger",
+        "стрик не обновляется"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Клиент использует состояние backend, не считает его по дроби уроков сам. В локальном коде состояния REST, DONE, COMEBACK, DANGER, ACTIVE; ноль различается streakZeroReason NEW (totalActiveDays=0) и AFTER_LOSS. COMEBACK — первый закрытый день после потери; REST имеет приоритет перед comeback. DANGER возможен только при положительном текущем стрике и в последние 6 часов суток; нулевой счётчик не должен пугать потерей. PDF показывает 5 визуальных состояний, но не полный enum/REST/DANGER. current_streak — проекция, живой ответ через LiveStreakReader может быть 0 при старом положительном значении в БД; не называть это несогласованностью без проверки цепочки и waiver. Начисление обычно после завершения работы; задержка может быть связана с listener/кешем/settlement, это гипотезы до логов.",
+      "required_case_data": [
+        "Ответ API state/currentStreak/streakZeroReason",
+        "Время обновления и повторного запроса",
+        "Q02-Q04 и логи событий"
+      ],
+      "examples": [],
+      "query_ids": [
+        "Q01",
+        "Q02",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 4
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakStateResolver.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakZeroReasonResolver.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/LiveStreakReader.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakContinuityResolver.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakWorkCompletedListener.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/scheduler/StreakDaySettlementScheduler.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-010",
+      "title": "Кнопка восстановления: последняя пауза и 14 дней",
+      "search_terms": [
+        "қалпына келтіру",
+        "восстановить стрик",
+        "кнопка серая",
+        "canWaive"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Восстанавливается только последний непрерывный промежуток залогированных MISSED до вчера включительно, не текущий незавершённый день. День без строки лога нельзя автоматически считать MISSED. Окно считается по КОНЦУ последнего промежутка: to >= today(Almaty)-14 дней, граница ровно 14 разрешена. Нельзя второй раз восстановить тот же промежуток. canWaive/canWaiveReason в табе — источник решения кнопки: NO_BREAK, ALREADY_WAIVED, OUT_OF_WINDOW. Все эти отказы в локальном коде оформляются 409 с текстом; точный HTTP-код на production требует ответа сервера. Проверять Q03/Q04, а не вручную менять счётчик.",
+      "required_case_data": [
+        "lastBreak.from/to,canWaive,canWaiveReason",
+        "Дата по Алматы",
+        "Q03-Q04"
+      ],
+      "examples": [
+        "При today=2026-10-12 окончание разрыва 2026-09-28 ещё в окне; 2026-09-27 — вне окна."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 6
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakBreakResolver.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakWaiveBreakAppService.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/CuratorStudentStreakAppService.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-011",
+      "title": "Роли, группа и обязательный комментарий",
+      "search_terms": [
+        "403 восстановление",
+        "404 стрик",
+        "комментарий",
+        "платформа қатесі",
+        "дәлелді себеп"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "PDF разрешает решение куратору группы ученика, не админу/завучу. Локальный CuratorStreakController требует CURATOR; вкладка и восстановление проверяют членство ученика в указанной группе (иначе 404). В прочитанном handler не подтверждена отдельная проверка принадлежности группы именно вызывающему куратору: нельзя заявлять, что весь ownership-контроль проверен. Основания PLATFORM_ERROR или VALID_EXCUSE; comment непустой обязателен в обоих случаях. Маршрут POST /v1/curator/groups/{groupId}/students/{studentId}/streak/waive-break всегда выбирает последний разрыв на сервере. 403 не означает пропавшую кнопку или оплату; нужны роль и точный ответ. Агент лишь объясняет штатный флоу, операцию выполняет уполномоченный куратор.",
+      "required_case_data": [
+        "Роль вызывающего",
+        "groupId,studentId",
+        "HTTP-код,текст ошибки,requestId без токена",
+        "Основание и наличие комментария без медицинских подробностей"
+      ],
+      "examples": [],
+      "query_ids": [
+        "Q01",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 5
+        },
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 6
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/presentation/controller/curator/CuratorStreakController.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/presentation/dto/streak/curator/WaiveBreakRequestDto.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakWaiveBreakAppService.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/CuratorStudentStreakAppService.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-012",
+      "title": "Восстановление соединяет цепочку, а не добавляет пропущенные дни",
+      "search_terms": [
+        "вернулось 17",
+        "14 вместо 17",
+        "серые дни",
+        "активные дни"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Восстановление соединяет закрытые дни непосредственно до и после последнего разрыва, включая уже закрытый сегодняшний день. Пример: 14 закрытых, 6 пропущенных, ещё 3 закрытых →17, не14 и не23. Пропуски остаются MISSED с break_waived=true, totalActiveDays не увеличивается, +1 не начисляется, ученику уведомление не отправляется. Сам долг по урокам не списывается. Вкладка/journal streak_restored_to исторически хранит длину ДО разрыва, а не итог восстановленной цепочки — не трактовать значение14 в журнале как доказательство неправильного ответа17. При расхождении нужны цепочка Q03,waiver Q04 и ответ waive-break; не исправлять БД.",
+      "required_case_data": [
+        "Ответ операции currentStreak",
+        "История CLOSED/MISSED до и после разрыва",
+        "Q04"
+      ],
+      "examples": [
+        "14+6 пропусков+3 →17; серые клетки остаются серыми."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q02",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 5
+        },
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 6
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/StreakWaiveBreakAppService.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/StreakBreakResolver.java"
+        }
+      ]
+    },
+    {
+      "id": "DST-013",
+      "title": "Счётчики куратора не равны цели на сегодня",
+      "search_terms": [
+        "куратор тапсырмалар",
+        "тексерісте",
+        "назначенных больше"
+      ],
+      "status": "reviewed_against_local_code_and_supplied_pdf",
+      "deployment_verified": false,
+      "rule": "Куратор видит currentStreak,longestStreak,totalActiveDays,неделю,assignments и lastBreak. Счётчики assignments для выбранной группы классифицируют задания по состоянию: SUCCESS→done; IN_REVIEW→inReview даже при прошедшем дедлайне; прочие статусы с прошедшим дедлайном→overdue, остальные→assigned. Уроки без дедлайна исключены. Это общие количества доступных заданий группы, а не dailyGoal.required ученика (30%, сегодняшний дедлайн или ҰБТ). Разница этих чисел сама по себе не баг. Отображаемый текущий стрик читается через тот же LiveStreakReader. Waived-клетки видны куратору, сам факт пропуска остаётся.",
+      "required_case_data": [
+        "Группа и ответы student/curator API в одно время",
+        "Отдельно assignments и dailyGoal"
+      ],
+      "examples": [],
+      "query_ids": [
+        "Q01",
+        "Q02",
+        "Q03",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "pdf",
+          "document": "Daily-Streak-business-logic-kk.pdf",
+          "page": 5
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/CuratorStudentStreakAppService.java"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 408,
+          "end_line": 713
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/streak/LiveStreakReader.java"
+        }
+      ]
+    }
+  ]
+}
