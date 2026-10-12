@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["draft", "need_details", "escalate", "no_match"] },
+    "feature": { "type": "string" },
+    "summary": { "type": "string" },
+    "draft": { "type": "string" },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "missingData": { "type": "array", "items": { "type": "string" } },
+    "ruleIds": { "type": "array", "items": { "type": "string" } },
+    "queryIds": { "type": "array", "items": { "type": "string" } },
+    "sourcePaths": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["status", "feature", "summary", "draft", "evidence", "missingData", "ruleIds", "queryIds", "sourcePaths"]
+}

@@ -8,6 +8,7 @@ import { AutoRefresh } from "./AutoRefresh";
 import { AgentControl } from "./AgentControl";
 import { featureAgentState, LOCAL_FEATURE_AGENT_ID } from "@/lib/featureAgentState";
 import { todayDateString } from "@/lib/date";
+import { activeFeaturePacks, loadFeaturePacks } from "@/lib/featureAgentKnowledge";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,11 @@ type Query = { id: string; sql: string };
 
 export default async function FeatureAgentPage() {
   if (!await getCurrentIdentity()) redirect("/login");
+  const packs = activeFeaturePacks(await loadFeaturePacks(process.cwd()));
   const drafts = await prisma.featureAgentDraft.findMany({
+    where: { OR: packs.map((pack) => ({ feature: pack.feature,
+      ruleIds: { hasSome: pack.rules.map((rule) => rule.id) } })),
+      status: { in: ["draft", "need_details", "escalate"] } },
     orderBy: { updatedAt: "desc" },
     take: 100,
     include: { issue: { select: { id: true, reportDate: true, groupName: true,
@@ -27,10 +32,15 @@ export default async function FeatureAgentPage() {
       <div className="support-page max-w-6xl">
         <AutoRefresh />
         <SupportPageHeader title="Локальный агент по фичам"
-          description="Черновики по тикетам Support. Агент работает, только пока включён ноутбук; ответ и SQL проверяет дежурный." />
+          description="Подсказки по новым фичам с добавленной базой знаний. Агент работает на ноутбуке; ответ и SELECT проверяет дежурный." />
         <AgentControl initial={featureAgentState(control, todayDateString())} />
+        <div className="support-panel mb-5 space-y-2 p-5 text-sm text-slate-600">
+          <p>Подключённые фичи: <span className="font-medium text-slate-800">{packs.map((pack) => pack.feature).join(", ") || "пока нет"}</span></p>
+          <p>Здесь появляются только обращения по подключённым фичам с подходящими правилами. Остальные обращения агент пропускает.</p>
+          <p className="text-xs text-slate-500">К фото добавляйте краткое описание действия или фичи, чтобы агент смог отобрать обращение.</p>
+        </div>
         {drafts.length === 0 ? (
-          <div className="support-panel p-6 text-sm text-slate-600">Пока нет черновиков. Запустите локального агента и дождитесь нового обращения.</div>
+          <div className="support-panel p-6 text-sm text-slate-600">Пока нет подсказок по подключённым фичам. Они появятся после подходящего обращения при включённом агенте.</div>
         ) : <div className="space-y-4">
           {drafts.map((item) => {
             const stale = item.issueUpdatedAt.getTime() !== item.issue.updatedAt.getTime();

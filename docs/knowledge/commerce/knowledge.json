@@ -1,0 +1,531 @@
+{
+  "schema_version": 1,
+  "feature": "commerce-v2",
+  "routing": {
+    "enabled": true,
+    "any": [
+      "commerce-v2", "commerce v2", "коммерция", "коммерци* v2",
+      "пән* ауыстыр*", "пән* алмастыр*", "замен* предмет*", "смен* предмет*", "поменять предмет*", "предмет* ауыстыр*",
+      "ағым* ауыстыр*", "поток* ауыстыр*", "смен* поток*", "перев* групп*", "перев* поток*",
+      "предоплат*", "бронь", "брондау", "возврат*", "қайтару", "сатып алу", "доплат*",
+      "история оплат*", "выдать бесплатно", "бесплатн* выдач*", "посадка",
+      "екі бейіндік пән", "физмат алынбайды", "ент пара", "ұбт жұбы"
+    ],
+    "all": [
+      ["оплат*", "курс*"], ["оплат*", "предмет*"], ["оплат*", "поток*"],
+      ["оплач*", "курс*"], ["оплач*", "предмет*"], ["оплач*", "поток*"],
+      ["төле*", "пән*"], ["төле*", "ағым*"], ["төле*", "курс*"],
+      ["заявк*", "одобрен*"], ["өтініш*", "ауыстыр*"],
+      ["жеңілдік*", "төле*"], ["скидк*", "оплат*"],
+      ["топқа", "қоспаған"], ["топқа", "қосу"], ["ағымына", "қосу"]
+    ]
+  },
+  "language": "ru",
+  "prepared_on": "2026-10-09",
+  "scope": "Подсказки Support по Commerce V2: покупка, предоплата, возврат, замена предметов и перевод. Частичный пакет; версия сервера, конфигурация и состояние ученика требуют проверки.",
+  "rules": [
+    {
+      "id": "COM-001",
+      "title": "Три профильных предмета / ҰБТ жұбы",
+      "search_terms": [
+        "физмат алынбайды",
+        "екі бейіндік пән",
+        "информатика математика физика",
+        "ЕНТ пара"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "В V2 checkEntProfilePairs проверяет итоговый состав каждого billed-месяца: оплаченные позиции, резерв предоплаты и покупаемые потоки. Профильных предметов типа PROFILE не больше двух; при двух пара должна присутствовать в subject_combinations. DEFAULT не входит в этот подсчёт. Убираемые заявкой позиции исключаются вызывающим кодом. Месяц когорты и billed-месяц нужно различать.",
+      "required_case_inputs": [
+        "полный текст ошибки и месяц в ней",
+        "роль и операция: покупка, продление или замена",
+        "выбранные потоки и их billed-месяцы",
+        "оплаченные и зарезервированные предметы по этому месяцу",
+        "что снимается заявкой"
+      ],
+      "diagnostic_steps": [
+        "Выписать все предметы из ошибки, включая невидимые в выбранных строках скриншота.",
+        "Проверить происхождение третьего предмета: оплаченная позиция, резерв или новая строка корзины.",
+        "Не считать ошибку пользовательской, пока не проверены состояние и месяцы. Если состав учитывается неверно — передать разработчику с данными.",
+        "Не рекомендовать удалять платёж/ученика. Если нужна замена, проверить штатную заявку и права завуча."
+      ],
+      "query_ids": ["Q01", "Q02", "Q06"],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/StudentGroupMonthlyPaymentAppService.java",
+          "line": 1821,
+          "anchor": "checkEntProfilePairs(concatRows"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/StudentGroupMonthlyPaymentAppService.java",
+          "line": 2357,
+          "anchor": "private void checkEntProfilePairs"
+        }
+      ]
+    },
+    {
+      "id": "COM-002",
+      "title": "Базовая лестница стоимости",
+      "search_terms": [
+        "цена",
+        "доплата",
+        "SMART",
+        "JUNIOR"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "Базовая лестница V2 для 1/2/3/4 предметов billed-месяца: SMART 35000/45000/55000/65000, JUNIOR 30000/40000/50000/60000 ₸. Это база до персональных скидок и кредитов, не готовая сумма чекаута. SMART ограничен тремя покупками одной когорты; четвёртый предмет возможен при допустимом сочетании когорт, не автоматически.",
+      "required_case_inputs": [
+        "семейство",
+        "оплачиваемый месяц и когорты",
+        "уже оплаченный состав",
+        "скидки и кредиты"
+      ],
+      "diagnostic_steps": [
+        "Сначала проверить состав и месяцы, затем текущий расчёт корзины.",
+        "Не умножать цену одного предмета на количество; не обещать итог только по этому правилу."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q02",
+        "Q03"
+      ],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/StudentGroupMonthlyPaymentAppService.java",
+          "line": 2675,
+          "anchor": "public static BigDecimal ladderFor(boolean"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/StudentGroupMonthlyPaymentAppService.java",
+          "line": 2689,
+          "anchor": "private static BigDecimal ladderPrice"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/StudentGroupMonthlyPaymentAppService.java",
+          "line": 1832,
+          "anchor": "Map<YearMonth, Long> smartCartBuysByCohort"
+        }
+      ]
+    },
+    {
+      "id": "COM-003",
+      "title": "Почему закрыта старая ручная операция",
+      "search_terms": [
+        "ручная доплата",
+        "добавить курс",
+        "старая кнопка"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "Для семейных потоков, подпадающих под ManualDoors.closedFor, старые ручные двери закрыты. Проверять тип потока и исключения в ManualDoors; штатный путь — корзина менеджера, commerce-заявка либо enroll с разрешённой ролью. Нельзя переносить это правило на все продукты сайта.",
+      "required_case_inputs": [
+        "тип потока",
+        "название операции и точный отказ",
+        "роль"
+      ],
+      "diagnostic_steps": [
+        "Сверить конкретный поток с областью правила.",
+        "Выбрать штатный путь по цели: продажа, замена, возврат, выдача."
+      ],
+      "query_ids": [],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/enroll/ManualDoors.java",
+          "line": 17,
+          "anchor": "class ManualDoors"
+        },
+        {
+          "source": "instruction",
+          "line": 1273,
+          "anchor": "### Айналма жолдар жабық"
+        }
+      ]
+    },
+    {
+      "id": "COM-004",
+      "title": "Кто может оформить возврат",
+      "search_terms": [
+        "нет кнопки возврат",
+        "403",
+        "ішкі менеджер"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "Исполняемый код разрешает оформление возврата только ADMIN или INTERNAL_MANAGER. Для одобрения REFUND — INTERNAL_MANAGER или ADMIN. Внешний MANAGER не получает это право только потому, что контроллер допускает менеджеров в раздел. Отклонение заявки имеет другие правила.",
+      "required_case_inputs": [
+        "фактические authorities пользователя",
+        "тип заявки",
+        "действие: оформить, одобрить или отклонить",
+        "точная ошибка"
+      ],
+      "diagnostic_steps": [
+        "Сверить роль и действие.",
+        "Для оформления направить внутреннему менеджеру или администратору; не предлагать менять права через SQL."
+      ],
+      "query_ids": [
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/requests/service/CommerceRequestService.java",
+          "line": 1047,
+          "anchor": "private static void assertMayRefund"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/requests/service/CommerceRequestService.java",
+          "line": 999,
+          "anchor": "private void assertDecisionRole"
+        }
+      ]
+    },
+    {
+      "id": "COM-005",
+      "title": "Срок возврата относится к оплачиваемому месяцу",
+      "search_terms": [
+        "после 15",
+        "будущий месяц",
+        "қайтару"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "moneyOutAllowedFor сравнивает бизнес-дату с дедлайном самого billed-месяца. По умолчанию это 15-е включительно: будущий месяц не закрывается из-за того, что сегодня позже 15-го. Для заявки используется соответствующая дата подачи, а не произвольно дата ответа менеджера. Настройки commerce.rules могут отличаться от дефолтов.",
+      "required_case_inputs": [
+        "billed-месяц каждой позиции",
+        "дата подачи/операции в Алматы",
+        "тип операции",
+        "действующая конфигурация"
+      ],
+      "diagnostic_steps": [
+        "Определить дату, от которой конкретный путь кода считает дедлайн.",
+        "Сравнить с дедлайном billed-месяца; не выдавать глобальный запрет после 15-го."
+      ],
+      "query_ids": [
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/operations/service/CommerceOperationsService.java",
+          "line": 477,
+          "anchor": "public boolean moneyOutAllowedFor(YearMonth billed, LocalDate asOf)"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/config/CommerceRules.java",
+          "line": 34,
+          "anchor": "public record CommerceRules"
+        }
+      ]
+    },
+    {
+      "id": "COM-006",
+      "title": "Сумма возврата и режим дней",
+      "search_terms": [
+        "6452",
+        "8000",
+        "7419",
+        "FULL",
+        "MANUAL",
+        "CORE",
+        "жеңілдік"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "Возврат учитывает оплаченный состав, исторический коэффициент оплаты и перерасчёт оставшегося набора. В текущем начавшемся месяце применяется режим дней: CORE, FULL (0) либо MANUAL. В примере инструкции 36000−28000=6452 арифметика неполна: разница 8000. Число 6452 нельзя обещать без обоснования даты и режима. Гипотеза 8000×25/31≈6452 не доказывает дату примера.",
+      "required_case_inputs": [
+        "история SUCCESS оплат и allocations",
+        "billed-месяц",
+        "возвращаемые и оставшиеся позиции",
+        "дата расчёта",
+        "refund_days_mode и manual_days",
+        "кредитом или деньгами"
+      ],
+      "diagnostic_steps": [
+        "Разделить перерасчёт состава и пропорцию дней.",
+        "Для инструкции зафиксировано расхождение; окончательную сумму сверять с preview ядра и данными.",
+        "Не применять сегодняшнюю скидку задним числом вместо исторической оплаты."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q02",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/operations/service/CommerceOperationsService.java",
+          "line": 665,
+          "anchor": "tailByStream.entrySet().removeIf"
+        },
+        {
+          "source": "instruction",
+          "line": 983,
+          "anchor": "36 000 − 28 000 = 6,452"
+        }
+      ]
+    },
+    {
+      "id": "COM-007",
+      "title": "Предоплата и срок остатка",
+      "search_terms": [
+        "5000",
+        "10000",
+        "бронь",
+        "предоплата",
+        "қалдық"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "PrepaymentDeadlines.restDeadline принимает billed-месяц, якорь и бизнес-дату. При дефолтах: якорь позже 3-го billed-месяца → якорь+5 дней, иначе 5-е billed-месяца. Если рассчитанный срок не позже today, функция возвращает today+5 дней. Якорь продления — закрытие окна, брони — дата брони. Для брони возможен отдельно заданный менеджером full_payment_days; общий helper нельзя считать единственным путём.",
+      "required_case_inputs": [
+        "тип кредита/платежа",
+        "billed-месяц",
+        "дата закрытия окна либо брони",
+        "настроенный срок брони",
+        "сохранённый expires_at",
+        "конфигурация"
+      ],
+      "diagnostic_steps": [
+        "Сначала проверить сохранённый кредит и вид предоплаты.",
+        "Не говорить «всегда до 5-го». Не продлевать автоматически expires_at пересчётом today."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q03"
+      ],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/credits/PrepaymentDeadlines.java",
+          "line": 28,
+          "anchor": "public static LocalDate restDeadline"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/resources/db/changelog/2026/10/05/001-JUZ40-commerce-schema.sql",
+          "line": 188,
+          "anchor": "full_payment_days — срок полной"
+        }
+      ]
+    },
+    {
+      "id": "COM-008",
+      "title": "Кредит и недостающие 5000",
+      "search_terms": [
+        "не вернулось 5000",
+        "кредит",
+        "остаток",
+        "қайтарылмай тұр"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "student_credits различает RENEWAL_PREPAYMENT, BOOKING и REFUND_CREDIT. Для диагностики важны remaining, expires_at, consumed_at, source_payment_id и consumed_by_payment_id. У брони до регистрации student_id может отсутствовать — искать по mail. Частичный возврат сам по себе не доказывает, что недостающая сумма сгорела или уже возвращена.",
+      "required_case_inputs": [
+        "исходный платёж",
+        "вид кредита",
+        "часть уже возвращённой суммы",
+        "остаток и связанные платежи"
+      ],
+      "diagnostic_steps": [
+        "Найти исходную оплату и отдельный кредит.",
+        "Проверить расходование и срок, не считать один amount доступным остатком.",
+        "При отсутствии полного пути возврата запросить данные; не придумывать причину."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/credits/model/StudentCredit.java",
+          "line": 36,
+          "anchor": "class StudentCredit"
+        },
+        {
+          "source": "instruction",
+          "line": 1050,
+          "anchor": "### Алдын ала төлемді (5 000 / 10 000) қайтару"
+        }
+      ]
+    },
+    {
+      "id": "COM-009",
+      "title": "Одобрение заявки не равно исполнению",
+      "search_terms": [
+        "заявка одобрена",
+        "доплатить",
+        "нет доступа",
+        "AWAITING_PAYMENT"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "У commerce_requests разные статусы WAITING, APPROVED, AWAITING_PAYMENT, EXECUTED, REJECTED, EXPIRED, CANCELLED. Нужно читать status, top_up_amount, decided_at и executed_at вместе с попытками оплаты. У commerce_request_payments старые ссылки могут быть invalidated; наличие ссылки или allocations не подтверждает успех оплаты.",
+      "required_case_inputs": [
+        "request_id",
+        "status и timestamps",
+        "попытки оплаты и их статусы"
+      ],
+      "diagnostic_steps": [
+        "Проверить заявку, затем связанную попытку оплаты.",
+        "Не объявлять доступ выданным по decided_at или факту создания платёжной ссылки."
+      ],
+      "query_ids": [
+        "Q04",
+        "Q05",
+        "Q02"
+      ],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/requests/model/CommerceRequestStatus.java",
+          "line": 8,
+          "anchor": "enum CommerceRequestStatus"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/resources/db/changelog/2026/10/05/001-JUZ40-commerce-schema.sql",
+          "line": 147,
+          "anchor": "CREATE TABLE IF NOT EXISTS commerce_request_payments"
+        }
+      ]
+    },
+    {
+      "id": "COM-010",
+      "title": "Бесплатная выдача и перевод",
+      "search_terms": [
+        "посадка",
+        "выдать бесплатно",
+        "перевести группу",
+        "grant",
+        "revoke"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "В ManagerEnrollController выдача grant разрешена ADMIN; revoke и transfer — ADMIN/HEAD_TEACHER. Более широкий доступ к pools не даёт права выполнить эти операции. Комментарий класса о правах местами устарел; читать исполняемые аннотации и проверки сервиса.",
+      "required_case_inputs": [
+        "действие",
+        "роль",
+        "поток и причина"
+      ],
+      "diagnostic_steps": [
+        "Различить выдачу, перевод группы и финансовую замену.",
+        "Передать операции соответствующей роли; не обходить через старую ручную дверь."
+      ],
+      "query_ids": [],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/presentation/controller/ManagerEnrollController.java",
+          "line": 40,
+          "anchor": "@PostMapping(\"/grant\")"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/presentation/controller/ManagerEnrollController.java",
+          "line": 46,
+          "anchor": "@PostMapping(\"/revoke\")"
+        }
+      ]
+    },
+    {
+      "id": "COM-011",
+      "title": "Allocations не означают успешную оплату",
+      "search_terms": [
+        "CREATED",
+        "SUCCESS",
+        "ledger",
+        "история оплат"
+      ],
+      "status": "reviewed_against_local_code",
+      "deployment_verified": false,
+      "rule": "Леджер payment_allocations пишется уже при CREATED. Для фактически успешных оплат нужен join payment_histories и status=SUCCESS. Q02 намеренно показывает статус любой выбранной попытки и флаг counts_as_successful_payment; нельзя складывать все строки как оплаченные. Отдельная строка леджера также не доказывает текущий доступ после возврата/замены.",
+      "required_case_inputs": [
+        "payment_id",
+        "status",
+        "kind и billed-период",
+        "операции после платежа"
+      ],
+      "diagnostic_steps": [
+        "Проверить статус и связь с заявкой.",
+        "Не считать created_at датой оплаты; учитывать payment_date и смысл показателя отчёта."
+      ],
+      "query_ids": [
+        "Q01",
+        "Q02",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/resources/db/changelog/2026/10/05/001-JUZ40-commerce-schema.sql",
+          "line": 47,
+          "anchor": "создании платежа (CREATED)"
+        }
+      ]
+    },
+    {
+      "id": "COM-012",
+      "title": "Оплата и выполненная замена не гарантируют видимость курса без группы",
+      "search_terms": [
+        "пәні шықпай тұр",
+        "оқушыда көрінбей тұр",
+        "топқа қоспаған",
+        "замена выполнена но предмет не виден",
+        "оплачено но нет курса"
+      ],
+      "status": "reviewed_against_local_code_and_case_select",
+      "deployment_verified": false,
+      "rule": "Экран покупки и поиск ученика могут показывать потоки из SUCCESS-платежей, даже если ученик ещё не состоит в учебной группе. При исполнении симметричной замены ядро переносит paid через SWAP_OUT/SWAP_IN и пытается посадить в минимальную группу каждого нового покупочного потока; если группы для потока/курса нет, заявка всё равно может стать EXECUTED, а ученик не увидит курс в кабинете. Пул новой замены строится по живому оплачиваемому остатку в payment_allocations, а не по членству в группе. Поэтому отсутствие группы объясняет невидимость курса, но само по себе не доказывает, что форма замены обязана быть пустой. Скриншот покупки нельзя считать скриншотом формы замены.",
+      "required_case_inputs": [
+        "что именно не видно: курс в кабинете, снимаемая позиция в форме замены или цель замены",
+        "статус и время заявки REPLACE",
+        "SUCCESS-платежи и сальдо allocations после SWAP_OUT/SWAP_IN",
+        "наличие активной группы для целевых потоков и членство ученика",
+        "ответ /replace-form-data, если жалоба именно на пустой список замены"
+      ],
+      "diagnostic_steps": [
+        "Сверить статус EXECUTED с остатком оплаты и месяцем; не просить повторно платить только из-за невидимости.",
+        "Проверить группы целевых потоков и активное членство. Если группы ещё нет — передать ответственным за комплектование групп; не менять БД вручную.",
+        "Если жалоба на пустой список замены, отдельно сравнить /replace-form-data с живым оплаченным остатком. При расхождении передать разработчику с временем, student_id и ответом API."
+      ],
+      "query_ids": ["Q01", "Q02", "Q04", "Q07"],
+      "sources": [
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/operations/service/CommerceOperationsService.java",
+          "line": 244,
+          "anchor": "getGroupByStreamIdWithLowestStudentCount"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/operations/service/CommerceOperationsService.java",
+          "line": 1285,
+          "anchor": "swappablePositions(String username)"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/commerce/requests/service/CommerceRequestService.java",
+          "line": 528,
+          "anchor": "replaceFormDataFor(UUID studentId)"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/group/repository/GroupRepository.java",
+          "line": 180,
+          "anchor": "student_streams_with_groups"
+        }
+      ]
+    }
+  ]
+}
