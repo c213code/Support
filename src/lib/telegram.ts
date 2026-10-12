@@ -341,6 +341,32 @@ async function callBotApi(
   }
 }
 
+// null означает, что членство проверить не удалось. Для проверки других
+// пользователей Telegram гарантирует результат только боту-администратору.
+export async function isChatMember(chatId: string, userId: bigint): Promise<boolean | null> {
+  const id = Number(userId);
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  const data = await callBotApi("getChatMember", { chat_id: chatId, user_id: id }) as {
+    ok?: boolean;
+    result?: { status?: string; is_member?: boolean; user?: { id?: number } };
+  } | null;
+  const member = data?.result;
+  if (data?.ok !== true || member?.user?.id !== id) return null;
+  switch (member.status) {
+    case "creator":
+    case "administrator":
+    case "member":
+      return true;
+    case "restricted":
+      return typeof member.is_member === "boolean" ? member.is_member : null;
+    case "left":
+    case "kicked":
+      return false;
+    default:
+      return null;
+  }
+}
+
 // Отражает смену статуса тикета прямо в чате — реакцией на исходное
 // сообщение, без лишнего сообщения-уведомления в чат. emoji: null снимает
 // реакцию (пустой список reaction). Telegram разрешает для ботов только

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
+import { checkMiniAppAccess } from "@/lib/miniappAccess";
 import { findStudentByContact, isStudentRegistered, platformEnabled } from "@/lib/platform";
 
 // Занят ли новый номер (или почта) на платформе — подсказка прямо в форме
@@ -49,6 +50,10 @@ export async function POST(request: NextRequest) {
   const check = verifyInitData(typeof body?.initData === "string" ? body.initData : "");
   if (!check.ok) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const access = await checkMiniAppAccess(check.user.id);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
   if (!platformEnabled()) return NextResponse.json({ available: false });

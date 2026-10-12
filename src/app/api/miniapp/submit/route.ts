@@ -13,6 +13,7 @@ import {
 } from "@/lib/submissionLabels";
 import { insertSentIssue } from "@/lib/webhook/acknowledge";
 import { submissionFormEnabled, verifyInitData } from "@/lib/miniapp";
+import { checkMiniAppAccess } from "@/lib/miniappAccess";
 import { uploadPhotos, type PhotoUpload } from "@/lib/telegram";
 import { postSubmissionToGroup } from "@/lib/submissionGroupPost";
 import { rewriteSubmissionDescription } from "@/lib/ticketDescription";
@@ -30,7 +31,7 @@ const MAX_PHOTOS_BYTES = 4 * 1024 * 1024;
 // чтения формы. Без заголовка (chunked) тело всё равно прочитается — от этого
 // на Vercel спасает лимит платформы, а не этот код.
 const MAX_REQUEST_BYTES = 4.5 * 1024 * 1024;
-// Подать обращение может любой, кто открыл бота. Считаются ПОПЫТКИ, а не
+// Подать обращение могут участники рабочих групп. Считаются ПОПЫТКИ, а не
 // удачные подачи: иначе отклонённые как мусор тексты (каждый — запрос к ИИ)
 // шли бы без предела и могли выжечь дневную квоту Groq всем ИИ-функциям.
 const MAX_ATTEMPTS_PER_HOUR = 20;
@@ -132,6 +133,8 @@ export async function POST(request: NextRequest) {
     return reply(401, check.reason === "expired" ? T.expired : T.reopen);
   }
   const user = check.user;
+  const access = await checkMiniAppAccess(user.id);
+  if (!access.ok) return reply(access.status, access.error);
 
   // Повтор той же отправки (ответ потерялся в дороге, куратор нажал ещё раз)
   // — отдаём уже заведённый тикет, а не заводим второй.
