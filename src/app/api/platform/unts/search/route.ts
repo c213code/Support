@@ -32,15 +32,19 @@ export type UntSearchRow = {
 // Как искали, если по почте/телефону в отчёте пусто (см.
 // findStudentUntFallback): UI по этому объясняет агенту, что строки найдены
 // по фамилии, а не по почте, — их надо сверить глазами перед обнулением.
+// correctedEmail — в том, что ввёл агент, опечатка (обычно в домене:
+// «gmai.com»), и ученик найден по своей настоящей почте; UI об этом говорит.
 export type UntSearchFallback =
   | { status: "student_not_found" }
-  | { status: "no_name" }
+  | { status: "no_name"; correctedEmail?: string }
+  | { status: "corrected_email"; correctedEmail: string; studentName: string }
   | {
       status: "searched";
       by: "lastname" | "firstname";
       query: string;
       studentName: string;
       combinationName: string | null;
+      correctedEmail?: string;
     };
 
 // Почта или телефон — только по ним есть смысл искать ученика на платформе
@@ -115,16 +119,28 @@ export async function GET(request: NextRequest) {
     // поиске + фильтр по комбинации ученика.
     if (matches.length === 0 && isContact(student)) {
       const info = await findStudentUntFallback(student);
-      if (!info) {
+      const corrected =
+        info && info.via !== "exact" && info.studentEmail ? info.studentEmail : undefined;
+      const studentName = info ? [info.lastname, info.firstname].filter(Boolean).join(" ") : "";
+      // Почта была с опечаткой — сначала результат по настоящей почте
+      // ученика: это тот же поиск, что и первый, только без опечатки.
+      if (corrected) {
+        matches = await findUntResults(untId, product, corrected);
+        if (matches.length > 0) {
+          fallback = { status: "corrected_email", correctedEmail: corrected, studentName };
+        }
+      }
+      if (matches.length > 0) {
+        // нашли по исправленной почте — дальше искать не нужно
+      } else if (!info) {
         fallback = { status: "student_not_found" };
       } else {
         const tries = [
           { by: "lastname" as const, query: info.lastname },
           { by: "firstname" as const, query: info.firstname },
         ].filter((t): t is { by: "lastname" | "firstname"; query: string } => Boolean(t.query));
-        const studentName = [info.lastname, info.firstname].filter(Boolean).join(" ");
         if (tries.length === 0) {
-          fallback = { status: "no_name" };
+          fallback = { status: "no_name", ...(corrected ? { correctedEmail: corrected } : {}) };
         }
         for (const t of tries) {
           matches = await findUntResults(
@@ -139,6 +155,7 @@ export async function GET(request: NextRequest) {
             query: t.query,
             studentName,
             combinationName: info.combinationName,
+            ...(corrected ? { correctedEmail: corrected } : {}),
           };
           if (matches.length > 0) break;
         }

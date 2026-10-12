@@ -28,13 +28,15 @@ type ResultRow = {
 // по почте/телефону в отчёте пусто.
 type SearchFallback =
   | { status: "student_not_found" }
-  | { status: "no_name" }
+  | { status: "no_name"; correctedEmail?: string }
+  | { status: "corrected_email"; correctedEmail: string; studentName: string }
   | {
       status: "searched";
       by: "lastname" | "firstname";
       query: string;
       studentName: string;
       combinationName: string | null;
+      correctedEmail?: string;
     };
 
 function isOpenNow(test: UntTest): boolean {
@@ -367,7 +369,8 @@ export function ResetUntResultTool() {
                           {fallback?.status === "searched" &&
                             searchedFor.includes("@") &&
                             row.studentEmail &&
-                            row.studentEmail.toLowerCase() !== searchedFor.toLowerCase() && (
+                            row.studentEmail.toLowerCase() !== searchedFor.toLowerCase() &&
+                            row.studentEmail.toLowerCase() !== fallback.correctedEmail?.toLowerCase() && (
                               <span className="ml-1.5 rounded bg-amber-50 px-1 py-0.5 font-sans text-[11px] font-medium text-amber-700">
                                 другая почта
                               </span>
@@ -439,16 +442,32 @@ function FallbackNote({ fallback, found }: { fallback: SearchFallback; found: bo
   if (fallback.status === "student_not_found") {
     return (
       <p className="text-sm text-slate-500">
-        По почте результата нет, и ученика с таким контактом на платформе не нашли. Впишите
-        фамилию ученика в поле вместо почты.
+        По почте результата нет, и ученика с таким контактом на платформе не нашли — даже с
+        поправкой на опечатку в почте. Впишите фамилию ученика в поле вместо почты.
       </p>
+    );
+  }
+  // В почте опечатка, и ученика нашли по настоящей — об этом говорим всегда:
+  // агенту стоит ответить куратору правильной почтой.
+  const typo = fallback.status !== "corrected_email" && fallback.correctedEmail ? (
+    <>
+      В почте опечатка — ученик найден по <span className="font-mono">{fallback.correctedEmail}</span>.{" "}
+    </>
+  ) : null;
+  if (fallback.status === "corrected_email") {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        В почте опечатка — нашли ученика <span className="font-medium">{fallback.studentName}</span>{" "}
+        по <span className="font-mono">{fallback.correctedEmail}</span> и его результат по этой
+        почте. Проверьте, что это он, перед обнулением.
+      </div>
     );
   }
   if (fallback.status === "no_name") {
     return (
       <p className="text-sm text-slate-500">
-        По почте результата нет, а в профиле ученика не заполнены имя и фамилия — искать по ним
-        нечем.
+        {typo}По почте результата нет, а в профиле ученика не заполнены имя и фамилия — искать по
+        ним нечем.
       </p>
     );
   }
@@ -459,13 +478,13 @@ function FallbackNote({ fallback, found }: { fallback: SearchFallback; found: bo
   if (!found) {
     return (
       <p className="text-sm text-slate-500">
-        Результата нет ни по почте, ни по {by} «{fallback.query}» {where}.
+        {typo}Результата нет ни по почте, ни по {by} «{fallback.query}» {where}.
       </p>
     );
   }
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-      По почте результата нет — нашли по {by} «{fallback.query}» {where}. Ученик:{" "}
+      {typo}По почте результата нет — нашли по {by} «{fallback.query}» {where}. Ученик:{" "}
       <span className="font-medium">{fallback.studentName}</span>. Это может быть другой аккаунт
       ученика или однофамилец — сверьте имя и почту перед обнулением.
     </div>

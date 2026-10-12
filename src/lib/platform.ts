@@ -237,6 +237,84 @@ export async function findStudentByContact(contact: string): Promise<StudentSumm
   return null;
 }
 
+// Почта с опечаткой («@gmai.com», «@mial.ru») — частый случай: агент
+// копирует её из сообщения куратора как есть, и точный поиск никого не
+// находит. Исправляем только домен и только на близкий к известному: часть до
+// «@» угадывать нельзя.
+const KNOWN_EMAIL_DOMAINS = [
+  "gmail.com",
+  "mail.ru",
+  "inbox.ru",
+  "list.ru",
+  "bk.ru",
+  "yandex.ru",
+  "yandex.kz",
+  "icloud.com",
+  "outlook.com",
+  "hotmail.com",
+  "yahoo.com",
+];
+
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
+// null — домен и так известный или исправить нечем.
+export function fixEmailDomain(email: string): string | null {
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return null;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1).toLowerCase().trim();
+  if (!domain || KNOWN_EMAIL_DOMAINS.includes(domain)) return null;
+  let best: { domain: string; distance: number } | null = null;
+  for (const known of KNOWN_EMAIL_DOMAINS) {
+    const distance = editDistance(domain, known);
+    if (distance <= 2 && (!best || distance < best.distance)) best = { domain: known, distance };
+  }
+  return best ? `${local}@${best.domain}` : null;
+}
+
+// Ученик по контакту с поправкой на опечатку в почте: сначала точно, потом с
+// исправленным доменом, потом по части до «@» — она у почты с опечаткой и у
+// настоящей общая. Последнее — только если такой ученик ровно один: два —
+// уже гадание.
+export type LenientContactMatch = {
+  student: StudentSummary;
+  via: "exact" | "domain_fix" | "local_part";
+};
+
+export async function findStudentByContactLenient(
+  contact: string
+): Promise<LenientContactMatch | null> {
+  const exact = await findStudentByContact(contact);
+  if (exact) return { student: exact, via: "exact" };
+  const value = contact.trim();
+  if (!value.includes("@")) return null;
+
+  const fixed = fixEmailDomain(value);
+  if (fixed) {
+    const byFixed = await findStudentByContact(fixed);
+    if (byFixed) return { student: byFixed, via: "domain_fix" };
+  }
+
+  const local = value.slice(0, value.lastIndexOf("@")).toLowerCase();
+  if (local.length < 5) return null;
+  const sameLocal = (await searchStudents(local, 10)).filter(
+    (u) => (u.email ?? "").toLowerCase().split("@")[0] === local
+  );
+  return sameLocal.length === 1 ? { student: sameLocal[0], via: "local_part" } : null;
+}
+
 // Завершил ли ученик регистрацию: GET /v1/users/username/{логин}/registered —
 // тот же запрос делает админ-панель, открывая аккаунт. false — аккаунт есть,
 // но регистрация не закончена: на входе ученик видит «Сіз тіркелуді әлі
@@ -590,6 +668,10 @@ export async function findUntResults(
 export type UntStudentFallback = {
   firstname: string | null;
   lastname: string | null;
+  // Настоящая почта ученика и как его нашли: не точно — значит, в том, что
+  // ввёл агент, опечатка, и искать результат надо сначала по этой почте.
+  studentEmail: string | null;
+  via: LenientContactMatch["via"];
   combinationId: string | null;
   combinationName: string | null;
 };
@@ -627,8 +709,9 @@ async function listSubjectCombinations(): Promise<SubjectCombination[]> {
 export async function findStudentUntFallback(
   contact: string
 ): Promise<UntStudentFallback | null> {
-  const found = await findStudentByContact(contact);
-  if (!found) return null;
+  const match = await findStudentByContactLenient(contact);
+  if (!match) return null;
+  const found = match.student;
   const raw = await getStudentRaw(found.id);
   const sc = raw.subjectCombination as
     | { id?: string; first?: { id?: string }; second?: { id?: string } }
@@ -651,6 +734,8 @@ export async function findStudentUntFallback(
   return {
     firstname: raw.firstname?.trim() || null,
     lastname: raw.lastname?.trim() || null,
+    studentEmail: raw.username ?? found.email,
+    via: match.via,
     combinationId: combination?.id ?? null,
     combinationName: combination?.name ?? null,
   };
