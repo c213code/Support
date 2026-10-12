@@ -1,0 +1,630 @@
+{
+  "schema_version": 1,
+  "feature": "weekly-theory-gate-v1",
+  "language": "ru",
+  "prepared_on": "2026-10-12",
+  "scope": "DV-7952: доступ после теории недели, weeklyTheoryLocked в курсах/поиске/стрике/календаре, дедлайны лекций. Production/схема не подтверждены; конфликт finishTime обязателен к проверке.",
+  "routing": {
+    "enabled": true,
+    "any": [
+      "DV-7952",
+      "weekly theory gate",
+      "weekly theory lock",
+      "weeklyTheoryLocked",
+      "weekly_theory_gate_locked",
+      "доступ после лекций",
+      "замок теории",
+      "замок недели",
+      "дедлайны лекций",
+      "deadline_is_null",
+      "пройдите все уроки теориялық сабақ",
+      "осы аптадағы барлық теориялық сабақтарды",
+      "complete all теориялық сабақ lessons"
+    ],
+    "all": [
+      [
+        "теори*",
+        "недел*",
+        "не открыва*"
+      ],
+      [
+        "теори*",
+        "пройден*",
+        "закрыт*"
+      ],
+      [
+        "теори*",
+        "SUCCESS",
+        "замок*"
+      ],
+      [
+        "лекци*",
+        "замок*"
+      ],
+      [
+        "лекци*",
+        "дедлайн*"
+      ],
+      [
+        "лекция*",
+        "дедлайн*"
+      ],
+      [
+        "лекция*",
+        "қара*",
+        "ашылмай*"
+      ],
+      [
+        "теория*",
+        "бітір*",
+        "ашылмай*"
+      ],
+      [
+        "теориялық",
+        "апта*",
+        "ашылмай*"
+      ],
+      [
+        "теориялық",
+        "құлып*"
+      ],
+      [
+        "теориялық",
+        "тапсырдым",
+        "ашылмай*"
+      ],
+      [
+        "lecture",
+        "deadline"
+      ],
+      [
+        "лекци*",
+        "finishTime"
+      ]
+    ]
+  },
+  "source_context": {
+    "document": "docs/mr-overviews/DV-7952-full-documentation.md",
+    "local_backend_branch": "master",
+    "local_backend_commit": "445fd9c59df3305af8cdb475b987a136a4b13123",
+    "production_verified": false,
+    "database_schema_verified": false,
+    "schema_note": "DataGrip bridge request failed. Перед SELECT нужны Q00/Q00b."
+  },
+  "rules": [
+    {
+      "id": "WTG-001",
+      "title": "Какая теория блокирует задания недели",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "Обязательны опубликованные неудалённые общие корневые LECTURE с rating_task_type=TEORIYALYK_TAPSYRMA в том же курсе, месяце и неделе; тема теории тоже неудалённая. Персональная, кураторская, дочерняя, другая неделя/месяц, неопубликованная/удалённая теория и не-LECTURE с тем же типом не блокируют. is_rating не является фильтром: нерейтинговая общая лекционная теория обязательна. Конкретный набор неизвестен без диагностики.",
+      "search_terms": [
+        "теория недели",
+        "теориялық сабақ",
+        "нерейтинговая лекция"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q02",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 44,
+          "end_line": 89
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 4080,
+          "end_line": 4133
+        }
+      ]
+    },
+    {
+      "id": "WTG-002",
+      "title": "Нужен SUCCESS по каждой лекции в этой группе",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "Каждая обязательная теория требует неудалённый итоговый is_total_result прогресс SUCCESS именно этого ученика и группы. Отсутствие прогресса, CREATED/IN_PROGRESS/IN_REVIEW, удалённый/неитоговый SUCCESS, чужой ученик/группа не засчитываются. Одна лекция не заменяет вторую. При переводе между группами не обещать автоматический зачёт старой группы. Несогласованные дубликаты total-прогресса могут блокировать даже при другой строке SUCCESS: нельзя брать произвольную последнюю успешную попытку.",
+      "search_terms": [
+        "всё посмотрел",
+        "SUCCESS другой группы",
+        "теорияны бітірдім"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q03",
+        "Q04",
+        "Q07"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 44,
+          "end_line": 89
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 4080,
+          "end_line": 4133
+        }
+      ]
+    },
+    {
+      "id": "WTG-003",
+      "title": "Настройки курса и различие дефолтов",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "Замок включается только при weekly_theory_gate_enabled=true и ненулевом rating_task_type цели в weekly_theory_gated_rating_task_types. Сама TEORIYALYK_TAPSYRMA исключена. Выключенный флаг, пустой массив, отсутствие подходящей теории/типа оставляют старые правила. null в массиве не запирает несовпавшую цель. Миграция 002 для ещё не настроенных SMART/JUNIOR/TURBO задаёт INTERACTIVE_BEINE, UY_ZHUMYSY, UZH_KZH, KUIZ_TEST; локальные дефолты назначения потока дополнительно содержат PRAKTIKALYK_SABAK. Дублирование сохраняет настройки источника. Проверять конкретный курс; не советовать автоматически менять настройки.",
+      "search_terms": [
+        "практика закрыта",
+        "список типов",
+        "у одного курса открыто"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q02",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/model/Course.java",
+          "line": 39,
+          "end_line": 49
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/model/Course.java",
+          "line": 102,
+          "end_line": 137
+        },
+        {
+          "source": "backend",
+          "path": "src/main/resources/db/changelog/2026/10/01/001-JUZ40-add-weekly-theory-gate-to-courses.sql",
+          "line": 1,
+          "end_line": 6
+        },
+        {
+          "source": "backend",
+          "path": "src/main/resources/db/changelog/2026/10/01/002-JUZ40-backfill-weekly-theory-gate-defaults.sql",
+          "line": 1,
+          "end_line": 18
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 44,
+          "end_line": 89
+        }
+      ]
+    },
+    {
+      "id": "WTG-004",
+      "title": "Прямой доступ и старые причины отказа",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "Перед weekly gate проверяются родитель, старт и ранние условия доступа; в локальном checker также есть оплата и практические ограничения. Отказ weekly gate — IllegalServiceArgumentException с локализованным weekly_theory_gate_locked (документ: HTTP 400). Проверка предшествует созданию прогресса и читает UPDATABLE/master. Не приписывать любую 400/403 этому замку; отсутствие прогресса цели не доказывает баг. Устранение weekly-замка не отменяет оплаты/старта/членства/родителя.",
+      "search_terms": [
+        "weekly_theory_gate_locked",
+        "400 теория",
+        "403 ОСТ"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q02",
+        "Q04",
+        "Q07"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/student/handlers/checker/LessonAccessChecker.java",
+          "line": 34,
+          "end_line": 94
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/service/LessonService.java",
+          "line": 533,
+          "end_line": 539
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/student/handlers/ProgressHandler.java",
+          "line": 29,
+          "end_line": 37
+        }
+      ]
+    },
+    {
+      "id": "WTG-005",
+      "title": "Контекст персональных и кураторских целей",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "Тема цели определяется coalesce: общая theme_id → personal_lessons_modifications для этого ученика/группы → curator_theme_modifications этой группы. Проверять соответствие course_id группы, месяца и недели, а не название. Персональная цель может запираться общей теорией, но персональная теория не становится общей обязательной предпосылкой. Пустой Q02 не доказывает открытый доступ.",
+      "search_terms": [
+        "персональное задание",
+        "кураторская тема",
+        "не та неделя"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q02",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 44,
+          "end_line": 89
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 4080,
+          "end_line": 4133
+        }
+      ]
+    },
+    {
+      "id": "WTG-006",
+      "title": "weeklyTheoryLocked — причина, не вся авторизация",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "В списке GET /v2/student/groups/{groupId}/lessons и поиске GET /v1/student/groups/{groupId}/lessons/search есть weeklyTheoryLocked. True выставляется с учётом прежних условий старта/родителя; false не гарантирует open. SUCCESS самой цели не заменяет теорию. Null легаси-проекции поиска мапится в false. При разнице списка и прямого доступа запросить оба ответа API и версию. Фронтенд здесь не проверен: не обещать работу модалки/перечитывания на каждом клиенте.",
+      "search_terms": [
+        "weeklyTheoryLocked",
+        "список открыт а детали закрыты",
+        "замок после SUCCESS"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q02",
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 4350,
+          "end_line": 4384
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 4407,
+          "end_line": 4425
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/presentation/mapper/LessonSearchResultMapper.java",
+          "line": 15,
+          "end_line": 24
+        }
+      ]
+    },
+    {
+      "id": "WTG-007",
+      "title": "Кеш после завершения теории",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "ProgressService createProgress/save/saveAndFlush/saveAll публикуют событие релевантной общей опубликованной корневой LECTURE-теории. Listener AFTER_COMMIT очищает адресные кеши недели и поиска; fallbackExecution=true для события вне транзакции. Откат не вызывает обычную after-commit очистку. Ошибка инвалидации не отменяет прогресс. TTL списков 10 минут, прямой доступ использует master. «Посмотрел, замок остался» не доказывает кеш: сначала SUCCESS по всем теориям, Q03/Q04, время и свежие ответы API. Не предлагать править Redis/прогрессы.",
+      "search_terms": [
+        "кеш замка",
+        "посмотрел замок остался"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q03",
+        "Q04"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/progress/service/WeeklyTheoryProgressEventPublisher.java",
+          "line": 20,
+          "end_line": 41
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/WeeklyTheoryGateCacheInvalidationListener.java",
+          "line": 14,
+          "end_line": 28
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/infrastructure/configuration/cache/service/impl/CacheServiceImpl.java",
+          "line": 348,
+          "end_line": 360
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/infrastructure/configuration/cache/CacheConfiguration.java",
+          "line": 210,
+          "end_line": 213
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/progress/service/ProgressService.java",
+          "line": 149,
+          "end_line": 198
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/progress/service/ProgressService.java",
+          "line": 322,
+          "end_line": 334
+        }
+      ]
+    },
+    {
+      "id": "WTG-008",
+      "title": "Флаг в стрике и календаре",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "GET /v1/student/streak dailyGoal.items[].weeklyTheoryLocked и GET /v1/student/calendar/day передают тот же предикат. Сам флаг не меняет счётчики, не исключает цель из нормы и не заменяет авторизацию. Лекции с дедлайном входят в пул Daily Streak. Старый кеш цели может показывать false до 5-минутного TTL/события выполнения. Расчёт нормы, воскресенье и восстановление относятся к daily-streak-v1, не придумывать их из DV-7952.",
+      "search_terms": [
+        "стрик замок теории",
+        "календарь weeklyTheoryLocked",
+        "лекция в цели"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q02",
+        "Q03",
+        "Q04",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 44,
+          "end_line": 89
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoalCalculator.java",
+          "line": 200,
+          "end_line": 220
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/enums/LessonType.java",
+          "line": 73,
+          "end_line": 82
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/presentation/mapper/TrackerMapper.java",
+          "line": 190,
+          "end_line": 201
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/infrastructure/configuration/cache/CacheConfiguration.java",
+          "line": 292,
+          "end_line": 298
+        }
+      ]
+    },
+    {
+      "id": "WTG-009",
+      "title": "Опциональный дедлайн и валидация лекции",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "PUT /v1/lessons/lectures/{lectureId}: withDeadline и deadline. Выключение очищает дату через MapStruct; true без даты отклоняется @AssertTrue deadline_is_null при сохранении DTO, при публикации дата также обязательна. Дублирование копирует оба поля. По документу дедлайн информационный; в каноническом gate его нет, он не заменяет статус теории и сам по себе не меняет баллы просмотра. DTO использует LocalDateTime: нужны фактический payload и часовой пояс, нельзя угадать offset по скрину.",
+      "search_terms": [
+        "deadline_is_null",
+        "лекция дедлайн",
+        "withDeadline"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/presentation/dto/course/lesson/lectureLesson/LectureLessonDto.java",
+          "line": 30,
+          "end_line": 65
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/presentation/mapper/LessonMapper.java",
+          "line": 176,
+          "end_line": 181
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/LessonAppService.java",
+          "line": 948,
+          "end_line": 962
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/service/validation/validator/LectureLessonValidator.java",
+          "line": 25,
+          "end_line": 37
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/model/theme/lectureLesson/LectureLesson.java",
+          "line": 170,
+          "end_line": 185
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+          "line": 44,
+          "end_line": 89
+        }
+      ]
+    },
+    {
+      "id": "WTG-010",
+      "title": "Как локальный путь засчитывает просмотр",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "updateProgressVideoTiming объединяет реальные интервалы; переход videoViewed=false → true происходит при percent>=VIEW_PERCENT_SUCCESS=50, ставит SUCCESS. Для этого пути не требовать 100% или мини-тест: обработчик не проверяет мини-тест при переходе. Открытый плеер/ползунок/слова «посмотрел» не доказывают сохранённый SUCCESS. Это локальный код, версия production не установлена. Gate требует все обязательные лекции недели; баллы и доступ — разные проверки.",
+      "search_terms": [
+        "просмотр 50 процентов",
+        "видео посмотрел а теория не зачлась"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q03",
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/student/StudentProgressAppService.java",
+          "line": 349,
+          "end_line": 433
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/course/model/theme/lectureLesson/LectureLesson.java",
+          "line": 43,
+          "end_line": 66
+        }
+      ]
+    },
+    {
+      "id": "WTG-011",
+      "title": "Конфликт finishTime: документ и локальный обработчик",
+      "status": "reviewed_against_local_code_and_supplied_document",
+      "deployment_verified": false,
+      "rule": "Документ обещает finishTime UTC первого завершения видео без перезаписи при повторе. В прочитанном updateProgressVideoTiming при достижении порога есть videoViewed/SUCCESS, но нет setFinishTime; ProgressService.save сохраняет и публикует события. Обещание времени не подтверждено этим путём. Null finish_time не доказывает отсутствие SUCCESS и сам по себе не закрывает weekly gate (проверяется статус). Не обещать зачёт в Daily Streak без API/версии, не советовать сброс/массовую правку времени. Запросить Q05, путь завершения и версию; подтверждённое расхождение передать разработчику. Миграция 02.10 сбрасывала with_deadline/deadline всех LECTURE (включая удалённые/персональные); это история, не команда повторить миграцию.",
+      "search_terms": [
+        "finishTime пустой",
+        "нет времени завершения",
+        "дедлайн лекции сбросился"
+      ],
+      "required_case_data": [
+        "ID/почта ученика, ID группы и урока",
+        "Курс, месяц и неделя; экран и действие",
+        "Точная ошибка/ответ API; время по Алматы"
+      ],
+      "query_ids": [
+        "Q05"
+      ],
+      "sources": [
+        {
+          "source": "supplied_document",
+          "path": "docs/mr-overviews/DV-7952-full-documentation.md"
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/application/service/student/StudentProgressAppService.java",
+          "line": 349,
+          "end_line": 433
+        },
+        {
+          "source": "backend",
+          "path": "src/main/java/kz/juz40/juz40/domain/progress/service/ProgressService.java",
+          "line": 149,
+          "end_line": 198
+        },
+        {
+          "source": "backend",
+          "path": "src/main/resources/db/changelog/2026/10/02/001-JUZ40-reset-lecture-deadlines.sql",
+          "line": 1,
+          "end_line": 6
+        }
+      ]
+    }
+  ]
+}

@@ -84,7 +84,7 @@ async function prepareWorkspace(folder: string, packs: FeaturePack[], issue: Non
   for (const pack of packs) {
     const destination = join(folder, "knowledge", pack.feature);
     await mkdir(destination, { recursive: true });
-    for (const name of ["knowledge.json", "assistant-instructions.md", "diagnostics.sql"]) {
+    for (const name of ["knowledge.json", "assistant-instructions.md", "diagnostics.sql", "source-document.md"]) {
       const source = join(pack.directory, name);
       if (existsSync(source)) await copyFile(source, join(destination, name));
     }

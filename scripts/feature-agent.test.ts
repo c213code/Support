@@ -39,7 +39,7 @@ test("SQL parser keeps individual templates separate", () => {
 
 test("unrelated quiz, materials and IELTS tickets do not invoke Commerce", async () => {
   const packs = await loadFeaturePacks(fileURLToPath(new URL("../", import.meta.url)));
-  assert.deepEqual(activeFeaturePacks(packs).map((item) => item.feature).sort(), ["commerce-v2", "daily-streak-v1"]);
+  assert.deepEqual(activeFeaturePacks(packs).map((item) => item.feature).sort(), ["commerce-v2", "daily-streak-v1", "weekly-theory-gate-v1"]);
   for (const text of [
     "Квиз орындалмайды, 8 оқушының тапсырмасы салынбай қалды. Материалдар ашылмайды.",
     "SMART: мини тест не работает, нет доступа к материалам IELTS",

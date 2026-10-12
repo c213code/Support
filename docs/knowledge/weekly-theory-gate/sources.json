@@ -1,0 +1,129 @@
+{
+  "prepared_on": "2026-10-12",
+  "branch": "master",
+  "commit": "445fd9c59df3305af8cdb475b987a136a4b13123",
+  "production_verified": false,
+  "database_schema_verified": false,
+  "document": {
+    "path": "docs/mr-overviews/DV-7952-full-documentation.md",
+    "sha256": "a0d84e1f8fec062a05087dd3df0c2c8efeaaf0a1da8c1fa50fa631bc3026ab5c",
+    "copy": "source-document.md"
+  },
+  "files": [
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/LessonAppService.java",
+      "sha256": "d6fe8e0c71b3cef84e8e1ad5094ea6b79ed2899a947bb58dd9210642c60d73b5",
+      "bytes": 167980
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/WeeklyTheoryGateCacheInvalidationListener.java",
+      "sha256": "e121540bfa6c07e60a6e03b9bd6045d8b919d9ef87bb5e2e51aa1dadc146aec5",
+      "bytes": 1207
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/student/StudentProgressAppService.java",
+      "sha256": "e6bac052e8244a5be6e1e9959382c530c34f1da3048961b5cb695597f21823b5",
+      "bytes": 110196
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/student/handlers/ProgressHandler.java",
+      "sha256": "56f1df476d948c166a060c5ccd6769322a68c835875e89cf38230b8cf93ae4ed",
+      "bytes": 2829
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/application/service/student/handlers/checker/LessonAccessChecker.java",
+      "sha256": "d0ab6fb007f46a21bd344f04da4de2d00275d8b5647070ea99c90d825c24fcd0",
+      "bytes": 7289
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/course/enums/LessonType.java",
+      "sha256": "6448c9f0ed205cfdf8d1a277aa5f1ec708e4a7f768cb1f411a7de1c87167f505",
+      "bytes": 3292
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/course/model/Course.java",
+      "sha256": "f05d9326e25a12aa669f4063ba4056dc0c94e09c8b5653784d3e87f2a7054141",
+      "bytes": 7452
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/course/model/theme/lectureLesson/LectureLesson.java",
+      "sha256": "c228df073419c727de3b735eeef67c93f89f2580093651e80c2a59122ddca7ea",
+      "bytes": 9470
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/course/repository/LessonRepository.java",
+      "sha256": "5349088f89aad5aff202057beb37b7fa487a87f5eb25c3f8c0f063f146f928bf",
+      "bytes": 380581
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/course/service/LessonService.java",
+      "sha256": "28764ebd6027c01ac16e0464404071c5e4e12aab90d6452f7aeadedef0f5476a",
+      "bytes": 30381
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/course/service/validation/validator/LectureLessonValidator.java",
+      "sha256": "19d169051d4711a65e2b4cd30fd859f8e8187036156704f7e189e6f22692f193",
+      "bytes": 2539
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/progress/service/ProgressService.java",
+      "sha256": "1a6c57062b0bdfb6128ad360f58c5fd7eabe5224b3d583c82def4e63fb448089",
+      "bytes": 21772
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/progress/service/WeeklyTheoryProgressEventPublisher.java",
+      "sha256": "08b93676b4901a35a600f6f0f0196250e6e8c1b959b5f52a00608444883db841",
+      "bytes": 1735
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/domain/streak/service/DailyGoalCalculator.java",
+      "sha256": "3671e332c2ac3218a0e939bbc86a21c954b212d2a091213e49b777d33ddfd41f",
+      "bytes": 14127
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/infrastructure/configuration/cache/CacheConfiguration.java",
+      "sha256": "3e3c6e32058de9635a696a05e678e2193d1c6145ffd670e53ac6c6385cd4c4d7",
+      "bytes": 25259
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/infrastructure/configuration/cache/service/impl/CacheServiceImpl.java",
+      "sha256": "282c02643b2c2039c2a51a3df2ff5dc76176cbed38ea434e675df78831a2588f",
+      "bytes": 20513
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/presentation/dto/course/lesson/lectureLesson/LectureLessonDto.java",
+      "sha256": "508a8b5f6ecba04000428796ae313c9308e13587c8cad96ffc63002355f3e53b",
+      "bytes": 2352
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/presentation/mapper/LessonMapper.java",
+      "sha256": "683a995275837c4e5e7ee59a8c3f94cd2f60ee108da15c6aaa2a76c6411680bf",
+      "bytes": 13821
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/presentation/mapper/LessonSearchResultMapper.java",
+      "sha256": "4ba619d2b7404e454266686b3d607a1c8567163ff56f59fe156904b5622c1f74",
+      "bytes": 1659
+    },
+    {
+      "path": "src/main/java/kz/juz40/juz40/presentation/mapper/TrackerMapper.java",
+      "sha256": "44bda2153c9f325c5e88b3fc3e713c76ab7f434b560c85eb3583100054069524",
+      "bytes": 12007
+    },
+    {
+      "path": "src/main/resources/db/changelog/2026/10/01/001-JUZ40-add-weekly-theory-gate-to-courses.sql",
+      "sha256": "90c8c4ad76a65a0f8cf1278e21e04f3133ad94141c8396805a88b81bf51905b7",
+      "bytes": 309
+    },
+    {
+      "path": "src/main/resources/db/changelog/2026/10/01/002-JUZ40-backfill-weekly-theory-gate-defaults.sql",
+      "sha256": "7dfab10cadd2e9dc56d1543929d152076523234418e83acd332043b241adde6a",
+      "bytes": 830
+    },
+    {
+      "path": "src/main/resources/db/changelog/2026/10/02/001-JUZ40-reset-lecture-deadlines.sql",
+      "sha256": "c4ae211924fc9ece86cfaeacf9d0fe300bca0fc2151287347e425982d4e1d008",
+      "bytes": 181
+    }
+  ]
+}
