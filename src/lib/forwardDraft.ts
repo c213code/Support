@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { redactParentCredentialMessage } from "@/lib/parentAccess";
 import { miniAppUrl } from "@/lib/miniapp";
 import { FORWARD_RESET } from "@/lib/telegramCallbacks";
 import {
@@ -140,7 +141,7 @@ async function addToDraft(opts: {
 // Голый плейсхолдер «[Фото]» в текст не кладём: фото и так приложены, а в
 // описании это мусор. Поэтому берём сам текст или подпись, а не extractText.
 function ownText(message: TelegramMessagePayload): string {
-  return (message.text ?? message.caption ?? "").trim();
+  return redactParentCredentialMessage(message.text ?? message.caption ?? "").trim();
 }
 
 function photosOf(message: TelegramMessagePayload): string[] {

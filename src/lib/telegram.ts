@@ -1,6 +1,8 @@
 // Автор тикетов, которые вебхук заводит сам (без участия агента) — по этому
 // значению определяем, что тикет ещё никто не "забрал", и заменяем его на
 // имя агента при первом же его действии (см. PATCH /api/issues/[id]).
+import { redactParentCredentialMessage } from "./parentAccess";
+
 export const AUTO_ISSUE_CREATOR = "Бот";
 
 export type TelegramUpdate = {
@@ -43,7 +45,7 @@ export type TelegramCallbackQuery = {
   data?: string;
   message?: {
     message_id: number;
-    chat: { id: number };
+    chat: { id: number; type?: string };
     // Текст сообщения, под которым нажали кнопку. Читается, чтобы достать
     // из него уже показанную человеку заметку: в callback_data (64 байта)
     // она не помещается, а пересчитывать её моделью заново — значит
@@ -208,8 +210,8 @@ export function ownAgentTelegramIdList(): bigint[] {
 }
 
 export function extractText(message: TelegramMessagePayload): string | null {
-  if (message.text) return message.text;
-  if (message.caption) return message.caption;
+  if (message.text) return redactParentCredentialMessage(message.text);
+  if (message.caption) return redactParentCredentialMessage(message.caption);
   if (message.photo) return "[Фото]";
   if (message.sticker) return `[Стикер ${message.sticker.emoji ?? ""}]`.trim();
   if (message.document) return `[Файл: ${message.document.file_name ?? ""}]`.trim();
@@ -266,6 +268,10 @@ export function extractReplyContextLine(
 
   const rawQuoted = quoted.text ?? quoted.caption;
   if (!rawQuoted) return null;
+  // Replies to our credential delivery must not copy the password back into Support storage/AI.
+  if (quoted.from?.is_bot && rawQuoted.includes("Ата-ана кабинетіне кіру деректері:")) {
+    return "↩️ Бот: Данные для входа родителя отправлены";
+  }
   // Цитата — всегда одна строка: так её и срезают обратно (stripReplyQuote,
   // REPLY_QUOTE_LINE в textClean, промпт чистки — «цитата идёт первой
   // строкой»). Многострочная цитата срезалась по первой строке, и остальные
@@ -374,7 +380,8 @@ export async function sendTelegramMessage(
   // ответ без привязки непонятно к чему относится.
   // allow_sending_without_reply: исходное сообщение могли удалить, пока мы
   // отвечали — тогда лучше отправить без привязки, чем не отправить вовсе.
-  replyToMessageId?: number
+  replyToMessageId?: number,
+  allowWithoutReply = true
 ): Promise<{ message_id: number } | null> {
   const data = (await callBotApi("sendMessage", {
     chat_id: chatId,
@@ -383,7 +390,7 @@ export async function sendTelegramMessage(
     message_thread_id: threadId,
     parse_mode: parseMode,
     reply_to_message_id: replyToMessageId,
-    allow_sending_without_reply: replyToMessageId != null ? true : undefined,
+    allow_sending_without_reply: replyToMessageId != null ? allowWithoutReply : undefined,
   })) as { result?: { message_id?: number } } | null;
 
   return typeof data?.result?.message_id === "number"

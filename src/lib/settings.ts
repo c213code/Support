@@ -5,6 +5,17 @@ import { prisma } from "@/lib/prisma";
 // регулярки" — это решение команды, а не личное предпочтение.
 const SETTINGS_ID = "singleton";
 
+export async function isParentAccessBotEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({ where: { id: SETTINGS_ID },
+    select: { parentAccessBotEnabled: true } });
+  return row?.parentAccessBotEnabled ?? false;
+}
+
+export async function setParentAccessBotEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({ where: { id: SETTINGS_ID },
+    update: { parentAccessBotEnabled: enabled }, create: { id: SETTINGS_ID, parentAccessBotEnabled: enabled } });
+}
+
 export async function isAiCleaningEnabled(): Promise<boolean> {
   const row = await prisma.appSetting.findUnique({
     where: { id: SETTINGS_ID },

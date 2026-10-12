@@ -72,3 +72,8 @@ export function parentReply(result: ParentCredentials): string {
     ...(result.phoneNumber ? [`Телефон арқылы да кіре аласыз: ${result.phoneNumber}`] : []),
     `Пароль: ${result.password}`].join("\n");
 }
+
+export function redactParentCredentialMessage(text: string): string {
+  return text.includes("Ата-ана кабинетіне кіру деректері:")
+    ? text.replace(/(Пароль:)[^\r\n]*/gi, "$1 <скрыто>") : text;
+}

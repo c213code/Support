@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requestParentAccessApproval } from "@/lib/parentAccessBot";
+
 import { buildDescription } from "@/lib/ticketDescription";
 import { STATUS_META } from "@/lib/status";
 import { changeIssueStatus } from "@/lib/issueStatus";
@@ -45,6 +47,8 @@ import {
 } from "@/lib/telegram";
 
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
+
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   // Секрет обязателен. Раньше сравнивались просто два значения, и при пустой
@@ -634,6 +638,8 @@ export async function POST(request: NextRequest) {
         where: { id: savedMessage.id },
         data: { usedForIssueId: activeIssue.id, archived: true, viewed: true },
       });
+      await requestParentAccessApproval({ issueId: activeIssue.id, chatId,
+        messageId: message.message_id, incomingText: contextualText });
       return NextResponse.json({ ok: true });
     }
   }

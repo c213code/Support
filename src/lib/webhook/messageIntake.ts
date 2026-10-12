@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { requestParentAccessApproval } from "@/lib/parentAccessBot";
 import { shiftDateString, todayDateString } from "@/lib/date";
 import { isNoiseOnly, maskSensitiveForAi } from "@/lib/textClean";
 import { STATUS_META } from "@/lib/status";
@@ -260,6 +261,8 @@ export async function attachReplyToBotMessage(
     },
   });
 
+  await requestParentAccessApproval({ issueId: issue.id, chatId,
+    messageId: message.message_id, incomingText: contextualText });
   return true;
 }
 
@@ -522,5 +525,7 @@ export async function attachFollowUpToTicket(
     }
   }
 
+  await requestParentAccessApproval({ issueId: issue.id, chatId,
+    messageId: message.message_id, incomingText: contextualText });
   return true;
 }

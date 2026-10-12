@@ -113,6 +113,7 @@ model TelegramMessage {
 // настройка для всей команды, а не личное предпочтение.
 model AppSetting {
   id                 String   @id @default("singleton")
+  parentAccessBotEnabled Boolean @default(false)
   aiCleaningEnabled  Boolean  @default(false)
   // Общий рубильник автоответов бота в рабочие группы (подтверждение
   // приёма, реакция на смену статуса — см. src/lib/autoReply.ts). Выключен
@@ -775,4 +776,22 @@ model ParentAccessReset {
 
   @@index([parentId, createdAt])
   @@index([createdAt])
+}
+
+// Approval metadata only: passwords are never persisted.
+model PendingParentAccess {
+  id              String   @id
+  issueId         String
+  parentId        String
+  account         Json
+  recipientId     String
+  dmMessageId     Int?
+  targetChatId    String
+  targetMessageId Int
+  status          String   @default("PENDING")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([issueId, parentId])
+  @@index([status, createdAt])
 }

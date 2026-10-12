@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { handleParentAccessCallback } from "@/lib/parentAccessBot";
 import { isIssueStatus, STATUS_META, type IssueStatus } from "@/lib/status";
 import { ESCALATION_TEAMS, escalationNote, isEscalationTeam } from "@/lib/escalation";
 import { devMemberByTelegramId, teamMembers } from "@/lib/devTeams";
@@ -155,6 +156,7 @@ async function notifyResolvedInChat(issueId: string): Promise<boolean> {
 // группу прямо из Telegram, без захода на сайт.
 export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
   const data = query.data ?? "";
+  if (await handleParentAccessCallback(query)) return;
 
   // «🗑 Удалить» / «Оставить» после /delete <ссылка> — вся логика, включая
   // проверку, что нажал агент, в src/lib/botMessageDelete.ts.

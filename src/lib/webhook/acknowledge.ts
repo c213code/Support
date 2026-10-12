@@ -16,6 +16,7 @@ import {
   isAiAskEnabled,
 } from "@/lib/settings";
 import { AUTO_ISSUE_CREATOR, ownAgentTelegramIdList } from "@/lib/telegram";
+import { requestParentAccessApproval } from "@/lib/parentAccessBot";
 
 // Приём входящего сообщения из рабочей группы: завести по нему тикет и,
 // если автоответы включены, подтвердить приём в чат. Вынесено из
@@ -158,9 +159,9 @@ export async function sendAcknowledgement(
   groupName: string,
   authorId: bigint | null
 ): Promise<void> {
-  // Главный рубильник проверяем здесь, а не только внутри sendBotReply:
-  // режим подтверждения пишет в личку раньше него, и без этой строки
-  // выключённые автоответы всё равно слали бы черновики.
+  // Parent access has a separate switch and always asks the duty agent first.
+  if (await requestParentAccessApproval({ issueId, chatId, messageId, incomingText })) return;
+  // Ordinary acknowledgements still obey the global auto-reply switch.
   if (!(await isAutoReplyEnabled())) return;
   if (await hasBotReplied(issueId, "ACK")) return;
   if (await agentAlreadyReplied(chatId, messageId, ownAgentTelegramIdList())) return;

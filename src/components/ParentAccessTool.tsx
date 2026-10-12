@@ -5,8 +5,10 @@ import { SupportPageHeader } from "./SupportPageHeader";
 import { useToast } from "./Toast";
 import { parentReply, type ParentCredentials, type ParentLookup } from "@/lib/parentAccess";
 
-export function ParentAccessTool() {
+export function ParentAccessTool({ initialBotEnabled = false, botReady = false }: { initialBotEnabled?: boolean; botReady?: boolean }) {
   const toast = useToast();
+  const [botEnabled, setBotEnabled] = useState(initialBotEnabled);
+  const [botSaving, setBotSaving] = useState(false);
   const [query, setQuery] = useState("");
   const [lookups, setLookups] = useState<ParentLookup[]>([]);
   const [searching, setSearching] = useState(false);
@@ -84,9 +86,36 @@ export function ParentAccessTool() {
     catch { toast("Не удалось скопировать. Выделите текст ответа вручную.", "error"); }
   }
 
+  async function toggleBot() {
+    if (botSaving) return;
+    setBotSaving(true);
+    try {
+      const response = await fetch("/api/platform/parents/bot", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !botEnabled }) });
+      const body = await response.json();
+      if (!response.ok) throw Error(body?.error || "Не удалось изменить настройку");
+      setBotEnabled(body.enabled);
+      toast(body.enabled ? "Бот будет предлагать помощь в личке дежурного" : "Новые предложения выключены", "success");
+    } catch (error) { toast(error instanceof Error ? error.message : "Нет связи с сервером", "error"); }
+    finally { setBotSaving(false); }
+  }
+
   return <div className="support-page max-w-4xl">
     <SupportPageHeader title="Доступ родителя"
       description="Поиск по номеру или почте родителя и ученика. Логин и пароль — после выбора нужного аккаунта." />
+    <section className="support-panel mb-5 flex items-center justify-between gap-4 p-5">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800">Помощь родителям через Telegram</h2>
+        <p className="mt-1 text-sm text-slate-500">Бот распознаёт запрос, находит аккаунты и спрашивает дежурного в личке.
+          После подтверждения отправляет логин и пароль ответом в рабочем чате.</p>
+        <p className="mt-2 text-xs text-slate-500">{botReady ? "Работает через Groq, независимо от ноутбука и обычных автоответов." : "Нужно настроить Groq, Telegram и сервис-аккаунт платформы."}</p>
+      </div>
+      <button type="button" role="switch" aria-checked={botEnabled} aria-label="Помощь родителям через Telegram"
+        disabled={botSaving || !botReady && !botEnabled} onClick={() => void toggleBot()}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50 ${botEnabled ? "bg-brand-600" : "bg-slate-300"}`}>
+        <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${botEnabled ? "left-1 translate-x-5" : "left-1"}`} />
+      </button>
+    </section>
     <form onSubmit={(event) => { event.preventDefault(); void search({ query }); }} className="support-panel mb-5 space-y-3 p-5">
       <label htmlFor="parent-access-query" className="block text-sm font-semibold text-slate-800">Контакт или список из обращения</label>
       <textarea id="parent-access-query" value={query} onChange={(event) => setQuery(event.target.value)}
