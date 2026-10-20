@@ -953,13 +953,6 @@ const COMMERCE_LABEL: SubmissionLabel = {
       showIf: { field: "formAttempt", equals: ["error"] },
     },
     {
-      id: "formError",
-      label: "Қате мәтіні (міндетті емес)",
-      type: "textarea",
-      showIf: { field: "formAttempt", equals: ["error"] },
-      placeholder: "Скринде көрінсе, жазбасаңыз да болады",
-    },
-    {
       ...SCREENSHOT,
       label: "Себеттің / сілтемедегі соманың скрині",
       showIf: onlyFor("price"),
