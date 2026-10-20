@@ -13,6 +13,7 @@ import { STATUS_KK } from "@/lib/statusKk";
 import { formatTimeAlmaty } from "@/lib/date";
 import { isSubmissionToGroupEnabled } from "@/lib/settings";
 import { ticketShortCode, ticketUrl } from "@/lib/miniapp";
+import { suggestionBacklogTarget } from "@/lib/suggestionBacklog";
 import {
   describeFields,
   displayValue,
@@ -168,6 +169,7 @@ export function buildSubmissionPost(opts: {
   limit: number;
 }): { html: string; plain: string; layout: { html: string; plain: string } } {
   const { label, values } = opts;
+  const suggestion = label.id === "suggestion";
 
   const kindField = label.fields.find(
     (f) => KIND_FIELD_IDS.includes(f.id) && fieldVisible(f, values)
@@ -181,14 +183,15 @@ export function buildSubmissionPost(opts: {
   const title = specific ?? label.title;
   const tag = specific ? (label.tag ?? label.title) : null;
 
-  const code = `Өтініш #${ticketShortCode(opts.issueId)}`;
+  const code = `${suggestion ? "💡 Ұсыныс" : "Өтініш"} #${ticketShortCode(opts.issueId)}`;
   const url = ticketUrl(opts.issueId);
   const testLine = opts.live ? null : `🧪 ТЕСТ · ${opts.groupName}`;
 
-  const headPlain = `${code}: ${tag ? `[${tag}] ` : ""}${title}`;
+  const headPlain = suggestion ? code : `${code}: ${tag ? `[${tag}] ` : ""}${title}`;
   const headHtml =
     `${url ? `<a href="${escapeHtml(url)}">${code}</a>` : code}: ` +
     `${tag ? `[${escapeHtml(tag)}] ` : ""}<b>${escapeHtml(title)}</b>`;
+  const suggestionHeadHtml = url ? `<a href="${escapeHtml(url)}">${code}</a>` : `<b>${code}</b>`;
 
   const footPlain = `Кураторы: ${opts.authorName} · ${STATUS_SLOT}`;
   const mention = `<a href="tg://user?id=${opts.telegramUserId}">${escapeHtml(opts.authorName)}</a>`;
@@ -200,7 +203,7 @@ export function buildSubmissionPost(opts: {
   const rest = describeFields(label, values)
     .filter((f) => !f.service && f.id !== "description" && f.id !== kindField?.id)
     .map((f) => `${f.label}: ${f.value}`);
-  const body = [description, rest.join("\n")].filter(Boolean).join("\n\n");
+  const body = [suggestion ? `Бағыты: ${opts.groupName}` : null, description, rest.join("\n")].filter(Boolean).join("\n\n");
 
   // Режем только тело и только до разметки (см. extractLinks). Слово-ссылка
   // длиннее своего плейсхолдера, поэтому видимую длину проверяем уже после
@@ -221,7 +224,7 @@ export function buildSubmissionPost(opts: {
   const bodyPlain = restoreLinks(cut, urls, false).trim();
   const bodyHtml = restoreLinks(escapeHtml(cut), urls, true).trim();
 
-  const htmlLayout = [testLine && escapeHtml(testLine), headHtml, bodyHtml, footHtml]
+  const htmlLayout = [testLine && escapeHtml(testLine), suggestion ? suggestionHeadHtml : headHtml, bodyHtml, footHtml]
     .filter(Boolean)
     .join("\n\n");
   const plainLayout = [testLine, headPlain, bodyPlain, footPlain].filter(Boolean).join("\n\n");
@@ -244,13 +247,15 @@ export async function postSubmissionToGroup(opts: {
   values: Record<string, string | string[]>;
   photoFileIds: string[];
 }): Promise<string | null> {
-  const live = await isSubmissionToGroupEnabled();
+  const backlog = suggestionBacklogTarget(opts.label.id);
+  // Explicitly enabled for suggestions; other submission routing keeps its toggle.
+  const live = backlog !== null || await isSubmissionToGroupEnabled();
 
-  const preset = await prisma.groupPreset.findUnique({
+  const preset = backlog ? null : await prisma.groupPreset.findUnique({
     where: { name: opts.groupName },
     select: { chatId: true },
   });
-  if (live && !preset?.chatId) {
+  if (live && !backlog && !preset?.chatId) {
     // Группу к чату ещё не привязали — отправлять некуда. Не ошибка: так
     // выглядит новая группа до первой настройки.
     console.warn(`[submission] «${opts.groupName}» не привязана к чату — обращение в группу не ушло`);
@@ -260,8 +265,14 @@ export async function postSubmissionToGroup(opts: {
   // Выключено — репетиция в служебный канал. Нет и его — значит форма и так
   // не работает (без него не грузятся фото), молчим.
   const storageChatId = process.env.TELEGRAM_STORAGE_CHAT_ID?.trim();
-  const chatId = live ? preset!.chatId! : storageChatId;
+  const chatId = backlog?.chatId ?? (live ? preset!.chatId! : storageChatId);
   if (!chatId) return null;
+
+  const existing = await prisma.botReply.findFirst({
+    where: { issueId: opts.issueId, chatId, kind: live ? "SUBMISSION" : "SUBMISSION_TEST", deleted: false },
+    select: { messageId: true },
+  });
+  if (existing) return live ? buildMessageLink(Number(chatId), existing.messageId) : null;
 
   const withPhotos = opts.photoFileIds.length > 0;
   const { html, plain, layout } = buildSubmissionPost({
@@ -279,8 +290,8 @@ export async function postSubmissionToGroup(opts: {
   // оторвался бы от скриншотов, а в группе между ними успевает влезть
   // чужая реплика.
   const sent = withPhotos
-    ? await sendStoredPhotos(chatId, opts.photoFileIds, html, "HTML")
-    : await sendTelegramMessage(chatId, html, undefined, undefined, "HTML");
+    ? await sendStoredPhotos(chatId, opts.photoFileIds, html, "HTML", backlog?.threadId)
+    : await sendTelegramMessage(chatId, html, undefined, backlog?.threadId, "HTML");
   if (!sent) {
     console.warn(
       `[submission] не отправилось ${live ? `в «${opts.groupName}»` : "в тест-канал"} (чат ${chatId})`

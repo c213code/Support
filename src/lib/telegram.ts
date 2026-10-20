@@ -557,9 +557,13 @@ export async function sendStoredPhotos(
   caption?: string,
   // "HTML" — когда в подписи есть разметка (например, упоминание автора
   // ссылкой tg://user). Текст вокруг неё вызывающий код экранирует сам.
-  parseMode?: "HTML"
+  parseMode?: "HTML",
+  threadId?: number
 ): Promise<{ message_id: number } | null> {
   if (fileIds.length === 0) return null;
+  // HTML is already bounded by visible length by the caller. Slicing its
+  // markup can cut a link/tag and make Telegram reject the entire photo.
+  const boundedCaption = parseMode === "HTML" ? caption : caption?.slice(0, CAPTION_LIMIT);
 
   // Альбом Telegram принимает от двух фото; подпись у альбома одна — на
   // первом, иначе она повторится под каждым.
@@ -569,17 +573,19 @@ export async function sendStoredPhotos(
     single
       ? {
           chat_id: chatId,
+          message_thread_id: threadId,
           photo: fileIds[0],
-          caption: caption?.slice(0, CAPTION_LIMIT),
+          caption: boundedCaption,
           parse_mode: parseMode,
         }
       : {
           chat_id: chatId,
+          message_thread_id: threadId,
           media: fileIds.map((fileId, index) => ({
             type: "photo",
             media: fileId,
             ...(index === 0 && caption
-              ? { caption: caption.slice(0, CAPTION_LIMIT), parse_mode: parseMode }
+              ? { caption: boundedCaption, parse_mode: parseMode }
               : {}),
           })),
         }
