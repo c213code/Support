@@ -33,6 +33,9 @@ export type FieldType =
 export type SelectOption = {
   value: string;
   label: string;
+  // Только для subtype: карточка подтипа выглядит как плитка ярлыка.
+  emoji?: string;
+  hint?: string;
 };
 
 export type LabelField = {
@@ -64,6 +67,11 @@ export type LabelField = {
   // не показываем — там место дорогое, а следующая строка говорит то же
   // самое («Оқушының ескі байланысы: Номер» перед «Ескі номер: …»).
   service?: boolean;
+  // Выбор подтипа внутри ярлыка («Жаңа төлемдер бойынша» → «Кредит беру»).
+  // Рисуется как список ярлыков, после выбора сворачивается в строку с ✕, а
+  // поля ниже появляются только после выбора: иначе подтипы и поля выглядят
+  // одним сплошным набором кнопок.
+  subtype?: boolean;
 };
 
 export type SubmissionLabel = {
@@ -706,18 +714,19 @@ const COMMERCE_LABEL: SubmissionLabel = {
   fields: [
     {
       id: COMMERCE_TYPE_FIELD,
-      label: "Не керек?",
+      label: "Нақты не керек?",
       type: "select",
       required: true,
+      subtype: true,
       options: [
-        { value: "credit-add", label: "Кредит беру" },
-        { value: "credit-remove", label: "Кредитті алып тастау / азайту" },
-        { value: "transfer", label: "Пән / ағым / тариф ауыстыру (SMART PRO → SMART, шығармашылық та)" },
-        { value: "remove", label: "Пәнді / продлениені алып тастау" },
-        { value: "free", label: "0 ₸-ге қосу (тегін, грант)" },
-        { value: "price", label: "Сілтеме сомасы басқа болуы керек" },
-        { value: "refund", label: "Картаға ақша қайтару" },
-        { value: "other", label: "Басқа мәселе" },
+        { value: "credit-add", emoji: "💰", label: "Кредит беру", hint: "Артық төлем, алынған пәннің ақшасы" },
+        { value: "credit-remove", emoji: "➖", label: "Кредитті алып тастау / азайту" },
+        { value: "transfer", emoji: "🔄", label: "Пән / ағым / тариф ауыстыру", hint: "SMART PRO → SMART, шығармашылыққа ауысу да" },
+        { value: "remove", emoji: "🗑️", label: "Пәнді / продлениені алып тастау" },
+        { value: "free", emoji: "🎁", label: "0 ₸-ге қосу", hint: "Тегін, грант" },
+        { value: "price", emoji: "🧮", label: "Сілтеме сомасы басқа болуы керек" },
+        { value: "refund", emoji: "↩️", label: "Картаға ақша қайтару" },
+        { value: "other", emoji: "💬", label: "Басқа мәселе" },
       ],
     },
     ...contactChoiceFields({
@@ -1249,6 +1258,20 @@ export function fieldVisible(
   if (!field.showIf) return true;
   const current = values[field.showIf.field];
   return typeof current === "string" && field.showIf.equals.includes(current);
+}
+
+// Индекс первого видимого подтипа без ответа (-1 — такого нет). Пока подтип
+// не выбран, форма не показывает поля после него и секцию фото.
+export function pendingSubtypeIndex(
+  label: SubmissionLabel,
+  values: Record<string, string | string[]>
+): number {
+  return label.fields.findIndex(
+    (field) =>
+      field.subtype &&
+      fieldVisible(field, values) &&
+      !(typeof values[field.id] === "string" && (values[field.id] as string) !== "")
+  );
 }
 
 // Человекочитаемое значение поля — для описания тикета и карточки агента.

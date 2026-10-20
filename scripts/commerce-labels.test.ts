@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildDetails, extractContact, findLabel, labelsForGroup, missingFields, requiredPhotos } from "../src/lib/submissionLabels";
+import { buildDetails, extractContact, findLabel, labelsForGroup, missingFields, pendingSubtypeIndex, requiredPhotos } from "../src/lib/submissionLabels";
 
 const group = "IT + Сервис";
 const label = () => {
@@ -80,4 +80,10 @@ test("new label lives only in the service group, old fallbacks stay", () => {
   for (const id of ["payment", "catalog", "discount", "other"]) assert.ok(findLabel(group, id));
   const ids = labelsForGroup(group).map((entry) => entry.id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+test("the type is a subtype: nothing below it shows until it is chosen", () => {
+  assert.equal(label().fields[0].subtype, true);
+  assert.equal(pendingSubtypeIndex(label(), {}), 0);
+  assert.equal(pendingSubtypeIndex(label(), { commerceType: "credit-add" }), -1);
 });

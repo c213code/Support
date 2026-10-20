@@ -9,6 +9,7 @@ import {
   fieldVisible,
   labelsForGroup,
   missingFields,
+  pendingSubtypeIndex,
   type LabelField,
 } from "@/lib/submissionLabels";
 import { currentInitData, haptic, telegramApp, type MiniAppEnv } from "@/lib/miniappClient";
@@ -741,8 +742,9 @@ export function SubmissionForm({
 
       {/* Скриншоты — постоянная секция со сжатием и вставкой из буфера;
           ярлык задаёт ей только подпись и минимум. До выбора ярлыка её нет:
-          фото без указанной проблемы дежурному ничего не говорит. */}
-      {label && (
+          фото без указанной проблемы дежурному ничего не говорит. То же
+          до выбора подтипа внутри ярлыка. */}
+      {label && pendingSubtypeIndex(label, values) < 0 && (
       <section className={styles.section} id={FIELD_IDS.photo}>
         <span className={styles.sectionHeader}>{photoField?.label ?? "Скриншот"}</span>
         <div className={styles.list}>

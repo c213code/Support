@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   checksStudent,
   fieldVisible,
+  pendingSubtypeIndex,
   type LabelField,
   type SubmissionLabel,
 } from "@/lib/submissionLabels";
@@ -227,9 +228,13 @@ export function LabelFields({
     );
   }
 
+  // Пока подтип не выбран, после него ничего не показываем.
+  const stopAt = pendingSubtypeIndex(label, values);
+
   return (
     <>
       {label.fields.map((field, index) => {
+        if (stopAt >= 0 && index > stopAt) return null;
         if (!fieldVisible(field, values)) return null;
         // Поле, которое заполняет автопроверка, спрашиваем только когда она
         // не сработала.
@@ -242,6 +247,65 @@ export function LabelFields({
 
         // Скриншоты рисует сама форма — своей секцией, ниже полей.
         if (field.type === "photos") return null;
+
+        if (field.type === "select" && field.subtype) {
+          const current = typeof values[field.id] === "string" ? (values[field.id] as string) : "";
+          const chosen = (field.options ?? []).find((o) => o.value === current);
+          // Тот же вид, что у выбора ярлыка: список, после выбора — строка с ✕.
+          return (
+            <section className={styles.section} key={key} id={fieldId(field.id)}>
+              <span className={styles.sectionHeader}>{field.label}</span>
+              {chosen ? (
+                <div className={styles.labelChosen}>
+                  {chosen.emoji && (
+                    <span className={styles.labelEmoji} aria-hidden="true">
+                      {chosen.emoji}
+                    </span>
+                  )}
+                  <span className={styles.labelChosenTitle}>{chosen.label}</span>
+                  <button
+                    type="button"
+                    className={styles.labelClear}
+                    aria-label="Өзгерту"
+                    onClick={() => {
+                      haptic("select");
+                      onChange(field.id, "");
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <div className={styles.labelList} role="group" aria-label={field.label}>
+                  {(field.options ?? []).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={styles.labelRow}
+                      onClick={() => {
+                        haptic("select");
+                        onChange(field.id, option.value);
+                      }}
+                    >
+                      {option.emoji && (
+                        <span className={styles.labelEmoji} aria-hidden="true">
+                          {option.emoji}
+                        </span>
+                      )}
+                      <span className={styles.labelRowText}>
+                        <span className={styles.labelRowTitle}>{option.label}</span>
+                        {option.hint && <span className={styles.labelRowHint}>{option.hint}</span>}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {invalid && (
+                <p className={`${styles.footer} ${styles.footerError}`}>Таңдаңыз</p>
+              )}
+            </section>
+          );
+        }
 
         if (field.type === "select") {
           const current = typeof values[field.id] === "string" ? (values[field.id] as string) : "";
