@@ -43,7 +43,7 @@ test("transfer needs both ends, month, group, renewal, old months and money outc
 test("switching type hides the previous branch so stale answers do not leak", () => {
   const stale = { ...base, commerceType: "credit-add", creditAmount: "8000", creditBasis: "overpaid" };
   const switched = { ...stale, commerceType: "free", streams: "TOEFL ITP ҚАРАША", billedMonth: "қараша 2026",
-    targetGroup: "fmPIQ", freeReason: "grant", freeApprovedBy: "грант" };
+    targetGroup: "fmPIQ", freeReason: "grant" };
   assert.deepEqual(missingFields(label(), switched, 0), []);
   const details = buildDetails(label(), switched);
   assert.doesNotMatch(details, /8000/);

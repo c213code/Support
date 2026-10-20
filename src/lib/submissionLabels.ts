@@ -867,14 +867,6 @@ const COMMERCE_LABEL: SubmissionLabel = {
         { value: "other", label: "Басқа" },
       ],
     },
-    {
-      id: "freeApprovedBy",
-      label: "Кім келісті?",
-      type: "text",
-      required: true,
-      showIf: onlyFor("free"),
-      placeholder: "Мысалы: Жұлдызай апай; грант туралы хабарлама",
-    },
 
     // --- Баға ---
     {
