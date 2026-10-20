@@ -13,7 +13,7 @@ import { STATUS_KK } from "@/lib/statusKk";
 import { formatTimeAlmaty } from "@/lib/date";
 import { isSubmissionToGroupEnabled } from "@/lib/settings";
 import { ticketShortCode, ticketUrl } from "@/lib/miniapp";
-import { suggestionBacklogTarget } from "@/lib/suggestionBacklog";
+import { suggestionBacklogTarget, SUGGESTION_SPREADSHEET_URL } from "@/lib/suggestionBacklog";
 import {
   describeFields,
   displayValue,
@@ -164,6 +164,9 @@ export function buildSubmissionPost(opts: {
   label: SubmissionLabel;
   values: Record<string, string | string[]>;
   live: boolean;
+  sourceMessageUrl?: string | null;
+  // Only a successful Sheets writer may supply this receipt.
+  spreadsheetReceipt?: { url: string };
   // Сколько видимых символов Telegram примет: 1024 у подписи к фото, 4096
   // у сообщения.
   limit: number;
@@ -203,13 +206,20 @@ export function buildSubmissionPost(opts: {
   const rest = describeFields(label, values)
     .filter((f) => !f.service && f.id !== "description" && f.id !== kindField?.id)
     .map((f) => `${f.label}: ${f.value}`);
-  const body = [suggestion ? `Бағыты: ${opts.groupName}` : null, description, rest.join("\n")].filter(Boolean).join("\n\n");
+  const body = [description, rest.join("\n")].filter(Boolean).join("\n\n");
+  const sourcePlain = suggestion && opts.sourceMessageUrl ? `Хабарлама: ${opts.sourceMessageUrl}` : null;
+  const sourceHtml = suggestion && opts.sourceMessageUrl
+    ? `Хабарлама: <a href="${escapeHtml(opts.sourceMessageUrl)}">ашу</a>` : null;
+  const sheetUrl = opts.spreadsheetReceipt?.url ?? SUGGESTION_SPREADSHEET_URL;
+  const sheetText = opts.spreadsheetReceipt ? "📊 Кестеге де енгізілді" : "📊 Ұсыныстар кестесі";
+  const sheetPlain = suggestion ? `${sheetText}: ${sheetUrl}` : null;
+  const sheetHtml = suggestion ? `${sheetText}: <a href="${escapeHtml(sheetUrl)}">ашу</a>` : null;
 
   // Режем только тело и только до разметки (см. extractLinks). Слово-ссылка
   // длиннее своего плейсхолдера, поэтому видимую длину проверяем уже после
   // подстановки и при перелёте подрезаем ещё.
   const frame =
-    [testLine, headPlain, footPlain].filter(Boolean).join("\n\n").length -
+    [testLine, headPlain, sourcePlain, footPlain, sheetPlain].filter(Boolean).join("\n\n").length -
     STATUS_SLOT.length +
     STATUS_ROOM +
     8;
@@ -224,10 +234,10 @@ export function buildSubmissionPost(opts: {
   const bodyPlain = restoreLinks(cut, urls, false).trim();
   const bodyHtml = restoreLinks(escapeHtml(cut), urls, true).trim();
 
-  const htmlLayout = [testLine && escapeHtml(testLine), suggestion ? suggestionHeadHtml : headHtml, bodyHtml, footHtml]
+  const htmlLayout = [testLine && escapeHtml(testLine), suggestion ? suggestionHeadHtml : headHtml, sourceHtml, bodyHtml, footHtml, sheetHtml]
     .filter(Boolean)
     .join("\n\n");
-  const plainLayout = [testLine, headPlain, bodyPlain, footPlain].filter(Boolean).join("\n\n");
+  const plainLayout = [testLine, headPlain, sourcePlain, bodyPlain, footPlain, sheetPlain].filter(Boolean).join("\n\n");
   return {
     html: htmlLayout.replace(STATUS_SLOT, escapeHtml(INITIAL_STATUS)),
     plain: plainLayout.replace(STATUS_SLOT, INITIAL_STATUS),
@@ -235,93 +245,76 @@ export function buildSubmissionPost(opts: {
   };
 }
 
-export async function postSubmissionToGroup(opts: {
+type SubmissionPostInput = {
   issueId: string;
   groupName: string;
   authorName: string;
-  // Telegram-id автора: по нему имя в шапке становится упоминанием, и
-  // куратор получает уведомление, что его заявку видно в группе. Через
-  // tg://user, а не @username — юзернейма у половины кураторов нет.
   telegramUserId: bigint;
   label: SubmissionLabel;
   values: Record<string, string | string[]>;
   photoFileIds: string[];
-}): Promise<string | null> {
-  const backlog = suggestionBacklogTarget(opts.label.id);
-  // Explicitly enabled for suggestions; other submission routing keeps its toggle.
-  const live = backlog !== null || await isSubmissionToGroupEnabled();
+};
 
-  const preset = backlog ? null : await prisma.groupPreset.findUnique({
-    where: { name: opts.groupName },
-    select: { chatId: true },
+export async function postSubmissionToGroup(opts: SubmissionPostInput): Promise<string | null> {
+  const backlog = suggestionBacklogTarget(opts.label.id);
+  const live = backlog !== null || await isSubmissionToGroupEnabled();
+  const preset = await prisma.groupPreset.findUnique({
+    where: { name: opts.groupName }, select: { chatId: true },
   });
-  if (live && !backlog && !preset?.chatId) {
-    // Группу к чату ещё не привязали — отправлять некуда. Не ошибка: так
-    // выглядит новая группа до первой настройки.
+  if (live && !preset?.chatId) {
     console.warn(`[submission] «${opts.groupName}» не привязана к чату — обращение в группу не ушло`);
     return null;
   }
-
-  // Выключено — репетиция в служебный канал. Нет и его — значит форма и так
-  // не работает (без него не грузятся фото), молчим.
-  const storageChatId = process.env.TELEGRAM_STORAGE_CHAT_ID?.trim();
-  const chatId = backlog?.chatId ?? (live ? preset!.chatId! : storageChatId);
+  const chatId = live ? preset!.chatId! : process.env.TELEGRAM_STORAGE_CHAT_ID?.trim();
   if (!chatId) return null;
+  const sourceLink = await publishSubmission(opts, { chatId, live, kind: live ? "SUBMISSION" : "SUBMISSION_TEST" });
+  if (backlog && sourceLink) {
+    // Preserve the original support link even if the backlog copy fails.
+    try {
+      await publishSubmission(opts, { ...backlog, live: true, kind: "SUBMISSION_BACKLOG", sourceMessageUrl: sourceLink });
+    } catch (error) {
+      console.warn(`[submission] копия предложения не ушла в бэклог: ${error instanceof Error ? error.name : "ошибка"}`);
+    }
+  }
+  return sourceLink;
+}
 
+async function publishSubmission(opts: SubmissionPostInput, target: {
+  chatId: string;
+  threadId?: number;
+  live: boolean;
+  kind: "SUBMISSION" | "SUBMISSION_TEST" | "SUBMISSION_BACKLOG";
+  sourceMessageUrl?: string;
+}): Promise<string | null> {
+  const { chatId, live, kind } = target;
   const existing = await prisma.botReply.findFirst({
-    where: { issueId: opts.issueId, chatId, kind: live ? "SUBMISSION" : "SUBMISSION_TEST", deleted: false },
+    where: {
+      issueId: opts.issueId, chatId, deleted: false,
+      // The initial version stored direct-to-backlog posts as SUBMISSION.
+      kind: kind === "SUBMISSION_BACKLOG" ? { in: ["SUBMISSION_BACKLOG", "SUBMISSION"] } : kind,
+    },
     select: { messageId: true },
   });
   if (existing) return live ? buildMessageLink(Number(chatId), existing.messageId) : null;
-
   const withPhotos = opts.photoFileIds.length > 0;
   const { html, plain, layout } = buildSubmissionPost({
-    issueId: opts.issueId,
-    groupName: opts.groupName,
-    authorName: opts.authorName,
-    telegramUserId: opts.telegramUserId,
-    label: opts.label,
-    values: opts.values,
-    live,
+    ...opts, live, sourceMessageUrl: target.sourceMessageUrl,
     limit: withPhotos ? CAPTION_LIMIT : 4096,
   });
-
-  // С фото текст уходит подписью к альбому: отдельным сообщением он
-  // оторвался бы от скриншотов, а в группе между ними успевает влезть
-  // чужая реплика.
   const sent = withPhotos
-    ? await sendStoredPhotos(chatId, opts.photoFileIds, html, "HTML", backlog?.threadId)
-    : await sendTelegramMessage(chatId, html, undefined, backlog?.threadId, "HTML");
+    ? await sendStoredPhotos(chatId, opts.photoFileIds, html, "HTML", target.threadId)
+    : await sendTelegramMessage(chatId, html, undefined, target.threadId, "HTML");
   if (!sent) {
-    console.warn(
-      `[submission] не отправилось ${live ? `в «${opts.groupName}»` : "в тест-канал"} (чат ${chatId})`
-    );
+    console.warn(`[submission] не отправилось: ${kind} (чат ${chatId})`);
     return null;
   }
-
-  // Запоминаем как сообщение бота по этому тикету: по нему работает
-  // «Удалить ответ» на сайте, и — главное — ответ коллеги реплаем на него
-  // приклеится к тому же тикету (attachReplyToBotMessage), а не заведёт
-  // второй.
   await prisma.botReply.create({
     data: {
-      issueId: opts.issueId,
-      chatId,
-      messageId: sent.message_id,
-      // Разные виды: тестовое сообщение на карточке подписано по-другому,
-      // и удалять его после репетиции — обычное дело, а не правка ответа
-      // коллегам.
-      kind: live ? "SUBMISSION" : "SUBMISSION_TEST",
+      issueId: opts.issueId, chatId, messageId: sent.message_id, kind,
       text: plain.slice(0, CAPTION_LIMIT),
       layout: JSON.stringify({ ...layout, caption: withPhotos } satisfies PostLayout),
     },
   });
-
-  // Ссылку отдаём только на настоящую публикацию: её пишут в telegramLink
-  // тикета, а ссылки тикета печатаются в репорт руководству
-  // (generateReportText → issueLinks). Ссылка на ТЕСТ-сообщение в закрытом
-  // служебном канале там была бы битой для всех, кроме нас. Тестовое
-  // сообщение с карточки и так достижимо — через запись BotReply.
   return live ? buildMessageLink(Number(chatId), sent.message_id) : null;
 }
 
@@ -337,7 +330,7 @@ export async function refreshSubmissionStatus(
       issueId,
       deleted: false,
       layout: { not: null },
-      kind: { in: ["SUBMISSION", "SUBMISSION_TEST"] },
+      kind: { in: ["SUBMISSION", "SUBMISSION_TEST", "SUBMISSION_BACKLOG"] },
     },
     select: { id: true, chatId: true, messageId: true, text: true, layout: true },
   });
