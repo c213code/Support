@@ -1,4 +1,4 @@
-// Распознавание «это про деңгейлік тест (ДТ)» в тексте обращения — чтобы на
+// Распознавание «это про деңгейлік тест (ДТ/БТ)» в тексте обращения — чтобы на
 // карточке показать кнопку прямо в /platform/reset-unt, а не заставлять
 // агента идти туда и печатать почту заново.
 //
@@ -10,8 +10,13 @@
 //
 // \b не годится: он зависит от \w, а \w по умолчанию ASCII-only и кириллицу
 // не видит — поэтому граница слова через unicode-lookaround, а не \b.
-const UNT_KEYWORD_RE = /(?<![\p{L}\p{N}])(дт(?![\p{L}\p{N}])|деңгей)/iu;
+// ДТ и БТ — один и тот же тест (уточнение команды, 20.10.2026).
+const UNT_KEYWORD_RE = /(?<![\p{L}\p{N}])((?:дт|бт)(?![\p{L}\p{N}])|деңгей)/iu;
 
 export function mentionsUntTest(text: string | null | undefined): boolean {
   return Boolean(text && UNT_KEYWORD_RE.test(text));
+}
+
+export function normalizeUntTestQuery(text: string): string {
+  return text.trim().toLowerCase().replace(/(?<![\p{L}\p{N}])(?:дт|бт)(?![\p{L}\p{N}])/giu, "дт");
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { SupportPageHeader } from "@/components/SupportPageHeader";
+import { BatchUntResetPanel } from "@/components/BatchUntResetPanel";
+import { normalizeUntTestQuery } from "@/lib/untResetRequest";
 
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
@@ -80,6 +82,8 @@ export function ResetUntResultTool() {
   const [product, setProduct] = useState("");
 
   const [student, setStudent] = useState("");
+  const [mode, setMode] = useState<"single" | "batch">("single");
+  const [batchText, setBatchText] = useState("");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<ResultRow[] | null>(null);
   const [fallback, setFallback] = useState<SearchFallback | null>(null);
@@ -130,8 +134,8 @@ export function ResetUntResultTool() {
 
   const filteredTests = useMemo(() => {
     if (!tests) return [];
-    const q = testQuery.trim().toLowerCase();
-    const list = q ? tests.filter((t) => t.name.toLowerCase().includes(q)) : tests;
+    const q = normalizeUntTestQuery(testQuery);
+    const list = q ? tests.filter((t) => normalizeUntTestQuery(t.name).includes(q)) : tests;
     return [...list]
       .sort((a, b) => {
         const openA = isOpenNow(a) ? 1 : 0;
@@ -232,7 +236,7 @@ export function ResetUntResultTool() {
 
   return (
     <div className="support-page max-w-3xl">
-      <SupportPageHeader title="Обнуление результата ДТ" description="Найдите тест и выберите завершённую попытку ученика." />
+      <SupportPageHeader title="Обнуление результата ДТ" description="Выберите тест и найдите одного ученика или целую пачку из сообщений. ДТ и БТ — один тест." />
 
       {/* Шаг 1: тест */}
       {!selectedTest && (
@@ -295,6 +299,10 @@ export function ResetUntResultTool() {
             </button>
           </div>
 
+          <div className="mb-3 flex gap-2" role="group" aria-label="Режим поиска учеников">
+            {([ ["single", "Один ученик"], ["batch", "Список из текста"] ] as const).map(([value, label]) => <button key={value} onClick={() => setMode(value)} aria-pressed={mode === value}
+              className={`rounded-lg px-3 py-2 text-sm font-medium ${mode === value ? "bg-brand-50 text-brand-700 ring-1 ring-brand-200" : "text-slate-500 hover:bg-slate-50"}`}>{label}</button>)}
+          </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-32">
               <label className="mb-1 block text-xs text-slate-600">Продукт</label>
@@ -319,7 +327,7 @@ export function ResetUntResultTool() {
                 />
               )}
             </div>
-            <div className="min-w-0 flex-1">
+            {mode === "single" && <><div className="min-w-0 flex-1">
               <label className="mb-1 block text-xs text-slate-600">
                 Почта, телефон или фамилия ученика
               </label>
@@ -337,10 +345,11 @@ export function ResetUntResultTool() {
               className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-40"
             >
               {searching ? "Ищем…" : "Найти"}
-            </button>
+            </button></>}
           </div>
 
-          {results && (
+          {mode === "batch" && <BatchUntResetPanel key={`${selectedTest.id}:${product}`} test={selectedTest} product={product} text={batchText} onTextChange={setBatchText} />}
+          {mode === "single" && results && (
             <div className="mt-4 space-y-2">
               {fallback && <FallbackNote fallback={fallback} found={results.length > 0} />}
               {results.length === 0 && !fallback && (
