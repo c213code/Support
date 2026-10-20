@@ -751,14 +751,6 @@ const COMMERCE_LABEL: SubmissionLabel = {
         { value: "other", label: "Басқа" },
       ],
     },
-    {
-      id: "creditSource",
-      label: "Қай айдағы / қай пәннің ақшасы?",
-      type: "text",
-      required: true,
-      showIf: onlyFor("credit-add"),
-      placeholder: "Мысалы: қыркүйек, тарих; немесе «55 000 → 44 000, айырмасы»",
-    },
 
     // --- Кредитті алып тастау ---
     {

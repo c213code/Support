@@ -15,11 +15,11 @@ test("type is asked first and nothing else is required before it", () => {
   assert.deepEqual(missingFields(label(), {}, 0), ["commerceType", "studentKind", "formAttempt"]);
 });
 
-test("credit grant needs amount, basis and source; screenshot stays optional", () => {
-  const values = { ...base, commerceType: "credit-add", creditAmount: "8000", creditBasis: "overpaid", creditSource: "қыркүйек" };
+test("credit grant needs only amount and basis; screenshot stays optional", () => {
+  const values = { ...base, commerceType: "credit-add", creditAmount: "8000", creditBasis: "overpaid" };
   assert.deepEqual(missingFields(label(), values, 0), []);
   assert.equal(requiredPhotos(label(), values), 0);
-  assert.deepEqual(missingFields(label(), { ...values, creditSource: "" }, 0), ["creditSource"]);
+  assert.deepEqual(missingFields(label(), { ...values, creditBasis: "" }, 0), ["creditBasis"]);
   assert.equal(extractContact(values), "student@example.test");
 });
 
@@ -41,7 +41,7 @@ test("transfer needs both ends, month, group, renewal, old months and money outc
 });
 
 test("switching type hides the previous branch so stale answers do not leak", () => {
-  const stale = { ...base, commerceType: "credit-add", creditAmount: "8000", creditBasis: "overpaid", creditSource: "қыркүйек" };
+  const stale = { ...base, commerceType: "credit-add", creditAmount: "8000", creditBasis: "overpaid" };
   const switched = { ...stale, commerceType: "free", streams: "TOEFL ITP ҚАРАША", billedMonth: "қараша 2026",
     targetGroup: "fmPIQ", freeReason: "grant", freeApprovedBy: "грант" };
   assert.deepEqual(missingFields(label(), switched, 0), []);
