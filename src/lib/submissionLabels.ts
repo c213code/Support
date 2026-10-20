@@ -668,7 +668,326 @@ const METHODOLOGY: SubmissionLabel[] = [
   OTHER_WITH_LESSON,
 ];
 
+// «Жаңа төлемдер бойынша» — одна плитка для всех запросов по новой коммерции
+// (V2 с 07.10): кредиты, переводы между потоками, снятие предмета, выдача за
+// 0 ₸, особая цена, «оплачено, но закрыто», возврат на карту. Основание —
+// разбор реальных обращений в «IT + СЕРВИС» 15–20.10.2026 и ops-заметки
+// (docs/commerce-labels.md). Почти в каждом из них дежурный переспрашивал одно
+// и то же: какой месяц (поток ҚАЗАН ≠ оплата за қараша), из какого потока и в
+// какой, в какую группу, что делать с деньгами (кредит / без денег / на
+// карту), оставлять ли старые месяцы открытыми и что форма «Оқушы» уже
+// ответила. Эти вопросы здесь обязательные.
+//
+// Почему один ярлык, а не семь: у кураторов это одна тема «төлем», а тип
+// выбирается первым полем. Ветки зависят только от полей, которые видны
+// всегда (тип, контакт, «формада жасап көрдіңіз бе?»): условие второго уровня
+// от поля из другой ветки оставило бы видимыми хвосты прошлого выбора, потому
+// что значения скрытых полей форма не стирает.
+
+type CommerceType =
+  | "credit-add"
+  | "credit-remove"
+  | "transfer"
+  | "remove"
+  | "free"
+  | "price"
+  | "paid-closed"
+  | "refund"
+  | "check";
+
+const COMMERCE_TYPE_FIELD = "commerceType";
+
+const onlyFor = (...types: CommerceType[]) => ({ field: COMMERCE_TYPE_FIELD, equals: types });
+
+const COMMERCE_LABEL: SubmissionLabel = {
+  id: "new-payments",
+  emoji: "💳",
+  title: "Жаңа төлемдер бойынша",
+  hint: "Кредит, пән / ағым ауыстыру, алып тастау, 0 ₸-ге қосу, баға, қайтарым",
+  fields: [
+    {
+      id: COMMERCE_TYPE_FIELD,
+      label: "Не керек?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "credit-add", label: "Кредит беру" },
+        { value: "credit-remove", label: "Кредитті алып тастау / азайту" },
+        { value: "transfer", label: "Пән / ағым / тариф ауыстыру (SMART PRO → SMART, шығармашылық та)" },
+        { value: "remove", label: "Пәнді / продлениені алып тастау" },
+        { value: "free", label: "0 ₸-ге қосу (тегін, грант)" },
+        { value: "price", label: "Сілтеме сомасы басқа болуы керек" },
+        { value: "paid-closed", label: "Төленді, бірақ сабақ / ай ашылмады" },
+        { value: "refund", label: "Картаға ақша қайтару" },
+        { value: "check", label: "Төлемді / кредитті тексеру" },
+      ],
+    },
+    ...contactChoiceFields({
+      prefix: "student",
+      kindLabel: "Оқушының байланысы",
+      phoneLabel: "Оқушының номері",
+      emailLabel: "Оқушының поштасы",
+    }),
+
+    // --- Кредит беру ---
+    {
+      id: "creditAmount",
+      label: "Кредит сомасы (₸)",
+      type: "text",
+      required: true,
+      showIf: onlyFor("credit-add", "credit-remove"),
+      placeholder: "Мысалы: 8000",
+    },
+    {
+      id: "creditBasis",
+      label: "Неге кредит береміз?",
+      type: "select",
+      required: true,
+      showIf: onlyFor("credit-add"),
+      options: [
+        { value: "overpaid", label: "Артық төлеген" },
+        { value: "removed", label: "Пән алынды, ақшасы кредитке" },
+        { value: "price", label: "Баға түзету (жеңілдік, ерекше баға)" },
+        { value: "other", label: "Басқа" },
+      ],
+    },
+    {
+      id: "creditSource",
+      label: "Қай айдағы / қай пәннің ақшасы?",
+      type: "text",
+      required: true,
+      showIf: onlyFor("credit-add"),
+      placeholder: "Мысалы: қыркүйек, тарих; немесе «55 000 → 44 000, айырмасы»",
+    },
+
+    // --- Кредитті алып тастау ---
+    {
+      id: "creditLeft",
+      label: "Алып тастағаннан кейін кредит қанша қалуы керек? (₸)",
+      type: "text",
+      required: true,
+      showIf: onlyFor("credit-remove"),
+      hint: "Толық алып тастасақ — 0",
+    },
+
+    // --- Ауыстыру / алып тастау / 0 ₸ / баға / ашылмады / қайтарым: не туралы ---
+    {
+      id: "fromStreams",
+      label: "Қай пәннен / ағымнан?",
+      type: "textarea",
+      required: true,
+      showIf: onlyFor("transfer", "remove"),
+      placeholder: "Пән, SMART / JUNIOR / SMART PRO, ағым айы (ШІЛДЕ, ТАМЫЗ, ҚЫРКҮЙЕК…)",
+      hint: "01 — шілде, 11 — тамыз, 21 — қыркүйек, 31 — қазан. Бірнеше пән болса, бәрін жазыңыз",
+    },
+    {
+      id: "toStreams",
+      label: "Қай пәнге / ағымға?",
+      type: "textarea",
+      required: true,
+      showIf: onlyFor("transfer"),
+      placeholder: "Мысалы: Гео шілде, Мат шілде, Тарих тамыз, Геом қазан",
+      hint: "Әр пәннің ағым айын жазыңыз",
+    },
+    {
+      id: "streams",
+      label: "Қай пән / ағым?",
+      type: "textarea",
+      required: true,
+      showIf: onlyFor("free", "price", "paid-closed", "refund"),
+      placeholder: "Пән, SMART / JUNIOR / SMART PRO / TOEFL, ағым айы",
+      hint: "01 — шілде, 11 — тамыз, 21 — қыркүйек, 31 — қазан",
+    },
+    {
+      id: "billedMonth",
+      label: "Қай айдың төлемі / сабағы?",
+      type: "text",
+      required: true,
+      showIf: onlyFor("transfer", "remove", "free", "price", "paid-closed", "refund"),
+      placeholder: "Мысалы: қараша 2026",
+      hint: "Ағымның аты (ҚАЗАН) мен төлем айын (қараша) шатастырмаңыз",
+    },
+    {
+      id: "targetGroup",
+      label: "Қай топқа / кураторға?",
+      type: "text",
+      required: true,
+      showIf: onlyFor("transfer", "free"),
+      placeholder: "Куратордың аты немесе «кез келген»",
+      hint: "Бірнеше пән болса: «Био — Дана Муратова, Хим — Жанерке»",
+    },
+    {
+      id: "nextRenewal",
+      label: "Келесі айға продление керек пе?",
+      type: "select",
+      required: true,
+      showIf: onlyFor("transfer"),
+      options: [
+        { value: "no", label: "Жоқ, продлениесіз" },
+        { value: "yes", label: "Иә, продлениемен" },
+      ],
+    },
+    {
+      id: "oldMonthsOpen",
+      label: "Ескі пәннің бұрынғы айлары ашық қалсын ба?",
+      type: "select",
+      required: true,
+      showIf: onlyFor("transfer", "remove"),
+      hint: "Алып тастағанда бұрынғы айлардың материалдары жабылады",
+      options: [
+        { value: "yes", label: "Иә, ашық қалсын" },
+        { value: "no", label: "Жоқ, жабылса болады" },
+      ],
+    },
+    {
+      id: "moneyOutcome",
+      label: "Ақшамен не болуы керек?",
+      type: "select",
+      required: true,
+      showIf: onlyFor("transfer", "remove"),
+      options: [
+        { value: "same", label: "Ештеңе: қосымша төлем де, кредит те жоқ" },
+        { value: "credit", label: "Айырмасы кредит болып қалсын" },
+        { value: "topup", label: "Оқушы доплата жасайды" },
+        { value: "forfeit", label: "Қайтарылмайды (кредит те берілмейді)" },
+      ],
+    },
+    {
+      id: "moneyAmount",
+      label: "Кредит / доплата сомасы (₸), белгілі болса",
+      type: "text",
+      showIf: onlyFor("transfer", "remove"),
+      hint: "Біз өзіміз есептейміз; сіз күтетін сома болса жазыңыз",
+    },
+
+    // --- 0 ₸-ге қосу ---
+    {
+      id: "freeReason",
+      label: "Неге тегін?",
+      type: "select",
+      required: true,
+      showIf: onlyFor("free"),
+      options: [
+        { value: "grant", label: "Грант / ұтыс" },
+        { value: "relative", label: "Қызметкердің туысы / келісілген" },
+        { value: "paid-before", label: "Бұрын төлеген, қосылмай қалған" },
+        { value: "selection", label: "Отбор (SMART PRO пробный)" },
+        { value: "other", label: "Басқа" },
+      ],
+    },
+    {
+      id: "freeApprovedBy",
+      label: "Кім келісті?",
+      type: "text",
+      required: true,
+      showIf: onlyFor("free"),
+      placeholder: "Мысалы: Жұлдызай апай; грант туралы хабарлама",
+    },
+
+    // --- Баға ---
+    {
+      id: "shownAmount",
+      label: "ПФ қазір қанша көрсетіп тұр? (₸)",
+      type: "text",
+      required: true,
+      showIf: onlyFor("price"),
+    },
+    {
+      id: "expectedAmount",
+      label: "Қанша болуы керек? (₸)",
+      type: "text",
+      required: true,
+      showIf: onlyFor("price"),
+      hint: "Жеңілдік есептелгеннен кейінгі соңғы сома",
+    },
+    {
+      id: "pricingReason",
+      label: "Неге осы сома?",
+      type: "textarea",
+      required: true,
+      showIf: onlyFor("price"),
+      placeholder: "Мысалы: SMART PRO + Қазтест 55 000, оған 20% жеңілдік → 44 000",
+    },
+
+    // --- Төленді / қайтарым ---
+    {
+      id: "paidAmount",
+      label: "Қанша төледі? (₸)",
+      type: "text",
+      required: true,
+      showIf: onlyFor("paid-closed", "refund"),
+    },
+    {
+      id: "paidAt",
+      label: "Қашан төледі?",
+      type: "text",
+      required: true,
+      showIf: onlyFor("paid-closed", "refund"),
+      placeholder: "Күні; Kaspi / карта",
+    },
+    {
+      id: "refundAmount",
+      label: "Картаға қанша қайтару керек? (₸)",
+      type: "text",
+      required: true,
+      showIf: onlyFor("refund"),
+    },
+    {
+      id: "refundReason",
+      label: "Қайтару себебі және оқушы қашан шықты?",
+      type: "textarea",
+      required: true,
+      showIf: onlyFor("refund"),
+      hint: "Ағымдағы айдың ақшасы 15-інен кейін қайтарылмайды — шыққан күнін міндетті түрде жазыңыз",
+    },
+
+    // --- Тексеру ---
+    {
+      id: "checkQuestion",
+      label: "Нені тексеру керек?",
+      type: "textarea",
+      required: true,
+      showIf: onlyFor("check"),
+      placeholder: "Мысалы: 9 000 кредит қайда кетті? Артық сома бар ма?",
+    },
+
+    // --- Барлығына ортақ ---
+    {
+      id: "formAttempt",
+      label: "«Оқушы» формасында жасап көрдіңіз бе?",
+      type: "select",
+      required: true,
+      options: [
+        { value: "no", label: "Жоқ / керегі жоқ" },
+        { value: "error", label: "Иә, қате шықты" },
+      ],
+    },
+    {
+      id: "formError",
+      label: "Қандай қате шықты? (мәтіні немесе Request ID)",
+      type: "textarea",
+      required: true,
+      showIf: { field: "formAttempt", equals: ["error"] },
+      placeholder: "Мысалы: «Шығармашылық пен басқа пәндер бір айда болмайды» немесе Request ID 97076edc…",
+    },
+    {
+      ...SCREENSHOT,
+      label: "Себеттің / төлемнің / жабық сабақтың скрині",
+      showIf: onlyFor("price", "paid-closed"),
+    },
+    {
+      ...SCREENSHOT,
+      label: "Қатенің немесе формадағы есептің скрині (бар болса)",
+      required: false,
+      minPhotos: 0,
+      showIf: onlyFor("credit-add", "credit-remove", "transfer", "remove", "free", "refund", "check"),
+    },
+    { ...DESCRIPTION, label: "Қосымша түсініктеме", required: false },
+  ],
+};
+
 const SERVICE: SubmissionLabel[] = [
+  COMMERCE_LABEL,
   {
     id: "discount",
     emoji: "🏷️",
@@ -707,6 +1026,7 @@ const SERVICE: SubmissionLabel[] = [
     id: "payment",
     emoji: "💳",
     title: "Төлем бойынша мәселе",
+    hint: "Жоғарыдағы төлем санаттарына сәйкес келмейтін басқа мәселе",
     fields: [
       { ...SCREENSHOT, label: "Төлем туралы скрин" },
       DESCRIPTION,
@@ -723,6 +1043,7 @@ const SERVICE: SubmissionLabel[] = [
     id: "catalog",
     emoji: "📚",
     title: "Каталог немесе курс ұзарту",
+    hint: "Каталогтағы немесе ұзартудағы басқа мәселе; арнайы санат табылмаса",
     fields: [
       { ...SCREENSHOT, label: "Қате көрінетін скрин" },
       DESCRIPTION,
