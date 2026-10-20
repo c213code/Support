@@ -14,6 +14,7 @@ import { formatTimeAlmaty } from "@/lib/date";
 import { isSubmissionToGroupEnabled } from "@/lib/settings";
 import { ticketShortCode, ticketUrl } from "@/lib/miniapp";
 import { suggestionBacklogTarget, SUGGESTION_SPREADSHEET_URL } from "@/lib/suggestionBacklog";
+import { checkSuggestionSpreadsheet } from "@/lib/suggestionSheetCheck";
 import {
   describeFields,
   displayValue,
@@ -165,8 +166,8 @@ export function buildSubmissionPost(opts: {
   values: Record<string, string | string[]>;
   live: boolean;
   sourceMessageUrl?: string | null;
-  // Only a successful Sheets writer may supply this receipt.
-  spreadsheetReceipt?: { url: string };
+  // Only a confirmed matching spreadsheet row may supply this link.
+  spreadsheetEntry?: { url: string };
   // Сколько видимых символов Telegram примет: 1024 у подписи к фото, 4096
   // у сообщения.
   limit: number;
@@ -210,8 +211,8 @@ export function buildSubmissionPost(opts: {
   const sourcePlain = suggestion && opts.sourceMessageUrl ? `Хабарлама: ${opts.sourceMessageUrl}` : null;
   const sourceHtml = suggestion && opts.sourceMessageUrl
     ? `Хабарлама: <a href="${escapeHtml(opts.sourceMessageUrl)}">ашу</a>` : null;
-  const sheetUrl = opts.spreadsheetReceipt?.url ?? SUGGESTION_SPREADSHEET_URL;
-  const sheetText = opts.spreadsheetReceipt ? "📊 Кестеге де енгізілді" : "📊 Ұсыныстар кестесі";
+  const sheetUrl = opts.spreadsheetEntry?.url ?? SUGGESTION_SPREADSHEET_URL;
+  const sheetText = opts.spreadsheetEntry ? "📊 Кестеде бар" : "📊 Ұсыныстар кестесі";
   const sheetPlain = suggestion ? `${sheetText}: ${sheetUrl}` : null;
   const sheetHtml = suggestion ? `${sheetText}: <a href="${escapeHtml(sheetUrl)}">ашу</a>` : null;
 
@@ -269,11 +270,26 @@ export async function postSubmissionToGroup(opts: SubmissionPostInput): Promise<
   if (!chatId) return null;
   const sourceLink = await publishSubmission(opts, { chatId, live, kind: live ? "SUBMISSION" : "SUBMISSION_TEST" });
   if (backlog && sourceLink) {
+    const sheetCheck = await checkSuggestionSpreadsheet({
+      issueId: opts.issueId,
+      description: typeof opts.values.description === "string" ? opts.values.description : "",
+      sourceMessageUrl: sourceLink,
+    });
     // Preserve the original support link even if the backlog copy fails.
     try {
-      await publishSubmission(opts, { ...backlog, live: true, kind: "SUBMISSION_BACKLOG", sourceMessageUrl: sourceLink });
+      await publishSubmission(opts, {
+        ...backlog, live: true, kind: "SUBMISSION_BACKLOG", sourceMessageUrl: sourceLink,
+        spreadsheetEntry: sheetCheck.status === "found" ? { url: sheetCheck.url } : undefined,
+      });
     } catch (error) {
       console.warn(`[submission] копия предложения не ушла в бэклог: ${error instanceof Error ? error.name : "ошибка"}`);
+    }
+    if (sheetCheck.status === "not-found") {
+      await remindSuggestionAuthor(opts, chatId, sourceLink).catch((error) => {
+        console.warn(`[submission] напоминание о таблице не отправилось: ${error instanceof Error ? error.name : "ошибка"}`);
+      });
+    } else if (sheetCheck.status === "unavailable" || sheetCheck.status === "uncertain") {
+      console.warn(`[submission] проверка таблицы: ${sheetCheck.status}; напоминание не отправлено`);
     }
   }
   return sourceLink;
@@ -285,6 +301,7 @@ async function publishSubmission(opts: SubmissionPostInput, target: {
   live: boolean;
   kind: "SUBMISSION" | "SUBMISSION_TEST" | "SUBMISSION_BACKLOG";
   sourceMessageUrl?: string;
+  spreadsheetEntry?: { url: string };
 }): Promise<string | null> {
   const { chatId, live, kind } = target;
   const existing = await prisma.botReply.findFirst({
@@ -298,7 +315,7 @@ async function publishSubmission(opts: SubmissionPostInput, target: {
   if (existing) return live ? buildMessageLink(Number(chatId), existing.messageId) : null;
   const withPhotos = opts.photoFileIds.length > 0;
   const { html, plain, layout } = buildSubmissionPost({
-    ...opts, live, sourceMessageUrl: target.sourceMessageUrl,
+    ...opts, live, sourceMessageUrl: target.sourceMessageUrl, spreadsheetEntry: target.spreadsheetEntry,
     limit: withPhotos ? CAPTION_LIMIT : 4096,
   });
   const sent = withPhotos
@@ -316,6 +333,25 @@ async function publishSubmission(opts: SubmissionPostInput, target: {
     },
   });
   return live ? buildMessageLink(Number(chatId), sent.message_id) : null;
+}
+
+export function buildSuggestionSheetReminder(authorName: string, telegramUserId: bigint): string {
+  return `<a href="tg://user?id=${telegramUserId}">${escapeHtml(authorName)}</a>, ұсынысыңызды <a href="${escapeHtml(SUGGESTION_SPREADSHEET_URL)}">осы кестеге</a> енгізіп қойыңызшы 🙏`;
+}
+
+async function remindSuggestionAuthor(opts: SubmissionPostInput, chatId: string, sourceLink: string): Promise<void> {
+  const kind = "SUGGESTION_TABLE_REMINDER";
+  const existing = await prisma.botReply.findFirst({
+    where: { issueId: opts.issueId, kind, deleted: false }, select: { id: true },
+  });
+  if (existing) return;
+  const sourceMessageId = Number(sourceLink.match(/\/(\d+)$/)?.[1]);
+  if (!Number.isSafeInteger(sourceMessageId) || sourceMessageId <= 0) return;
+  const text = buildSuggestionSheetReminder(opts.authorName, opts.telegramUserId);
+  const sent = await sendTelegramMessage(chatId, text, undefined, undefined, "HTML", sourceMessageId, false);
+  if (sent) await prisma.botReply.create({
+    data: { issueId: opts.issueId, chatId, messageId: sent.message_id, kind, text },
+  });
 }
 
 // Переписать строку статуса в посте обращения — зовётся из changeIssueStatus

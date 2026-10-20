@@ -4,12 +4,15 @@ import { suggestionBacklogTarget } from "../src/lib/suggestionBacklog";
 import { buildSubmissionPost, postSubmissionToGroup } from "../src/lib/submissionGroupPost";
 import { findLabel } from "../src/lib/submissionLabels";
 import { prisma } from "../src/lib/prisma";
+import { buildSuggestionSheetReminder } from "../src/lib/submissionGroupPost";
 import { sendStoredPhotos } from "../src/lib/telegram";
 
 const groupName = "IT + Сервис";
 const label = findLabel(groupName, "suggestion")!;
 const opts = { issueId: "ticketABC123", groupName, authorName: "Куратор <тест>", telegramUserId: BigInt(123), label,
   values: { description: "Сабаққа белгі қосу & сүзгі", urgency: "medium" }, photoFileIds: [] };
+const matchingCsv = '"№","Ұсыныс берілген күні","Ұсыныс иесі","Ұсыныс атауы","Ұсыныс сипаттамасы"\n"1","20.10","Куратор","Идея","Сабаққа белгі қосу & сүзгі"';
+function sheetResponse() { return new Response(matchingCsv, { headers: { "content-type": "text/csv; charset=utf-8" } }); }
 function env(t: TestContext, values: Record<string, string | undefined>) {
   for (const [key, value] of Object.entries(values)) {
     const before = process.env[key];
@@ -40,7 +43,7 @@ test("the suggestion card shows the source and spreadsheet links without claimin
   assert.doesNotMatch(post.html, /Бағыты/);
   assert.match(post.html, /Хабарлама: <a href="https:\/\/t.me\/c\/123\/456">ашу<\/a>/);
   assert.match(post.html, /📊 Ұсыныстар кестесі: <a href="https:\/\/docs.google.com\/spreadsheets\/d\/1VCY43GIjOFA_FeFfIWo-k6G6_OortrNe53hfogkPWgQ\/edit">ашу<\/a>/);
-  assert.doesNotMatch(post.plain, /Кестеге де енгізілді/);
+  assert.doesNotMatch(post.plain, /Кестеде бар/);
   assert.match(post.html, /Сабаққа белгі қосу &amp; сүзгі/);
   assert.match(post.plain, /Қаншалықты шұғыл\?: Орташа/);
   assert.match(post.html, /Куратор &lt;тест&gt;/);
@@ -48,10 +51,10 @@ test("the suggestion card shows the source and spreadsheet links without claimin
   assert.doesNotMatch(post.plain, /ТЕСТ|Ұсыныс #ABC123: Ұсыныс/);
 });
 
-test("a spreadsheet confirmation requires an explicit successful-write receipt", (t) => {
+test("a spreadsheet confirmation refers to a verified existing row", (t) => {
   env(t, { PUBLIC_APP_URL: "https://example.com" });
-  const post = buildSubmissionPost({ ...opts, live: true, limit: 4096, spreadsheetReceipt: { url: "https://docs.google.com/spreadsheets/d/verified/edit#range=A20" } });
-  assert.match(post.plain, /📊 Кестеге де енгізілді: https:\/\/docs.google.com\/spreadsheets\/d\/verified\/edit#range=A20/);
+  const post = buildSubmissionPost({ ...opts, live: true, limit: 4096, spreadsheetEntry: { url: "https://docs.google.com/spreadsheets/d/verified/edit#range=A20" } });
+  assert.match(post.plain, /📊 Кестеде бар: https:\/\/docs.google.com\/spreadsheets\/d\/verified\/edit#range=A20/);
 });
 
 test("suggestions create a source post then a linked backlog copy, and retries reuse both", async (t) => {
@@ -63,6 +66,7 @@ test("suggestions create a source post then a linked backlog copy, and retries r
   mockDelegate(t, prisma.botReply, "create", async ({ data }: { data: { chatId: string; messageId: number } }) => { existing.set(data.chatId, { messageId: data.messageId }); return data; });
   const requests: Record<string, unknown>[] = [];
   t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+    if (_url.toString().includes("docs.google.com")) return sheetResponse();
     requests.push(JSON.parse(init.body as string));
     return Response.json({ ok: true, result: { message_id: requests.length + 98 } });
   });
@@ -75,6 +79,51 @@ test("suggestions create a source post then a linked backlog copy, and retries r
   assert.equal(requests[1].chat_id, "-1001759146038");
   assert.equal(requests[1].message_thread_id, 22735);
   assert.match(requests[1].text as string, /Хабарлама: <a href="https:\/\/t.me\/c\/222\/99">ашу<\/a>/);
+  assert.match(requests[1].text as string, /Кестеде бар/);
+});
+
+test("a missing proposal produces one reply to its curator in the source group", async (t) => {
+  env(t, { TELEGRAM_BOT_TOKEN: "test-token", PUBLIC_APP_URL: "https://example.com", SUGGESTION_BACKLOG_ENABLED: undefined });
+  const saved = new Map<string, { messageId: number }>();
+  mockDelegate(t, prisma.groupPreset, "findUnique", async () => ({ chatId: "-100222" }));
+  mockDelegate(t, prisma.botReply, "findFirst", async ({ where }: { where: { chatId?: string; kind: string | { in: string[] } } }) => {
+    const kind = typeof where.kind === "string" ? where.kind : "SUBMISSION_BACKLOG";
+    return saved.get(kind) ?? null;
+  });
+  mockDelegate(t, prisma.botReply, "create", async ({ data }: { data: { kind: string; messageId: number } }) => { saved.set(data.kind, { messageId: data.messageId }); return data; });
+  const requests: Record<string, unknown>[] = [];
+  t.mock.method(globalThis, "fetch", async (url: URL | string, init: RequestInit) => {
+    if (url.toString().includes("docs.google.com")) return new Response(matchingCsv.split("\n")[0], { headers: { "content-type": "text/csv" } });
+    requests.push(JSON.parse(init.body as string));
+    return Response.json({ ok: true, result: { message_id: requests.length + 98 } });
+  });
+  await postSubmissionToGroup(opts);
+  await postSubmissionToGroup(opts);
+  assert.equal(requests.length, 3, "source, backlog and a single reminder; no repeat on retry");
+  const reminder = requests[2];
+  assert.equal(reminder.chat_id, "-100222");
+  assert.equal(reminder.reply_to_message_id, 99);
+  assert.equal(reminder.allow_sending_without_reply, false);
+  assert.equal(reminder.text, buildSuggestionSheetReminder(opts.authorName, opts.telegramUserId));
+  assert.match(reminder.text as string, /tg:\/\/user\?id=123/);
+  assert.match(reminder.text as string, /осы кестеге/);
+});
+
+test("an unreadable table never causes a request to fill it again", async (t) => {
+  env(t, { TELEGRAM_BOT_TOKEN: "test-token", PUBLIC_APP_URL: "https://example.com", SUGGESTION_BACKLOG_ENABLED: undefined });
+  mockDelegate(t, prisma.groupPreset, "findUnique", async () => ({ chatId: "-100222" }));
+  mockDelegate(t, prisma.botReply, "findFirst", async () => null);
+  mockDelegate(t, prisma.botReply, "create", async () => ({}));
+  const requests: Record<string, unknown>[] = [];
+  t.mock.method(globalThis, "fetch", async (url: URL | string, init: RequestInit) => {
+    if (url.toString().includes("docs.google.com")) return new Response("Denied", { status: 403 });
+    requests.push(JSON.parse(init.body as string));
+    return Response.json({ ok: true, result: { message_id: requests.length + 98 } });
+  });
+  t.mock.method(console, "warn", () => {});
+  await postSubmissionToGroup(opts);
+  assert.equal(requests.length, 2, "source and backlog only");
+  assert.doesNotMatch(requests[1].text as string, /Кестеде бар|енгізіп қойыңызшы/);
 });
 
 test("a failed backlog copy preserves the source link and retry only sends the missing copy", async (t) => {
@@ -85,6 +134,7 @@ test("a failed backlog copy preserves the source link and retry only sends the m
   mockDelegate(t, prisma.botReply, "create", async () => { sourceSaved = true; return {}; });
   const targets: string[] = [];
   t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+    if (_url.toString().includes("docs.google.com")) return sheetResponse();
     const data = JSON.parse(init.body as string);
     targets.push(data.chat_id);
     return data.chat_id === "-100222" ? Response.json({ ok: true, result: { message_id: 99 } })
