@@ -954,13 +954,20 @@ const COMMERCE_LABEL: SubmissionLabel = {
         { value: "error", label: "Иә, қате шықты" },
       ],
     },
+    // Request ID длинный, руками его не перепечатают: просим скрин формы с
+    // ошибкой. Секция фото у формы одна, её подпись и минимум берутся из
+    // первого видимого поля фото, поэтому это поле стоит раньше остальных.
+    {
+      ...SCREENSHOT,
+      label: "Формадағы қатенің скрині (Request ID көрінсін)",
+      showIf: { field: "formAttempt", equals: ["error"] },
+    },
     {
       id: "formError",
-      label: "Қандай қате шықты? (мәтіні немесе Request ID)",
+      label: "Қате мәтіні (міндетті емес)",
       type: "textarea",
-      required: true,
       showIf: { field: "formAttempt", equals: ["error"] },
-      placeholder: "Мысалы: «Шығармашылық пен басқа пәндер бір айда болмайды» немесе Request ID 97076edc…",
+      placeholder: "Скринде көрінсе, жазбасаңыз да болады",
     },
     {
       ...SCREENSHOT,

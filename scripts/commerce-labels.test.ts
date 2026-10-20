@@ -59,10 +59,11 @@ test("price and paid-but-closed require a screenshot, the rest do not", () => {
   assert.equal(requiredPhotos(label(), { ...base, commerceType: "check", checkQuestion: "кредит қайда?" }), 0);
 });
 
-test("a failed form attempt requires the error text or Request ID", () => {
+test("a failed form attempt requires a screenshot of the error, not typed text", () => {
   const values = { ...base, commerceType: "check", checkQuestion: "кредит қайда кетті?", formAttempt: "error" };
-  assert.deepEqual(missingFields(label(), values, 0), ["formError"]);
-  assert.deepEqual(missingFields(label(), { ...values, formError: "Request ID 9d044a8d" }, 0), []);
+  assert.equal(requiredPhotos(label(), values), 1);
+  assert.deepEqual(missingFields(label(), values, 0), ["photos"]);
+  assert.deepEqual(missingFields(label(), values, 1), []);
 });
 
 test("refund keeps paid amount, date, refund amount and the exit date", () => {
