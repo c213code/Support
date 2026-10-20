@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
-import { generateReportText } from "@/lib/report";
+import { generateReportText, generateReportMessages } from "@/lib/report";
 import { appUrl, ticketShortCode, ticketUrl } from "@/lib/miniapp";
+import { pickRecipient } from "@/lib/dailyReview";
+import { telegramIdToAgent } from "@/lib/agentTelegram";
+import { isWeekendDate } from "@/lib/date";
 
 // Репорт боссам целиком — с тем, что знает только сервер: ссылки «#4JQ9PW» на
 // тикеты на доске, отметка про авто-репорт и подвал «сделано с помощью».
@@ -38,15 +41,18 @@ export async function reportFooter(reportDate: string): Promise<string[]> {
   return lines;
 }
 
-export async function buildReport(reportDate: string): Promise<{ text: string; html: string }> {
-  const [issues, presets, footer] = await Promise.all([
+export async function buildReport(reportDate: string): Promise<{ text: string; html: string; messages: string[] }> {
+  const [issues, presets, footer, dutyId] = await Promise.all([
     prisma.issue.findMany({ where: { reportDate }, orderBy: [{ position: "asc" }] }),
     prisma.groupPreset.findMany({ orderBy: { order: "asc" } }),
     reportFooter(reportDate),
+    isWeekendDate(reportDate) ? pickRecipient(reportDate, false) : Promise.resolve(null),
   ]);
-  const common = { ticketUrl, ticketCode: ticketShortCode, footer };
+  const dutyName = dutyId ? telegramIdToAgent(dutyId) ?? "Сменный дежурный" : null;
+  const common = { ticketUrl, ticketCode: ticketShortCode, footer, compact: true, reportDate, dutyName };
   return {
     text: generateReportText(issues, presets, { ...common, format: "plain" }),
     html: generateReportText(issues, presets, { ...common, format: "html" }),
+    messages: generateReportMessages(issues, presets, common),
   };
 }

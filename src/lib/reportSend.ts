@@ -12,34 +12,7 @@ export type SendReportResult =
   // группе, остальные нет: повторять целиком нельзя, будет дубль.
   | { ok: false; reason: "send-failed"; sentParts: number; totalParts: number };
 
-// Лимит Telegram на одно сообщение — 4096 символов; берём с запасом.
-const MAX_PART = 3900;
-
-// Длинный репорт — частями. Режем по пустой строке между группами, а если
-// одна группа сама длиннее лимита — по строкам: тикет не должен рваться
-// посередине. 28.09 репорт вышел в 4582 символа, Telegram его отклонил, а
-// бот записал «отправлено» и ответил ✅ — в группу не ушло ничего.
-export function splitReport(text: string): string[] {
-  const parts: string[] = [];
-  let current = "";
-  const push = (piece: string, sep: string) => {
-    if (!current) current = piece;
-    else if (current.length + sep.length + piece.length <= MAX_PART) current += sep + piece;
-    else {
-      parts.push(current);
-      current = piece;
-    }
-  };
-  for (const block of text.split(/\n{2,}/)) {
-    if (block.length <= MAX_PART) {
-      push(block, "\n\n");
-      continue;
-    }
-    for (const line of block.split("\n")) push(line.slice(0, MAX_PART), "\n");
-  }
-  if (current) parts.push(current);
-  return parts;
-}
+export { splitReport } from "@/lib/reportSplit";
 
 // Рассылка готового репорта в рабочую группу — общая логика между кнопкой
 // "📤 Отправить в группу" (под вечерней сводкой и карточками разбора) и
@@ -60,7 +33,7 @@ export async function sendReportToGroup(reportDate: string): Promise<SendReportR
 
   // HTML — ради ссылок «#4JQ9PW» на тикеты на доске; простой текст
   // возвращаем вызывающему (его показывают в личке как «вот что ушло»).
-  const { text, html } = await buildReport(reportDate);
+  const { text, messages } = await buildReport(reportDate);
   if (!text) {
     return { ok: false, reason: "empty" };
   }
@@ -70,22 +43,15 @@ export async function sendReportToGroup(reportDate: string): Promise<SendReportR
   const targetThreadId = process.env.REPORT_TARGET_THREAD_ID
     ? Number(process.env.REPORT_TARGET_THREAD_ID)
     : undefined;
-  // Результат отправки проверяем: раньше его не смотрели, и отклонённый
-  // Telegram репорт (длиннее 4096 символов) записывался как отправленный.
-  const parts = splitReport(html);
-  for (const [index, part] of parts.entries()) {
-    const sent = await sendTelegramMessage(targetChatId, part, undefined, targetThreadId, "HTML");
+  for (const [index, message] of messages.entries()) {
+    const sent = await sendTelegramMessage(targetChatId, message, undefined, targetThreadId, "HTML");
     if (!sent) {
       if (index > 0) {
-        // Начало уже в группе — журнал пишем, чтобы повторное нажатие не
-        // продублировало его; хвост человек дошлёт сам.
         await prisma.reportSendLog.upsert({
-          where: { reportDate },
-          update: { sentAt: new Date() },
-          create: { reportDate },
+          where: { reportDate }, update: { sentAt: new Date() }, create: { reportDate },
         });
       }
-      return { ok: false, reason: "send-failed", sentParts: index, totalParts: parts.length };
+      return { ok: false, reason: "send-failed", sentParts: index, totalParts: messages.length };
     }
   }
 

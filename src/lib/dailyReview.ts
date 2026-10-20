@@ -99,7 +99,7 @@ export async function buildReviewSummary(
 
   const header = [
     `🌙 Репорт — ${reportDate}`,
-    ...(askToSend ? [`Осы репортты топқа жіберейін бе? Жіберілмесе, бот ${reportDate === todayDateString() ? "ертең" : "бүгін"} 11:00-де өзі жібереді.`] : []),
+    ...(askToSend ? [`Осы репортты топқа жіберейін бе? Жіберілмесе, бот ${reportDate === todayDateString() ? "ертең" : "бүгін"} 10:30-де өзі жібереді.`] : []),
     `📨 Отправлено: ${sentCount} · 🔄 В работе/Пендинг/На завтра/Передано: ${activeCount} · ✅ Решено: ${resolvedCount}`,
     ...(stalled > 0
       ? [`⏳ Висят в работе больше ${STALL_HOURS} ч: ${stalled} — может, уже сделано?`]
@@ -524,7 +524,7 @@ async function moveReviewSession(chatId: string, step: 1 | -1): Promise<void> {
 // (разбор, заметки) и в посторонних чатах тоже сохраняются как его
 // сообщения, и раньше тот, кто больше переписывался с ботом, считался
 // дежурным.
-export async function pickRecipient(reportDate: string): Promise<number | null> {
+export async function pickRecipient(reportDate: string, useFallback = true): Promise<number | null> {
   const permanent = agentTelegramEntries()
     .filter(([name]) => name !== SHARED_AGENT && (AGENTS as readonly string[]).includes(name))
     .map(([, id]) => id);
@@ -534,7 +534,7 @@ export async function pickRecipient(reportDate: string): Promise<number | null> 
   if (candidates.length === 0) return null;
   // Тихий день без агентской переписки — шлём первому постоянному, чтобы
   // сводка не потерялась молча.
-  const fallback = permanent[0] ?? candidates[0];
+  const fallback = useFallback ? permanent[0] ?? candidates[0] : null;
 
   const linkedChats = await prisma.groupPreset.findMany({
     where: { chatId: { not: null } },

@@ -9,7 +9,7 @@ import { sendDailyReviewMessage } from "@/lib/dailyReview";
 // обзор и вопрос получают Ерош и Алпа; в выходные — выбранный дежурный
 // (см. pickRecipient в lib/dailyReview.ts).
 //
-// Если репорт не отправят вечером, в 09:00 бот напомнит, а в 11:00 сам
+// Если репорт не отправят вечером, в 09:00 бот напомнит, а в 10:30 сам
 // отправит его при отсутствии ReportSendLog за эту дату.
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");

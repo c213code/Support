@@ -9,7 +9,7 @@ import { sendDailyReviewMessage } from "@/lib/dailyReview";
 // репорт сразу в 22:00, а разбирает вчерашний день с утра — досылает
 // repeat вчерашней сводки, только если "📤 Отправить в группу" так и не
 // нажали (см. ReportSendLog, пишется в report_send-обработчике вебхука).
-// В будни спрашиваем и Ероша, и Алпу. Если до 11:00 никто не отправит,
+// В будни спрашиваем и Ероша, и Алпу. Если до 10:30 никто не отправит,
 // отдельный cron сам отправит вчерашний репорт. Уже отправленный не трогаем.
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");

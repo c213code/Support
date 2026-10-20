@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { GroupPresetDTO, IssueDTO } from "@/lib/types";
-import { groupIssues } from "@/lib/report";
+import { groupIssues, isReportableIssue } from "@/lib/report";
 import { copyReport } from "@/lib/copyReport";
 import { STATUS_META } from "@/lib/status";
 import { formatDateHuman } from "@/lib/date";
@@ -22,10 +22,10 @@ export function ReportLedger({
   const toast = useToast();
   const [copied, setCopied] = useState(false);
 
-  const reportable = issues.filter((i) => i.status !== "SENT");
+  const reportable = issues.filter(isReportableIssue);
   const grouped = groupIssues(reportable, groups);
-  const resolved = issues.filter((i) => i.status === "RESOLVED").length;
-  const active = issues.filter(
+  const resolved = reportable.filter((i) => i.status === "RESOLVED").length;
+  const active = reportable.filter(
     (i) =>
       i.status === "IN_PROGRESS" ||
       i.status === "PENDING" ||
@@ -110,7 +110,7 @@ export function ReportLedger({
         </div>
         <div className="rounded-xl bg-slate-50 px-3 py-2">
           <div className="text-xl font-extrabold tabular-nums text-brand-600">
-            {issues.length}
+            {reportable.length}
           </div>
           <div className="mt-0.5 text-[10.5px] font-medium text-slate-400">
             всего
