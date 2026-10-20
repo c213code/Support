@@ -670,7 +670,7 @@ const METHODOLOGY: SubmissionLabel[] = [
 
 // «Жаңа төлемдер бойынша» — одна плитка для всех запросов по новой коммерции
 // (V2 с 07.10): кредиты, переводы между потоками, снятие предмета, выдача за
-// 0 ₸, особая цена, «оплачено, но закрыто», возврат на карту. Основание —
+// 0 ₸, особая цена, возврат на карту. Основание —
 // разбор реальных обращений в «IT + СЕРВИС» 15–20.10.2026 и ops-заметки
 // (docs/commerce-labels.md). Почти в каждом из них дежурный переспрашивал одно
 // и то же: какой месяц (поток ҚАЗАН ≠ оплата за қараша), из какого потока и в
@@ -691,9 +691,8 @@ type CommerceType =
   | "remove"
   | "free"
   | "price"
-  | "paid-closed"
   | "refund"
-  | "check";
+  | "other";
 
 const COMMERCE_TYPE_FIELD = "commerceType";
 
@@ -717,9 +716,8 @@ const COMMERCE_LABEL: SubmissionLabel = {
         { value: "remove", label: "Пәнді / продлениені алып тастау" },
         { value: "free", label: "0 ₸-ге қосу (тегін, грант)" },
         { value: "price", label: "Сілтеме сомасы басқа болуы керек" },
-        { value: "paid-closed", label: "Төленді, бірақ сабақ / ай ашылмады" },
         { value: "refund", label: "Картаға ақша қайтару" },
-        { value: "check", label: "Төлемді / кредитті тексеру" },
+        { value: "other", label: "Басқа мәселе" },
       ],
     },
     ...contactChoiceFields({
@@ -786,7 +784,7 @@ const COMMERCE_LABEL: SubmissionLabel = {
       label: "Қай пән / ағым?",
       type: "textarea",
       required: true,
-      showIf: onlyFor("free", "price", "paid-closed", "refund"),
+      showIf: onlyFor("free", "price", "refund"),
       placeholder: "Пән, SMART / JUNIOR / SMART PRO / TOEFL, ағым айы",
       hint: "01 — шілде, 11 — тамыз, 21 — қыркүйек, 31 — қазан",
     },
@@ -795,7 +793,7 @@ const COMMERCE_LABEL: SubmissionLabel = {
       label: "Қай айдың төлемі / сабағы?",
       type: "text",
       required: true,
-      showIf: onlyFor("transfer", "remove", "free", "price", "paid-closed", "refund"),
+      showIf: onlyFor("transfer", "remove", "free", "price", "refund"),
       placeholder: "Мысалы: қараша 2026",
       hint: "Ағымның аты (ҚАЗАН) мен төлем айын (қараша) шатастырмаңыз",
     },
@@ -899,14 +897,14 @@ const COMMERCE_LABEL: SubmissionLabel = {
       label: "Қанша төледі? (₸)",
       type: "text",
       required: true,
-      showIf: onlyFor("paid-closed", "refund"),
+      showIf: onlyFor("refund"),
     },
     {
       id: "paidAt",
       label: "Қашан төледі?",
       type: "text",
       required: true,
-      showIf: onlyFor("paid-closed", "refund"),
+      showIf: onlyFor("refund"),
       placeholder: "Күні; Kaspi / карта",
     },
     {
@@ -925,14 +923,14 @@ const COMMERCE_LABEL: SubmissionLabel = {
       hint: "Ағымдағы айдың ақшасы 15-інен кейін қайтарылмайды — шыққан күнін міндетті түрде жазыңыз",
     },
 
-    // --- Тексеру ---
+    // --- Басқа мәселе: төлем туралы, бірақ жоғарыдағы түрлерге келмейді ---
     {
-      id: "checkQuestion",
-      label: "Нені тексеру керек?",
+      id: "otherProblem",
+      label: "Мәселені сипаттаңыз",
       type: "textarea",
       required: true,
-      showIf: onlyFor("check"),
-      placeholder: "Мысалы: 9 000 кредит қайда кетті? Артық сома бар ма?",
+      showIf: onlyFor("other"),
+      placeholder: "Не болды және не істеу керек",
     },
 
     // --- Барлығына ортақ ---
@@ -963,15 +961,15 @@ const COMMERCE_LABEL: SubmissionLabel = {
     },
     {
       ...SCREENSHOT,
-      label: "Себеттің / төлемнің / жабық сабақтың скрині",
-      showIf: onlyFor("price", "paid-closed"),
+      label: "Себеттің / сілтемедегі соманың скрині",
+      showIf: onlyFor("price"),
     },
     {
       ...SCREENSHOT,
       label: "Қатенің немесе формадағы есептің скрині (бар болса)",
       required: false,
       minPhotos: 0,
-      showIf: onlyFor("credit-add", "credit-remove", "transfer", "remove", "free", "refund", "check"),
+      showIf: onlyFor("credit-add", "credit-remove", "transfer", "remove", "free", "refund", "other"),
     },
     { ...DESCRIPTION, label: "Қосымша түсініктеме", required: false },
   ],

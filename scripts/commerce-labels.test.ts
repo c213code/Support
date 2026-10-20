@@ -50,17 +50,17 @@ test("switching type hides the previous branch so stale answers do not leak", ()
   assert.doesNotMatch(details, /Артық төлеген/);
 });
 
-test("price and paid-but-closed require a screenshot, the rest do not", () => {
+test("price requires a screenshot, the rest do not", () => {
   const price = { ...base, commerceType: "price", streams: "SMART PRO ӘДЕБ-ТІЛ", billedMonth: "қараша 2026",
     shownAmount: "52000", expectedAmount: "44000", pricingReason: "55 000 − 20%" };
   assert.equal(requiredPhotos(label(), price), 1);
   assert.deepEqual(missingFields(label(), price, 0), ["photos"]);
   assert.deepEqual(missingFields(label(), price, 1), []);
-  assert.equal(requiredPhotos(label(), { ...base, commerceType: "check", checkQuestion: "кредит қайда?" }), 0);
+  assert.equal(requiredPhotos(label(), { ...base, commerceType: "other", otherProblem: "кредит қайда?" }), 0);
 });
 
 test("a failed form attempt requires a screenshot of the error, not typed text", () => {
-  const values = { ...base, commerceType: "check", checkQuestion: "кредит қайда кетті?", formAttempt: "error" };
+  const values = { ...base, commerceType: "other", otherProblem: "кредит қайда кетті?", formAttempt: "error" };
   assert.equal(requiredPhotos(label(), values), 1);
   assert.deepEqual(missingFields(label(), values, 0), ["photos"]);
   assert.deepEqual(missingFields(label(), values, 1), []);
