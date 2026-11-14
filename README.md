@@ -1816,6 +1816,24 @@ MiMo недетерминирована: 8 из ~96 тикетов меняют 
 Бесплатный ключ Gemini упирается в дневную квоту (429) посреди разбора,
 поэтому Gemini включается только явно.
 
+**Claude (Anthropic API напрямую).** `RECONCILE_MODEL=anthropic:<модель>`
+(можно `claude:<модель>`) и `ANTHROPIC_API_KEY` из console.anthropic.com.
+Модели: `claude-opus-5-5` (самая умная, $4 / $20 за 1M токенов вход/выход),
+`claude-sonnet-5-5` ($2 / $10), `claude-haiku-5-5` ($0.10 / $0.50). Запасной
+тоже может быть Claude: `RECONCILE_FALLBACK=anthropic:claude-haiku-5-5`.
+- Ответ — по JSON-схеме на стороне API: статус всегда из списка.
+- Правила кэшируются (`cache_control`), повторное чтение — 1/20 цены входа;
+  словарь идёт отдельным блоком после метки и кэш не ломает.
+- Глубина размышлений — `RECONCILE_EFFORT` (`low` / `medium` / `high` /
+  `xhigh` / `max`, по умолчанию `medium`). Выключить размышления у Opus 5.5
+  и Sonnet 5.5 нельзя — только понизить effort. Другое значение (например,
+  оставшееся от OpenRouter) игнорируется — будет `medium`.
+- У Opus 5.5 и Sonnet 5.5 включён серверный повтор при отказе классификатора
+  безопасности (`fallbacks: "default"`): API сам переспросит другую модель
+  Claude. Если отказали все — тикет уходит к запасной из `RECONCILE_FALLBACK`.
+- Цена каждого запроса считается по прайсу (`ANTHROPIC_PRICES` в
+  `dayReconcile.ts`) и видна в `eval:reconcile`, как у OpenRouter.
+
 Не называй ключ `GEMINI_API_KEY`/`GOOGLE_API_KEY`: с ними graphify
 отправляет код во внешний API.
 

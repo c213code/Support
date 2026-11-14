@@ -3,6 +3,7 @@
 //
 //   npm run eval:reconcile -- --models=gemini:gemini-3.8-flash,groq --limit=60
 //   npm run eval:reconcile -- --models=openrouter:deepseek/deepseek-v4.1-flash,groq
+//   npm run eval:reconcile -- --models=anthropic:claude-sonnet-5-5,anthropic:claude-haiku-5-5
 //
 // Эталон — финальный статус тикета в базе. Он шумный: тикет могли закрыть и
 // через три дня, а бывает, что закрыли без единой реплики в чате. Поэтому в
@@ -47,6 +48,7 @@ const PROVIDERS: ReconcileProvider[] = arg("models", "gemini:gemini-3.8-flash,gr
     const model = cut < 0 ? "" : spec.slice(cut + 1);
     if (kind === "groq") return { kind: "groq", model: "groq" };
     if (kind === "openrouter") return { kind: "openrouter", model };
+    if (kind === "anthropic" || kind === "claude") return { kind: "anthropic", model: model || "claude-opus-5-5" };
     return { kind: "gemini", model: model || "gemini-3.8-flash" };
   });
 

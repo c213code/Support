@@ -18,20 +18,30 @@ import { maskSensitiveForAi } from "@/lib/textClean";
 // Ничего не меняется само. Статус тикета меняется только в applyVerdicts —
 // когда человек отметил решения и нажал «Применить».
 
-// Модель разбора — переменной RECONCILE_MODEL: «gemini:<модель>» (нужен
+// Модель разбора — переменной RECONCILE_MODEL: «anthropic:<модель>» (Claude,
+// нужен ANTHROPIC_API_KEY; «claude:» — то же самое), «gemini:<модель>» (нужен
 // GEMINI_REPORT_KEY), «openrouter:<модель>» (нужен OPENROUTER_API_KEY) или
 // «groq».
 // Запасная модель для повтора: другая, чем основная, чтобы сбой одной не
-// оставлял тикет с «ИИ не ответил». RECONCILE_FALLBACK — «openrouter:<модель>»,
-// «groq» или «none»; по умолчанию DeepSeek Flash через OpenRouter (дешёвый и
-// на наших тикетах почти не хуже MiMo), без ключа OpenRouter — Groq.
+// оставлял тикет с «ИИ не ответил». RECONCILE_FALLBACK — «anthropic:<модель>»,
+// «openrouter:<модель>», «groq» или «none»; по умолчанию DeepSeek Flash через
+// OpenRouter (дешёвый и на наших тикетах почти не хуже MiMo), без ключа
+// OpenRouter — Groq.
+function anthropicModel(spec: string | undefined): string | null {
+  const match = spec?.match(/^(?:anthropic|claude):(.+)$/);
+  return match && process.env.ANTHROPIC_API_KEY ? match[1].trim() : null;
+}
+
 export function fallbackProvider(primary: ReconcileProvider): ReconcileProvider | null {
   const spec = process.env.RECONCILE_FALLBACK?.trim();
   if (spec === "none") return null;
+  const claude = anthropicModel(spec);
   const candidate: ReconcileProvider | null =
     spec === "groq"
       ? { kind: "groq", model: "groq" }
-      : process.env.OPENROUTER_API_KEY
+      : claude
+        ? { kind: "anthropic", model: claude }
+        : process.env.OPENROUTER_API_KEY
         ? {
             kind: "openrouter",
             model: spec?.startsWith("openrouter:")
@@ -50,6 +60,8 @@ export function fallbackProvider(primary: ReconcileProvider): ReconcileProvider 
 export function reconcileProvider(): ReconcileProvider {
   const spec = process.env.RECONCILE_MODEL?.trim();
   if (spec === "groq") return { kind: "groq", model: "groq" };
+  const claude = anthropicModel(spec);
+  if (claude) return { kind: "anthropic", model: claude };
   if (spec?.startsWith("gemini:") && process.env.GEMINI_REPORT_KEY) {
     return { kind: "gemini", model: spec.slice("gemini:".length) };
   }

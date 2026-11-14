@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { callGroqChat, GROQ_MODEL } from "@/lib/ai";
 import { maskSensitiveForAi } from "@/lib/textClean";
 import type { ThreadLine } from "@/lib/resolutionNote";
@@ -42,14 +43,15 @@ export type ReconcileVerdict = {
   reason: string;
 };
 
-// costUsd — сколько запрос стоил, если провайдер это сообщает (OpenRouter).
+// costUsd — сколько запрос стоил: OpenRouter сообщает сам, у Claude считаем
+// по прайсу (ANTHROPIC_PRICES).
 export type ReconcileUsage = { inputTokens: number; outputTokens: number; costUsd?: number };
 
 export type ReconcileResult =
   | { ok: true; verdict: ReconcileVerdict; usage: ReconcileUsage | null; ms: number }
   | { ok: false; error: string; ms: number };
 
-export type ReconcileProvider = { kind: "gemini" | "groq" | "openrouter"; model: string };
+export type ReconcileProvider = { kind: "gemini" | "groq" | "openrouter" | "anthropic"; model: string };
 
 // Сами правила и подача под каждую модель — в lib/reconcilePrompt.ts.
 
@@ -318,6 +320,129 @@ async function askOpenRouter(model: string, userText: string, glossary: string, 
   };
 }
 
+// Claude API напрямую (ключ ANTHROPIC_API_KEY, официальный SDK).
+//
+// - Ответ по JSON-схеме на стороне API (output_config.format): статус из
+//   списка, невалидного JSON не придёт — как у Gemini.
+// - Правила (~4100 токенов) — отдельным блоком system с cache_control:
+//   они одинаковы у всех тикетов, и повторное чтение из кэша стоит 1/10–1/20
+//   обычного входа. Словарь — следующим блоком, после метки: он у каждого
+//   тикета свой и кэш не ломает.
+// - Глубина размышлений — output_config.effort (RECONCILE_EFFORT: low /
+//   medium / high / xhigh / max, по умолчанию medium). У Opus 5.5 и Sonnet 5.5
+//   размышления выключить нельзя — только понизить effort.
+// - Повторов внутри SDK нет (maxRetries: 0): повтор и запасная модель — в
+//   reconcileRun, как у остальных провайдеров.
+let anthropicClient: Anthropic | null = null;
+function anthropic(): Anthropic {
+  anthropicClient ??= new Anthropic({ maxRetries: 0, timeout: MODEL_TIMEOUT_MS });
+  return anthropicClient;
+}
+
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+type ClaudeEffort = (typeof CLAUDE_EFFORTS)[number];
+
+function claudeEffort(): ClaudeEffort {
+  const value = process.env.RECONCILE_EFFORT?.trim();
+  return CLAUDE_EFFORTS.includes(value as ClaudeEffort) ? (value as ClaudeEffort) : "medium";
+}
+
+// $ за 1M токенов: вход, выход, чтение кэша, запись кэша (5 мин — 1.25× входа).
+// Нет модели в таблице — цена в журнале просто не считается.
+const ANTHROPIC_PRICES: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
+  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+};
+
+// Серверный повтор на другой модели Claude, если классификатор безопасности
+// откажет (stop_reason: refusal). Есть не у всех моделей — у Haiku нет.
+const MODELS_WITH_SERVER_FALLBACK = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5", "claude-fable-5-2"]);
+
+const VERDICT_SCHEMA = {
+  type: "object",
+  properties: {
+    status: { type: "string", enum: [...RECONCILE_STATUSES] },
+    note: { type: "string" },
+    evidence: { type: "string" },
+    reason: { type: "string" },
+  },
+  required: ["status", "note", "evidence", "reason"],
+  additionalProperties: false,
+} as const;
+
+async function askAnthropic(model: string, userText: string, glossary: string, rules?: string): Promise<ReconcileResult> {
+  const started = Date.now();
+  if (!process.env.ANTHROPIC_API_KEY) return { ok: false, error: "ANTHROPIC_API_KEY не задан", ms: 0 };
+
+  // Через общий buildReconcileMessages — чтобы и здесь работала подмена
+  // правил из eval-прогона (--rules). Словарь отдельно, после метки кэша.
+  const [systemMessage, userMessage] = buildReconcileMessages(model, userText, "", undefined, rules);
+  const system: Anthropic.Beta.BetaTextBlockParam[] = [
+    { type: "text", text: systemMessage.content, cache_control: { type: "ephemeral" } },
+  ];
+  if (glossary.trim()) system.push({ type: "text", text: glossary });
+  const withFallback = MODELS_WITH_SERVER_FALLBACK.has(model);
+
+  let response: Anthropic.Beta.BetaMessage;
+  try {
+    response = await anthropic().beta.messages.create({
+      model,
+      // С запасом на размышления: при effort medium их обычно сотни токенов,
+      // но трудная переписка думается дольше, а обрезанный ответ — сбой.
+      max_tokens: 8000,
+      system,
+      messages: [{ role: "user", content: userMessage.content }],
+      output_config: {
+        effort: claudeEffort(),
+        format: { type: "json_schema", schema: VERDICT_SCHEMA },
+      },
+      ...(withFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+    });
+  } catch (err) {
+    const ms = Date.now() - started;
+    if (err instanceof Anthropic.APIConnectionTimeoutError) return { ok: false, error: "сеть: таймаут", ms };
+    if (err instanceof Anthropic.APIConnectionError) return { ok: false, error: "сеть: нет соединения", ms };
+    if (err instanceof Anthropic.APIError) {
+      return { ok: false, error: `${err.status ?? "?"}: ${err.message.slice(0, 160)}`, ms };
+    }
+    return { ok: false, error: `сбой: ${(err as Error).name}`, ms };
+  }
+  const ms = Date.now() - started;
+
+  const u = response.usage;
+  const cacheRead = u.cache_read_input_tokens ?? 0;
+  const cacheWrite = u.cache_creation_input_tokens ?? 0;
+  const price = ANTHROPIC_PRICES[response.model] ?? ANTHROPIC_PRICES[model];
+  const usage: ReconcileUsage = {
+    inputTokens: u.input_tokens + cacheRead + cacheWrite,
+    outputTokens: u.output_tokens,
+    costUsd: price
+      ? (u.input_tokens * price.input +
+          cacheRead * price.cacheRead +
+          cacheWrite * price.cacheWrite +
+          u.output_tokens * price.output) /
+        1_000_000
+      : undefined,
+  };
+
+  if (response.stop_reason === "refusal") {
+    return { ok: false, error: `Claude отказался отвечать (${response.stop_details?.category ?? "без категории"})`, ms };
+  }
+  // Как у OpenRouter: упёрлись в лимит — технический сбой, пусть reconcileRun
+  // попробует запасную модель.
+  if (response.stop_reason === "max_tokens") {
+    return { ok: false, error: "Модель исчерпала лимит ответа; статус обращения не определён", ms };
+  }
+  const text = response.content
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("");
+  if (!text.trim()) return { ok: false, error: "Модель вернула пустой ответ; статус обращения не определён", ms };
+  const verdict = parseVerdict(text);
+  if (!verdict) return { ok: false, error: `не JSON по схеме: ${text.slice(0, 120)}`, ms };
+  return { ok: true, verdict, usage, ms };
+}
+
 // Суждение по одному тикету. thread — уже замаскированная переписка по нему:
 // реплики агентов и ответы куратора (collectResolutionContext); без реплик
 // агентов судить не о чем, и такой тикет вызывающий код сразу пропускает.
@@ -338,7 +463,9 @@ export async function reconcileIssue(
     ? askGemini(provider.model, userText, glossary, rules)
     : provider.kind === "openrouter"
       ? askOpenRouter(provider.model, userText, glossary, rules)
-      : askGroq(userText, glossary, rules));
+      : provider.kind === "anthropic"
+        ? askAnthropic(provider.model, userText, glossary, rules)
+        : askGroq(userText, glossary, rules));
   if (instructions.length && result.ok && result.verdict.status !== "UNCLEAR" &&
       !hasInstructionEvidence(result.verdict.evidence, instructions.map(maskSensitiveForAi))) {
     result.verdict = { status: "UNCLEAR", note: "", evidence: "",
