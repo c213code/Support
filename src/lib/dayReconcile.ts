@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { callGroqChat, GROQ_MODEL } from "@/lib/ai";
+import { callGroqDirect, GROQ_MODEL } from "@/lib/ai";
 import { maskSensitiveForAi } from "@/lib/textClean";
 import type { ThreadLine } from "@/lib/resolutionNote";
 import type { ResolvedSibling } from "@/lib/relatedIssue";
@@ -214,7 +214,7 @@ async function askGemini(model: string, userText: string, glossary: string, rule
 
 async function askGroq(userText: string, glossary: string, rules?: string): Promise<ReconcileResult> {
   const started = Date.now();
-  const data = (await callGroqChat(
+  const data = (await callGroqDirect(
     {
       model: GROQ_MODEL,
       messages: buildReconcileMessages(GROQ_MODEL, userText, glossary, undefined, rules),

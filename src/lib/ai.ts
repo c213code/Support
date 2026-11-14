@@ -10,6 +10,7 @@
 // молча откатывается на cleanTicketDescription, а не роняет обработку
 // сообщения.
 import { buildAiContext } from "@/lib/projectContext";
+import { callClaudeChat, claudeAiModel } from "@/lib/claude";
 import {
   isSituationId,
   isSlotId,
@@ -45,12 +46,29 @@ function groqApiKeys(): string[] {
     .filter(Boolean);
 }
 
-// Общий вызов Groq chat completions с перебором ключей — 429 (квота
-// исчерпана) и любая другая ошибка/таймаут одного ключа переходят к
-// следующему, а не сразу к null. Возвращает null, только если так
-// ответили (или упали) вообще все ключи — вызывающий код как и раньше
-// откатывается на regex-чистку/пропуск фичи.
+// Общий вызов модели для всех функций ниже. Если задан AI_MODEL=claude-…
+// и ANTHROPIC_API_KEY — сначала Claude (lib/claude.ts переводит формат
+// туда и обратно), при любом его сбое (лимит расходов, таймаут) — Groq.
+// Без них — Groq, как раньше. Ключ Groq поэтому остаётся обязательным:
+// он и запасной путь, и проверка «ИИ настроен» в маршрутах.
 export async function callGroqChat(
+  body: Record<string, unknown>,
+  timeoutMs: number
+): Promise<unknown> {
+  if (claudeAiModel()) {
+    const viaClaude = await callClaudeChat(body, timeoutMs);
+    if (viaClaude) return viaClaude;
+  }
+  return callGroqDirect(body, timeoutMs);
+}
+
+// Groq chat completions с перебором ключей — 429 (квота исчерпана) и любая
+// другая ошибка/таймаут одного ключа переходят к следующему, а не сразу к
+// null. Возвращает null, только если так ответили (или упали) вообще все
+// ключи — вызывающий код как и раньше откатывается на regex-чистку/пропуск
+// фичи. Напрямую зовёт только разбор дня с RECONCILE_MODEL=groq: там Groq
+// выбран явно, и подменять его Claude нельзя.
+export async function callGroqDirect(
   body: Record<string, unknown>,
   timeoutMs: number
 ): Promise<unknown> {
