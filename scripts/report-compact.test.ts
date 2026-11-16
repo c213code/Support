@@ -33,14 +33,13 @@ test("weekends retain the inferred duty agent", () => {
   assert.match(html, /Дежурный \(по активности\): Ерош &amp; Алпа/);
 });
 
-test("IELTS is excluded from details and totals in both formats", () => {
+test("IELTS is included in details and totals in both formats", () => {
   for (const format of ["html", "plain"] as const) {
-    const excluded = ["IELTS", " ielts ", "IELTS🎓"].map((groupName) => ({ ...issue, groupName, description: "IELTS-only issue", status: "RESOLVED" as const }));
-    const text = generateReportText([issue, ...excluded], [], { ...options, format });
-    assert.match(text, /Всего в репорте: 1/);
-    assert.match(text, /Решено: 0 · Пендинг: 1/);
-    assert.doesNotMatch(text, /IELTS/i);
-    assert.equal(generateReportText(excluded, [], { ...options, format, footer: ["Footer"] }), "");
+    const ielts = { ...issue, groupName: "IELTS", description: "IELTS-only issue", status: "RESOLVED" as const };
+    const text = generateReportText([issue, ielts], [], { ...options, format });
+    assert.match(text, /Всего в репорте: 2/);
+    assert.match(text, /Решено: 1 · Пендинг: 1/);
+    assert.match(text, /IELTS-only issue/);
   }
 });
 

@@ -7,11 +7,11 @@ import { sendReportToGroup } from "@/lib/reportSend";
 // или командой. sendReportToGroup проверяет ReportSendLog и использует тот же
 // текст, целевой чат и разбиение по группам/тикетам, что ручная отправка.
 //
-// Только со вторника по субботу — то есть репорты за понедельник–пятницу.
-// Выходные сами в группу боссов не уходят: их отправляют руками, если нужно.
+// Каждый день, включая репорты за субботу и воскресенье (уходят в вс и пн
+// в 10:30). До 16.11.2026 выходные сами не уходили — только руками.
 // Проверка здесь, а не в расписании cron: оно в UTC, а день недели нужен
 // по Алматы — так в одном месте и без пересчёта часовых поясов.
-const AUTO_SEND_DAYS = new Set([2, 3, 4, 5, 6]);
+const AUTO_SEND_DAYS = new Set([0, 1, 2, 3, 4, 5, 6]);
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
   if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {

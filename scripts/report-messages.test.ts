@@ -100,5 +100,6 @@ test("an oversized single ticket becomes a complete card linking to its full tex
 
 test("excluded and empty reports produce no messages", () => {
   assert.deepEqual(generateReportMessages([], [], options), []);
-  assert.deepEqual(generateReportMessages([issue("1", "IELTS"), { ...issue("2", "Support"), status: "SENT" }], [], options), []);
+  assert.deepEqual(generateReportMessages([{ ...issue("2", "Support"), status: "SENT" }], [], options), []);
+  assert.notDeepEqual(generateReportMessages([issue("1", "IELTS")], [], options), []);
 });

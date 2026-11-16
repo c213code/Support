@@ -1,6 +1,14 @@
 {
   "crons": [
     {
+      "path": "/api/cron/auto-reconcile",
+      "schedule": "30 16 * * *"
+    },
+    {
+      "path": "/api/cron/auto-reconcile",
+      "schedule": "45 16 * * *"
+    },
+    {
       "path": "/api/cron/evening-report",
       "schedule": "0 17 * * *"
     },

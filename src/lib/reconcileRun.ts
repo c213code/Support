@@ -372,10 +372,34 @@ export type ApplyOutcome = { verdictId: string; applied: boolean; reason?: strin
 // поняла («Непонятно», «Передано»). Без него применяется предложенный.
 export type ApplyItem = { verdictId: string; status?: IssueStatus };
 
+// Что вечерний авто-разбор (lib/autoReconcile.ts) применяет сам — то же, что
+// окно «Авто-репорт» отмечает галочкой по умолчанию (preselect в
+// AutoReportDialog.tsx): разобрано, ещё не применено, статус из APPLICABLE и
+// отличается от текущего. «Непонятно» и «Передано» — никогда.
+export function isAutoApplicable(verdict: {
+  state: string;
+  appliedAt: Date | null;
+  proposed: string | null;
+  statusBefore: string;
+}): boolean {
+  return (
+    verdict.state === "done" &&
+    !verdict.appliedAt &&
+    !!verdict.proposed &&
+    APPLICABLE.has(verdict.proposed as IssueStatus) &&
+    verdict.proposed !== verdict.statusBefore
+  );
+}
+
+// automatic — применяет не человек, а вечерний cron. Тогда автором смены
+// статуса считается тот, кто ответил в чате (resolver), а не «Авто-репорт»:
+// иначе в репорт ушло бы «Авто-репорт шешті», а авто-тикет переоформился
+// бы на несуществующего агента.
 export async function applyVerdicts(
   runId: string,
   items: ApplyItem[],
-  actor: string
+  actor: string,
+  { automatic = false }: { automatic?: boolean } = {}
 ): Promise<ApplyOutcome[]> {
   const chosen = new Map(items.map((item) => [item.verdictId, item.status]));
   const verdicts = await prisma.reconcileVerdict.findMany({
@@ -415,9 +439,12 @@ export async function applyVerdicts(
     // Заметка модели описывает её вывод; если человек выбрал другой статус,
     // она не про то («Мәселенің шешілгені нақты емес» под «Решено»).
     const modelNote = status === verdict.proposed ? verdict.note : null;
+    const resolvedBy = verdict.resolver ?? (automatic ? null : actor);
     const note =
       status === "RESOLVED"
-        ? `${verdict.resolver ?? actor} шешті${modelNote ? `, ${modelNote}` : ""}`
+        ? resolvedBy
+          ? `${resolvedBy} шешті${modelNote ? `, ${modelNote}` : ""}`
+          : modelNote || undefined
         : modelNote || undefined;
     // Сначала застолбить решение условной записью, потом менять статус:
     // два «Применить» одновременно (две вкладки, два агента) иначе оба
@@ -435,7 +462,7 @@ export async function applyVerdicts(
     const result = await changeIssueStatus({
       issueId: verdict.issueId,
       status,
-      actor,
+      actor: automatic ? verdict.resolver : actor,
       source: "chat",
       expectedUpdatedAt: verdict.issueUpdatedAt ?? undefined,
       expectedStatus: verdict.statusBefore,

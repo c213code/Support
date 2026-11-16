@@ -25,7 +25,8 @@ export type ReportGroupPreset = {
 };
 
 export function isReportableIssue(issue: Pick<ReportIssue, "status" | "groupName">): boolean {
-  return issue.status !== "SENT" && !/^ielts(?:\s*🎓)?$/i.test(issue.groupName.trim());
+  // IELTS с 16.11.2026 тоже идёт в репорт (раньше вырезался целиком).
+  return issue.status !== "SENT";
 }
 
 const SEPARATOR = "—".repeat(30);
