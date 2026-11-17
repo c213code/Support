@@ -17,6 +17,7 @@ import {
 } from "@/lib/settings";
 import { AUTO_ISSUE_CREATOR, ownAgentTelegramIdList } from "@/lib/telegram";
 import { requestParentAccessApproval } from "@/lib/parentAccessBot";
+import { requestUntResetApproval } from "@/lib/untResetBot";
 
 // Приём входящего сообщения из рабочей группы: завести по нему тикет и,
 // если автоответы включены, подтвердить приём в чат. Вынесено из
@@ -159,6 +160,9 @@ export async function sendAcknowledgement(
   groupName: string,
   authorId: bigint | null
 ): Promise<void> {
+  // Сброс БТ/ДТ: карточка дежурному в личку. На ответ в группу не влияет —
+  // подтверждение приёма ниже идёт своим чередом.
+  await requestUntResetApproval({ issueId, chatId, messageId, incomingText });
   // Parent access has a separate switch and always asks the duty agent first.
   if (await requestParentAccessApproval({ issueId, chatId, messageId, incomingText })) return;
   // Ordinary acknowledgements still obey the global auto-reply switch.

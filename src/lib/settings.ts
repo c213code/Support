@@ -16,6 +16,19 @@ export async function setParentAccessBotEnabled(enabled: boolean): Promise<void>
     update: { parentAccessBotEnabled: enabled }, create: { id: SETTINGS_ID, parentAccessBotEnabled: enabled } });
 }
 
+// Бот сам предлагает в личку обнулить результат БТ/ДТ (src/lib/untResetBot.ts).
+// Выключено по умолчанию: включает человек, а не выкатка.
+export async function isUntResetBotEnabled(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({ where: { id: SETTINGS_ID },
+    select: { untResetBotEnabled: true } });
+  return row?.untResetBotEnabled ?? false;
+}
+
+export async function setUntResetBotEnabled(enabled: boolean): Promise<void> {
+  await prisma.appSetting.upsert({ where: { id: SETTINGS_ID },
+    update: { untResetBotEnabled: enabled }, create: { id: SETTINGS_ID, untResetBotEnabled: enabled } });
+}
+
 export async function isAiCleaningEnabled(): Promise<boolean> {
   const row = await prisma.appSetting.findUnique({
     where: { id: SETTINGS_ID },

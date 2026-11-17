@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getCurrentIdentity } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
-import {
-  platformEnabled,
-  getUntResultStatus,
-  deleteUntResult,
-  PlatformError,
-} from "@/lib/platform";
+import { platformEnabled, PlatformError } from "@/lib/platform";
+import { resetUntResult } from "@/lib/untReset";
 
 const STATUS_BY_CODE: Record<PlatformError["code"], number> = {
   not_configured: 503,
@@ -18,11 +13,8 @@ const STATUS_BY_CODE: Record<PlatformError["code"], number> = {
   upstream_error: 502,
 };
 
-// Удаляем прод-результат теста необратимо, поэтому не доверяем тому, что
-// клиент уже когда-то видел статус "FINISHED" на экране — перепроверяем его
-// прямо перед DELETE (могло пройти время, ученик мог зайти и продолжить
-// решать). Обнулять можно только реально завершённый результат: удалить
-// решение ученика в процессе — не "снять зависший ПИИ", а потерять прогресс.
+// Сама проверка FINISHED и удаление — в resetUntResult (src/lib/untReset.ts):
+// та же функция работает и для кнопки в личке бота.
 export async function POST(request: NextRequest) {
   const identity = await getCurrentIdentity();
   if (!identity) {
@@ -41,41 +33,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const status = await getUntResultStatus(resultId);
-    if (status.status !== "FINISHED" || !status.finishTime) {
+    const outcome = await resetUntResult({ resultId, untId, untName, actor: identity.name });
+    if (!outcome.ok) {
       return NextResponse.json(
         { error: "Результат ещё не завершён (нет статуса FINISHED и finishTime) — обнулять нельзя" },
         { status: 409 }
       );
     }
-
-    await deleteUntResult(resultId);
-
-    // Журнал — после успешного удаления (несделанное не журналируем, см.
-    // schema.prisma). Сбой самой записи не должен превращать уже случившееся
-    // удаление в "ошибку" для клиента.
-    try {
-      await prisma.untResultReset.create({
-        data: {
-          actor: identity.name,
-          untId,
-          untName: untName || null,
-          resultId,
-          studentEmail: status.studentEmail,
-          studentName: status.studentName || null,
-          finishTimeWas: status.finishTime,
-        },
-      });
-    } catch (auditErr) {
-      console.warn(`[platform] результат обнулён, но журнал не записался: ${String(auditErr)}`);
-    }
-
-    return NextResponse.json({
-      ok: true,
-      resultId,
-      studentEmail: status.studentEmail,
-      studentName: status.studentName,
-    });
+    return NextResponse.json(outcome);
   } catch (err) {
     if (err instanceof PlatformError) {
       return NextResponse.json({ error: err.message }, { status: STATUS_BY_CODE[err.code] });

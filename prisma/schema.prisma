@@ -114,6 +114,9 @@ model TelegramMessage {
 model AppSetting {
   id                 String   @id @default("singleton")
   parentAccessBotEnabled Boolean @default(false)
+  // Бот сам предлагает в личку обнулить результат БТ/ДТ (см.
+  // src/lib/untResetBot.ts). Выключен по умолчанию, включает человек.
+  untResetBotEnabled Boolean @default(false)
   aiCleaningEnabled  Boolean  @default(false)
   // Общий рубильник автоответов бота в рабочие группы (подтверждение
   // приёма, реакция на смену статуса — см. src/lib/autoReply.ts). Выключен
@@ -793,5 +796,31 @@ model PendingParentAccess {
   updatedAt       DateTime @updatedAt
 
   @@unique([issueId, parentId])
+  @@index([status, createdAt])
+}
+
+// Предложение обнулить результат БТ/ДТ, отправленное агенту в личку (см.
+// src/lib/untResetBot.ts). resultId уникален: по одному результату — одна
+// карточка, сколько бы сообщений про него ни пришло, и статус PENDING →
+// PROCESSING меняется одним updateMany, поэтому повторное нажатие кнопки
+// второй раз не удаляет. Само удаление журналируется в UntResultReset.
+model PendingUntReset {
+  id              String   @id
+  resultId        String   @unique
+  untId           String
+  untName         String
+  studentName     String
+  studentEmail    String?
+  score           Int
+  // "contact" — найден по почте/телефону, "name" — только по имени (сверить).
+  matchedBy       String
+  recipientId     String
+  dmMessageId     Int?
+  sourceChatId    String
+  sourceMessageId Int
+  status          String   @default("PENDING")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
   @@index([status, createdAt])
 }

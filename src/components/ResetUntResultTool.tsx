@@ -2,6 +2,7 @@
 
 import { SupportPageHeader } from "@/components/SupportPageHeader";
 import { BatchUntResetPanel } from "@/components/BatchUntResetPanel";
+import { UntResetBotToggle } from "@/components/UntResetBotToggle";
 import { normalizeUntTestQuery } from "@/lib/untResetRequest";
 
 import { useEffect, useMemo, useState } from "react";
@@ -237,6 +238,7 @@ export function ResetUntResultTool() {
   return (
     <div className="support-page max-w-3xl">
       <SupportPageHeader title="Обнуление результата ДТ" description="Выберите тест и найдите одного ученика или целую пачку из сообщений. ДТ и БТ — один тест." />
+      <UntResetBotToggle />
 
       {/* Шаг 1: тест */}
       {!selectedTest && (

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requestParentAccessApproval } from "@/lib/parentAccessBot";
+import { requestUntResetApproval } from "@/lib/untResetBot";
 
 import { buildDescription } from "@/lib/ticketDescription";
 import { STATUS_META } from "@/lib/status";
@@ -639,6 +640,8 @@ export async function POST(request: NextRequest) {
         data: { usedForIssueId: activeIssue.id, archived: true, viewed: true },
       });
       await requestParentAccessApproval({ issueId: activeIssue.id, chatId,
+        messageId: message.message_id, incomingText: contextualText });
+      await requestUntResetApproval({ issueId: activeIssue.id, chatId,
         messageId: message.message_id, incomingText: contextualText });
       return NextResponse.json({ ok: true });
     }
