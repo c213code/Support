@@ -78,10 +78,17 @@ async function findInTest(test: UntTestSummary, product: string, student: BatchS
   const found: Found[] = [];
   for (const contact of [...student.emails, ...student.phones]) {
     const { results, fallback } = await searchUntResults(test.id, product, contact);
-    // fallback "searched" — по почте пусто, строки найдены по фамилии в
-    // комбинации ученика: это может быть однофамилец, нужна сверка.
-    const matchedBy = fallback?.status === "searched" ? "name" : "contact";
-    found.push(...results.map((row) => ({ row, test, matchedBy }) as Found));
+    if (fallback?.status === "searched") {
+      // По почте пусто, и платформа искала по фамилии (или имени) ученика —
+      // а это поиск по началу слова: на «Сарсен» приходят и Сарсенбай, и
+      // Сарсенбек со всей комбинации. На сайте агент выбирает строку
+      // глазами; в личку такую пачку слать нельзя, поэтому берём только
+      // строки, где имя и фамилия совпали с учеником целиком.
+      const same = results.filter((row) => sameName(fallback.studentName, row.fullName));
+      found.push(...same.map((row) => ({ row, test, matchedBy: "name" }) as Found));
+    } else {
+      found.push(...results.map((row) => ({ row, test, matchedBy: "contact" }) as Found));
+    }
   }
   if (found.length === 0 && student.name) {
     // Только имя: сначала как написано, потом по первому слову (обычно
@@ -93,7 +100,20 @@ async function findInTest(test: UntTestSummary, product: string, student: BatchS
       if (same.length > 0) break;
     }
   }
+  // Два полных тёзки по имени — гадать, который из них, бот не будет:
+  // такой случай остаётся ручному поиску на сайте.
+  const byName = found.filter((hit) => hit.matchedBy === "name");
+  if (new Set(byName.map((hit) => hit.row.resultId)).size > 1) {
+    return found.filter((hit) => hit.matchedBy !== "name");
+  }
   return found;
+}
+
+// Текст обращения прямо в карточке — чтобы не ходить по ссылке и не искать,
+// про какое это сообщение.
+function quote(text: string): string {
+  const flat = text.replace(/\s*\n\s*/g, " / ").replace(/\s+/g, " ").trim();
+  return flat.length > 300 ? `${flat.slice(0, 300)}…` : flat;
 }
 
 function finishedAt(finishTime: string | null): string {
@@ -172,8 +192,9 @@ export async function requestUntResetApproval(params: {
         ...(matchedBy === "name"
           ? ["", "⚠️ Найден по имени, а не по почте или телефону — сверьте, что это тот ученик."]
           : []),
-        "", `Обращение: ${buildMessageLink(Number(params.chatId), params.messageId)}`,
-        "Удаление необратимо: результат исчезнет, ученик сможет пройти тест заново.",
+        "", `Обращение: «${quote(params.incomingText)}»`,
+        buildMessageLink(Number(params.chatId), params.messageId),
+        "", "Удаление необратимо: результат исчезнет, ученик сможет пройти тест заново.",
       ].join("\n"), [
         [{ text: "🗑 Удалить результат", callback_data: `${PREFIX}${id}:del` }],
         [{ text: "Не трогать", callback_data: `${PREFIX}${id}:skip` }],

@@ -50,6 +50,7 @@ function harness() {
     // resultId → строка отчёта и её статус на платформе
     results: new Map<string, { untId: string; fullName: string; email: string; score: number; status: string; finishTime: string | null }>(),
     counter: 100,
+    accounts: [] as Array<{ id: string; roles: string[]; username: string; firstname: string; lastname: string }>,
   };
   const now = Date.now();
   const iso = (ms: number) => new Date(ms).toISOString().slice(0, 19);
@@ -103,7 +104,13 @@ function harness() {
     if (url.hostname !== "platform.example.test") throw Error(`Unexpected network request: ${url}`);
     if (url.pathname === "/v1/auth/signin") return Response.json({ token: "fixture-token" });
     if (url.pathname === "/v1/unts") return Response.json(tests);
-    if (url.pathname === "/v1/users") return Response.json({ content: [] });
+    // Ученик на платформе — нужен запасному поиску по фамилии.
+    if (url.pathname === "/v1/users") {
+      const search = (url.searchParams.get("search") ?? "").toLowerCase();
+      return Response.json({ content: state.accounts.filter((a) => a.username === search) });
+    }
+    const account = state.accounts.find((a) => url.pathname === `/v2/users/${a.id}`);
+    if (account) return Response.json({ ...account, subjectCombination: null });
     const report = url.pathname.match(/^\/v1\/unts\/([^/]+)\/report$/);
     if (report) {
       const untId = report[1]; const student = (url.searchParams.get("student") ?? "").toLowerCase();
@@ -245,5 +252,32 @@ test("результат перестал быть завершённым к м�
     await h.press(row, "del");
     assert.equal(h.state.deletes.length, 0);
     assert.equal(row.status, "FAILED");
+  } finally { h.cleanup(); }
+});
+
+test("по почте пусто, платформа ищет по фамилии → карточка только на самого ученика, без пачки похожих", async () => {
+  const h = harness();
+  try {
+    // Ученик есть на платформе, но результат лежит на другом его аккаунте:
+    // по почте отчёт пуст, запасной поиск идёт по фамилии «Сарсен».
+    h.state.accounts.push({ id: "00000000-0000-4000-8000-000000000009", roles: ["STUDENT"],
+      username: "nazifa@example.test", firstname: "Назифа", lastname: "Сарсен" });
+    const add = (id: string, fullName: string) => h.state.results.set(id, { untId: "unt-smart", fullName,
+      email: `${id}@example.test`, score: 50, status: "FINISHED", finishTime: "2026-11-17T10:00:00" });
+    add("r-1", "Сарсен Назифа"); add("r-2", "Сарсенбай Аяулым");
+    add("r-3", "Сарсенбева Нурзинет"); add("r-4", "Сарсенбек Казына");
+
+    const text = "БТ қайта ашып беріңізші\nnazifa@example.test";
+    assert.equal(await h.ask(text), true);
+    assert.equal(h.cards().length, 1, "одна карточка, а не четыре");
+    const card = String(h.cards()[0].text);
+    assert.ok(card.includes("Сарсен Назифа") && card.includes("сверьте"));
+    assert.ok(card.includes("БТ қайта ашып беріңізші / nazifa@example.test"), "текст обращения виден в карточке");
+
+    // Два полных тёзки — бот не выбирает между ними и молчит.
+    h.state.rows.clear(); h.state.telegram.length = 0;
+    add("r-5", "Сарсен Назифа");
+    assert.equal(await h.ask(text), false);
+    assert.equal(h.cards().length, 0);
   } finally { h.cleanup(); }
 });
