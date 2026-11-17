@@ -584,6 +584,15 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Дописанное сообщение приклеилось к уже заведённому тикету — тикет не
+    // создавался заново, и sendAcknowledgement (откуда обычно зовётся сброс
+    // БТ/ДТ) тут не вызывался. А кураторы шлют учеников пачкой, сообщение за
+    // сообщением: без этого вызова карточка приходила только по первому.
+    if (recent.usedForIssueId) {
+      await requestUntResetApproval({ issueId: recent.usedForIssueId, chatId,
+        messageId: message.message_id, incomingText: contextualText });
+    }
+
     return NextResponse.json({ ok: true });
   }
 
